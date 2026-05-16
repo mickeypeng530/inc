@@ -1,18 +1,17 @@
 # 敏感資料 — 絕對不能上 public repo
 VS會議 + 績效.xlsx
 *.xlsx
-scripts/import_batch*.json
-scripts/import_*.json
-scripts/*.json
-scripts/__pycache__/
 *.bak
 
-# 本機工作 artifact(設計圖 / 截圖 / 草稿)
+# 本機工作 artifact(設計圖 / 截圖 / 草稿 / Python 工具 / 內部文件)
 *.png
 *.jpg
 *.jpeg
 待修改.txt
 design_handoff_ui_styles/
+scripts/
+CLAUDE.md
+database.rules.json
 
 # Claude 內部
 .claude/
