@@ -1,0 +1,4219 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>績效紀錄</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+:root {
+  --bg-page:   #0e0f12;
+  --bg-panel:  #15171b;
+  --bg-head:   #1a1c21;
+  --border:    #25282e;
+  --border-row:#1e2028;
+  --grid:      #3d424b;
+  --grid-week: #565c68;
+  --ink-1:     #ffffff;
+  --ink-2:     #dcdfe4;
+  --ink-muted: #6b7280;
+  --ink-cap:   #9aa0a6;
+  --accent:    #e9a23b;
+  --danger:    #ef4444;
+  --font-ui:   'IBM Plex Sans','Noto Sans TC',system-ui,sans-serif;
+  --font-mono: 'IBM Plex Mono',monospace;
+  --font-disp: 'Fraunces',serif;
+  --r: 2px;
+}
+:root[data-theme="light"] {
+  --bg-page:   #f6f4ef;
+  --bg-panel:  #fbfaf6;
+  --bg-head:   #f1ede4;
+  --border:    #e5e1d6;
+  --border-row:#ebe7da;
+  --grid:      #cfc8b6;
+  --grid-week: #a89f86;
+  --ink-1:     #1c1f1d;
+  --ink-2:     #3a3730;
+  --ink-muted: #7a7569;
+  --ink-cap:   #9a9485;
+  --accent:    #b45309;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font-ui);
+  background: var(--bg-page);
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* === Header === */
+header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 24px;
+  background: var(--bg-head);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+header h1 {
+  font-family: var(--font-disp);
+  font-size: 17px;
+  font-weight: 500;
+  font-style: italic;
+  color: var(--ink-1);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.tabs {
+  display: flex;
+  gap: 0;
+  margin-left: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 2px;
+}
+.tab {
+  padding: 4px 14px;
+  border-radius: var(--r);
+  cursor: pointer;
+  color: var(--ink-muted);
+  background: transparent;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  transition: all 0.12s;
+}
+.tab:hover { color: var(--ink-1); }
+.tab.active { background: var(--accent); color: #0e0f12; }
+.header-spacer { flex: 1; }
+.icon-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--ink-muted);
+  padding: 4px 9px;
+  border-radius: var(--r);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.icon-btn:hover { border-color: var(--ink-cap); color: var(--ink-1); }
+
+/* === Day nav === */
+.day-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 24px;
+  background: var(--bg-head);
+  border-bottom: 1px solid var(--border);
+}
+.day-nav button {
+  background: var(--bg-panel);
+  color: var(--ink-2);
+  border: 1px solid var(--border);
+  padding: 3px 10px;
+  border-radius: var(--r);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.day-nav button:hover { border-color: var(--accent); color: var(--accent); }
+.day-nav input[type="date"] {
+  background: var(--bg-panel);
+  color: var(--ink-1);
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  border-radius: var(--r);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.day-label {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink-1);
+  margin-left: 4px;
+  font-size: 13px;
+}
+.weekday-tag {
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* === Views === */
+.view { display: none; padding: 14px 24px; }
+.view.active { display: block; }
+
+/* === Three-col grid (always 3 cols until 720px) === */
+.three-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+.col-stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+@media (max-width: 1280px) {
+  .three-col { gap: 10px; }
+  body { font-size: 12px; }
+}
+@media (max-width: 720px) {
+  .three-col { grid-template-columns: 1fr; }
+}
+
+/* === Panel === */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 14px;
+  overflow: hidden;
+}
+.panel h2 {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  margin: -14px -14px 10px;
+  padding: 9px 14px;
+  background: var(--bg-head);
+  border-bottom: 1px solid var(--border);
+}
+
+/* === Counts (grid-cell alignment) === */
+.count-group { margin-bottom: 2px; }
+.count-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-row);
+}
+.count-groupcell {
+  flex: 0 0 58px;
+  width: 58px;
+  max-width: 58px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink-1);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.count-sublabel {
+  flex: 1;
+  font-size: 13px;
+  color: var(--ink-2);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.count-controls { display: flex; align-items: center; flex-shrink: 0; }
+.btn-step {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-2);
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  transition: border-color 0.12s, color 0.12s;
+  flex-shrink: 0;
+}
+.btn-step:hover { border-color: var(--accent); color: var(--accent); }
+.count-input {
+  width: 42px;
+  text-align: center;
+  background: transparent;
+  color: var(--ink-1);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 2px 2px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  margin: 0 3px;
+}
+.count-input:focus { outline: none; border-bottom-color: var(--accent); }
+
+/* Remove native number spinner for count + pending inputs (settings keep it) */
+.count-input::-webkit-inner-spin-button,
+.count-input::-webkit-outer-spin-button,
+.pending-input::-webkit-inner-spin-button,
+.pending-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.count-input, .pending-input { -moz-appearance: textfield; appearance: textfield; }
+.count-subrev {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  min-width: 50px;
+  text-align: right;
+  margin-right: 4px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.count-unitprice {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+  margin-left: 3px;
+}
+
+/* === Other aggregate (collapsible) === */
+.btn-other-toggle {
+  background: transparent;
+  border: none;
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  letter-spacing: 0.04em;
+}
+.btn-other-toggle:hover { color: var(--accent); }
+.count-other-count {
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-left: 4px;
+}
+.count-other-sub { padding-left: 0; background: var(--bg-head); }
+.count-other-sub .count-sublabel { font-size: 12px; color: var(--ink-2); }
+
+.count-base-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 2px solid var(--border);
+  font-size: 12px;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.count-base-total-num {
+  font-family: var(--font-disp);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: -0.01em;
+}
+
+/* Special.others list-of-records row */
+.special-other-row, .special-other-add {
+  display: grid !important;
+  grid-template-columns: 58px minmax(70px, 1fr) 50px 38px auto !important;
+  gap: 6px;
+  align-items: center;
+}
+.special-other-row .special-other-cat,
+.special-other-add .special-other-cat {
+  min-width: 0;
+  width: 100%;
+  padding-left: 0;
+}
+.count-other-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.count-other-rev-inline {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+  margin-left: 6px;
+}
+.special-other-cat {
+  background: var(--bg-page);
+  color: var(--ink-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 2px 6px;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  min-width: 0;
+}
+.special-other-amount, .special-other-count {
+  background: transparent;
+  color: var(--ink-1);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 2px 4px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  width: 100%;
+}
+.special-other-amount:focus, .special-other-count:focus { outline: none; border-bottom-color: var(--accent); }
+.special-other-amount::-webkit-inner-spin-button,
+.special-other-amount::-webkit-outer-spin-button,
+.special-other-count::-webkit-inner-spin-button,
+.special-other-count::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.special-other-amount, .special-other-count { -moz-appearance: textfield; appearance: textfield; }
+.special-other-row .btn-row-del {
+  background: transparent;
+  border: none;
+  color: var(--ink-muted);
+  cursor: pointer;
+  font-size: 14px;
+}
+.special-other-row .btn-row-del:hover { color: var(--danger); }
+.btn-other-add {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--ink-muted);
+  cursor: pointer;
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.btn-other-add:hover { color: var(--accent); border-color: var(--accent); }
+.count-other-add-spacer { display: block; }
+
+/* === Pending reports panel === */
+.pending-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  align-items: start;
+}
+.pending-summary { grid-column: 1 / -1; }
+.pending-group {
+  padding-top: 4px;
+}
+.pending-group-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  margin-bottom: 6px;
+}
+.pending-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.pending-row .pending-label { color: var(--ink-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pending-group-name { color: var(--accent); }
+.pending-group-stat {
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.pending-row .pending-input {
+  width: 44px;
+  text-align: center;
+  background: transparent;
+  color: var(--ink-1);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 1px 2px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.pending-row .pending-input:focus { outline: none; border-bottom-color: var(--accent); }
+.pending-row .pending-controls { display: flex; gap: 2px; align-items: center; }
+.pending-row .pending-controls .btn-step {
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+}
+.pending-summary {
+  background: var(--bg-head);
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.pending-summary .pending-sum-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.pending-summary .pending-sum-count {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--ink-1);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.pending-summary .pending-sum-money {
+  font-family: var(--font-disp);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+/* === Schedule events (不值班) === */
+.schedule-block {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  margin-top: 18px;
+  padding: 0;
+}
+.schedule-head {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  background: var(--bg-head);
+  border-bottom: 1px solid var(--border);
+  padding: 9px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.schedule-body { padding: 12px 14px; }
+.schedule-overview {
+  display: grid;
+  grid-template-columns: 80px 1fr 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.schedule-overview-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.schedule-overview-dates {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-1);
+  font-variant-numeric: tabular-nums;
+}
+.schedule-overview-note {
+  background: transparent;
+  color: var(--ink-2);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 2px 4px;
+  font-size: 12px;
+  font-family: var(--font-ui);
+}
+.schedule-overview-note:focus { outline: none; border-bottom-color: var(--accent); }
+.schedule-event-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.schedule-event-table th {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.schedule-event-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-row);
+}
+.schedule-event-table input[type="text"], .schedule-event-table input[type="month"] {
+  width: 100%;
+  background: transparent;
+  color: var(--ink-1);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 2px 4px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+}
+.schedule-event-table input[type="text"]:focus, .schedule-event-table input[type="month"]:focus { outline: none; border-bottom-color: var(--accent); }
+.schedule-event-table .col-reason { width: 28%; }
+.schedule-event-table .col-dates { width: 32%; }
+.schedule-event-table .col-noir { width: 60px; text-align: center; }
+.schedule-event-table .col-month { width: 130px; }
+.schedule-event-table .col-del { width: 32px; text-align: center; }
+
+/* === Procedures === */
+.proc-input-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  align-items: center;
+}
+.proc-input-row select, .proc-input-row input {
+  background: var(--bg-page);
+  color: var(--ink-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+}
+.proc-input-row select { flex: 1; min-width: 0; }
+.proc-input-row input.qty { width: 50px; font-family: var(--font-mono); text-align: center; }
+.proc-input-row input.proc-medrec { width: 90px; font-family: var(--font-mono); }
+.btn-primary {
+  background: var(--accent);
+  color: #0e0f12;
+  border: none;
+  padding: 5px 12px;
+  border-radius: var(--r);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.btn-primary:hover { opacity: 0.85; }
+.btn-secondary {
+  background: transparent;
+  color: var(--ink-2);
+  border: 1px solid var(--border);
+  padding: 5px 12px;
+  border-radius: var(--r);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.btn-secondary:hover { border-color: var(--ink-cap); color: var(--ink-1); }
+
+/* select 用 btn-secondary class 時,強制底色/字色(暗主題 native select 文字會看不見)*/
+select.btn-secondary {
+  background: var(--bg-panel);
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  -webkit-appearance: menulist;
+  appearance: menulist;
+}
+select.btn-secondary option {
+  background: var(--bg-panel);
+  color: var(--ink-1);
+}
+.proc-list { list-style: none; }
+.proc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-row);
+  font-size: 13px;
+}
+.proc-item:last-child { border-bottom: none; }
+.proc-item-name {
+  flex: 1;
+  font-weight: 500;
+  color: var(--ink-1);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.proc-item-medrec {
+  width: 75px;
+  background: transparent;
+  color: var(--ink-2);
+  border: none;
+  border-bottom: 1px dashed var(--border);
+  padding: 1px 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.proc-item-medrec:focus { outline: none; border-bottom: 1px solid var(--accent); color: var(--ink-1); }
+.proc-item-medrec:hover { border-bottom-color: var(--ink-cap); }
+.proc-item-presetname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proc-item-amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  min-width: 64px;
+  text-align: right;
+  font-size: 13px;
+}
+.proc-item-detail {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+  display: block;
+  margin-top: 2px;
+}
+.proc-item .btn-del {
+  background: transparent;
+  color: var(--ink-muted);
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 2px;
+  line-height: 1;
+}
+.proc-item .btn-del:hover { color: var(--danger); }
+.proc-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.proc-total .stat-money {
+  font-family: var(--font-disp);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--accent);
+  letter-spacing: -0.01em;
+}
+.subhead {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  margin: 12px 0 6px;
+}
+
+/* === Stats hero === */
+.stats-hero {
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.stats-hero-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 2px;
+}
+.stats-hero-num {
+  font-family: var(--font-disp);
+  font-size: 34px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+.stats-mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+.stats-mini-cell {
+  background: var(--bg-head);
+  border: 1px solid var(--border);
+  padding: 5px 8px;
+}
+.stats-mini-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 2px;
+}
+.stats-mini-val {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink-1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* === Daily stats rows === */
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border-row);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-row.indent { padding-left: 10px; color: var(--ink-muted); font-size: 12px; }
+.stat-row.total {
+  font-weight: 600;
+  font-size: 14px;
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+  margin-top: 4px;
+  padding-top: 6px;
+  color: var(--ink-1);
+}
+.stat-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.stat-money { font-family: var(--font-mono); color: var(--accent); font-variant-numeric: tabular-nums; }
+
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-row);
+}
+.meta-row:last-child { border-bottom: none; }
+.meta-row label {
+  flex: 0 0 64px;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.meta-row input, .meta-row select, .meta-row textarea {
+  flex: 1;
+  background: transparent;
+  color: var(--ink-1);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 2px 4px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+}
+.meta-row input:focus, .meta-row textarea:focus { outline: none; border-bottom-color: var(--accent); }
+.meta-row textarea { resize: vertical; min-height: 28px; field-sizing: content; }
+
+/* === Month pivot === */
+.month-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+.month-3col {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  margin-top: 18px;
+  align-items: start;
+}
+.month-3col .panel { padding: 14px; }
+@media (max-width: 1280px) { .month-3col { gap: 10px; } }
+@media (max-width: 900px) { .month-3col { gap: 8px; } }
+@media (max-width: 600px) { .month-3col { grid-template-columns: 1fr; } }
+
+/* === Schedule month blocks (collapsible) === */
+.schedule-month-block {
+  border: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.schedule-month-block:last-child { margin-bottom: 0; }
+.schedule-month-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  background: var(--bg-head);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+.schedule-month-head:hover { background: #1c1f25; }
+.schedule-month-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  flex: 1;
+}
+.schedule-month-summary {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+.schedule-month-body { padding: 8px 10px; }
+.schedule-month-block.collapsed .schedule-month-body { display: none; }
+.schedule-duty-row {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+}
+.schedule-duty-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.schedule-duty-input {
+  width: 100%;
+  background: transparent;
+  color: var(--ink-1);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 2px 4px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+.schedule-duty-input:focus { outline: none; border-bottom-color: var(--accent); }
+.schedule-overview-row {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.schedule-overview-row .lbl {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.schedule-overview-dates-line {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-1);
+  font-variant-numeric: tabular-nums;
+}
+.schedule-overview-note-input {
+  width: 100%;
+  background: transparent;
+  color: var(--ink-2);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 2px 4px;
+  font-size: 12px;
+  font-family: var(--font-ui);
+}
+.schedule-overview-note-input:focus { outline: none; border-bottom-color: var(--accent); }
+.schedule-event-grid { display: flex; flex-direction: column; gap: 0; }
+.schedule-event-row {
+  display: grid;
+  grid-template-columns: 1fr 1.1fr 24px;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-row);
+}
+.schedule-event-row:last-of-type { border-bottom: none; }
+.schedule-event-row input[type="text"] {
+  background: transparent;
+  color: var(--ink-1);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 3px 4px;
+  font-size: 12px;
+  font-family: var(--font-ui);
+}
+.schedule-event-row input[type="text"]:focus { outline: none; border-bottom-color: var(--accent); }
+.schedule-event-row .btn-row-del {
+  background: transparent;
+  border: none;
+  color: var(--ink-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+}
+.schedule-event-row .btn-row-del:hover { color: var(--danger); }
+.schedule-add-btn {
+  margin-top: 6px;
+  background: transparent;
+  color: var(--ink-muted);
+  border: 1px dashed var(--border);
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  width: 100%;
+}
+.schedule-add-btn:hover { color: var(--accent); border-color: var(--accent); }
+.pivot-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+.pivot-table th, .pivot-table td {
+  border: 1px solid var(--grid);
+  padding: 4px 6px;
+  text-align: center;
+  min-width: 30px;
+}
+/* 週日界線(對齊日曆,週日 = 一週起點)*/
+.pivot-table .pivot-week-start { border-left: 2px solid var(--grid-week); }
+/* 週末 column 淡底色 — 呼應加班 平日/假日 */
+.pivot-table .pivot-weekend { background: rgba(233,162,59,0.05); }
+/* header 星期小字 */
+.pivot-table th .pivot-wd {
+  font-size: 8px;
+  font-weight: 400;
+  color: var(--ink-muted);
+  letter-spacing: 0;
+}
+.pivot-table th .pivot-wd.wd-end { color: var(--accent); }
+.pivot-table th {
+  background: var(--bg-head);
+  position: sticky;
+  top: 0;
+  font-weight: 600;
+  color: var(--ink-cap);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  z-index: 2;
+}
+.pivot-table .row-label {
+  text-align: left;
+  background: var(--bg-panel);
+  position: sticky;
+  left: 0;
+  min-width: 90px;
+  font-family: var(--font-ui);
+  color: var(--ink-2);
+}
+.pivot-table .col-total { background: var(--bg-head); font-weight: 600; color: var(--accent); }
+.pivot-table .row-indent { padding-left: 14px; color: var(--ink-muted); }
+.pivot-table .pivot-cell { padding: 0; }
+.pivot-table .pivot-group-row { background: var(--bg-head); }
+.pivot-table .pivot-group-row .group-name { color: var(--ink-1); font-weight: 600; }
+.pivot-table .group-cell { color: var(--ink-1); font-weight: 600; }
+.pivot-table .pivot-bottom-row { background: var(--bg-head); }
+.pivot-table .pivot-bottom-row:first-of-type { border-top: 2px solid var(--border); }
+.pivot-table .pivot-bottom-row .row-label { color: var(--accent); font-weight: 600; }
+.pivot-table .pivot-note-row { background: var(--bg-page); }
+.pivot-table .pivot-note-cell {
+  padding: 2px;
+  vertical-align: top;
+  text-align: center;
+}
+.pivot-table .pivot-note-clickable { cursor: pointer; }
+.pivot-table .pivot-note-clickable:hover { background: rgba(233,162,59,0.08); }
+.pivot-note-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.25;
+  color: var(--ink-2);
+  background: var(--bg-head);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 0 3px;
+  margin: 1px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+.pivot-rev-imported { color: var(--ink-2) !important; }
+.pivot-rev-imported::after { content: '·'; color: var(--accent); margin-left: 2px; }
+
+/* === Procedure cell popover === */
+.proc-popover {
+  position: fixed;
+  z-index: 150;
+  background: var(--bg-panel);
+  border: 1px solid var(--accent);
+  border-radius: var(--r);
+  padding: 8px 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.55);
+  min-width: 180px;
+  max-width: 320px;
+}
+.proc-popover-head {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 5px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.proc-popover-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: 12px;
+}
+.proc-popover-name { color: var(--ink-1); white-space: nowrap; }
+.proc-popover-mr {
+  font-family: var(--font-mono);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.proc-popover-amt {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.pivot-table .pivot-rev-cell { color: var(--accent); font-size: 11px; }
+.pivot-table .pivot-ot-holiday { background: rgba(233, 162, 59, 0.08); }
+
+/* === Procedure breakdown summary === */
+.procbreakdown-summary td {
+  background: var(--bg-head);
+  padding: 8px 10px !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+.procbreakdown-summary-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.procbreakdown-summary-inner .pb-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.procbreakdown-summary-inner .pb-val {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink-1);
+  font-variant-numeric: tabular-nums;
+}
+.procbreakdown-summary-inner .pb-sep { color: var(--ink-muted); }
+.pb-msk td { background: rgba(233, 162, 59, 0.05); color: var(--accent); }
+.pivot-table .pivot-ot-summary .pivot-ot-summary-cell { padding: 4px 8px; text-align: left; }
+.ot-bar {
+  position: relative;
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  height: 16px;
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.ot-bar-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: var(--accent);
+  opacity: 0.65;
+  transition: width 0.2s;
+}
+.ot-bar-label {
+  position: relative;
+  display: block;
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-1);
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.ot-merged { display: flex; gap: 14px; align-items: center; }
+.ot-merged-item { display: flex; align-items: center; gap: 6px; flex: 1; }
+.ot-merged-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.ot-merged-item .ot-bar { flex: 1; }
+
+/* === 月收入摘要 === */
+.pivot-income-row td { background: var(--bg-head); }
+.pivot-income-cell { padding: 8px 10px !important; }
+.income-summary { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.income-field { display: flex; flex-direction: column; gap: 2px; min-width: 110px; }
+.income-field-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.income-field-val {
+  font-family: var(--font-disp);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.income-field-input {
+  width: 110px;
+  background: transparent;
+  color: var(--accent);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 1px 2px;
+  font-family: var(--font-disp);
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.income-field-input:focus { outline: none; border-bottom-color: var(--accent); }
+.income-field-input::-webkit-inner-spin-button,
+.income-field-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.income-field-input { -moz-appearance: textfield; appearance: textfield; }
+.income-field-sub { font-size: 10px; color: var(--ink-muted); }
+.pivot-input {
+  width: 100%;
+  background: transparent;
+  color: var(--ink-1);
+  border: none;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  padding: 3px 2px;
+}
+.pivot-input:focus { outline: 1px solid var(--accent); background: var(--bg-page); }
+.pivot-input::-webkit-inner-spin-button,
+.pivot-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.pivot-input { -moz-appearance: textfield; appearance: textfield; }
+
+/* === Settings 3-col layout (collapsible details) === */
+#view-settings.active {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  align-items: start;
+}
+@media (max-width: 1024px) { #view-settings.active { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 720px) { #view-settings.active { grid-template-columns: 1fr; } }
+.settings-section {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  margin-bottom: 0;
+  min-width: 0;
+}
+.settings-section > summary {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  padding: 9px 14px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  background: var(--bg-head);
+  border-bottom: 1px solid transparent;
+  position: relative;
+}
+.settings-section > summary::-webkit-details-marker { display: none; }
+.settings-section > summary::before { content: '▶ '; color: var(--ink-muted); margin-right: 4px; font-size: 10px; }
+.settings-section[open] > summary::before { content: '▼ '; }
+.settings-section[open] > summary { border-bottom-color: var(--border); }
+.settings-section > summary:hover { color: var(--ink-1); }
+.settings-body { padding: 12px 14px; }
+.settings-hint { font-size: 11px; color: var(--ink-muted); margin-bottom: 8px; line-height: 1.5; }
+.settings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.settings-table th, .settings-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.settings-table th {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.settings-table input, .settings-table select {
+  background: var(--bg-page);
+  color: var(--ink-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 3px 6px;
+  font-size: 13px;
+  width: 100%;
+  font-family: var(--font-ui);
+}
+.settings-table input.amount {
+  width: 80px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+.settings-table .col-narrow { width: 60px; text-align: center; }
+.settings-table .col-drag { width: 22px; text-align: center; }
+.settings-table .drag-handle {
+  cursor: grab;
+  color: var(--ink-muted);
+  user-select: none;
+  font-family: var(--font-mono);
+  letter-spacing: -2px;
+}
+.settings-table .drag-handle:hover { color: var(--accent); }
+.settings-table .drag-handle:active { cursor: grabbing; }
+.settings-table tr.dragging { opacity: 0.4; }
+.settings-table tr.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
+
+/* === Modal === */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.72);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 22px;
+  max-width: 540px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.modal h3 {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+.modal-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.cascade-list {
+  list-style: none;
+  margin: 8px 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.cascade-list li {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cascade-list code {
+  background: var(--bg-page);
+  padding: 1px 4px;
+  border-radius: var(--r);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+/* === Toast === */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-panel);
+  color: var(--ink-1);
+  padding: 8px 18px;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.45);
+  z-index: 200;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.toast.show { opacity: 1; }
+.toast.success { border-color: var(--accent); }
+
+/* === Day mini label (in header, only mini-mode shows) === */
+.day-mini-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+  letter-spacing: 0.06em;
+  margin-left: 6px;
+}
+
+/* === Mini quick-mode === */
+body.mini-mode { font-size: 13px; }
+body.mini-mode header { padding: 6px 10px; gap: 8px; }
+body.mini-mode header h1 { font-size: 13px; }
+body.mini-mode header .tabs { display: none; }
+body.mini-mode header .icon-btn { padding: 3px 7px; font-size: 10px; }
+body.mini-mode .day-nav { display: none; }
+body.mini-mode main > .view:not(#view-mini) { display: none !important; }
+body.mini-mode #view-mini { display: block; padding: 8px 10px; }
+body:not(.mini-mode) #view-mini { display: none; }
+
+#view-mini .mini-rows { display: flex; flex-direction: column; gap: 0; }
+#view-mini .mini-row {
+  padding: 4px 4px;
+  background: transparent;
+  border-bottom: 1px solid var(--border-row);
+  border-radius: 0;
+}
+#view-mini .mini-row .count-groupcell { flex: 0 0 50px; }
+#view-mini .mini-row .count-sublabel { font-size: 12px; }
+#view-mini .mini-summary {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: var(--bg-head);
+  border: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.money-blur { filter: blur(6px); transition: filter 0.2s; user-select: none; }
+.money-blur.unblur { filter: none; user-select: auto; }
+
+/* === Meeting batch-entry === */
+.meeting-role-head {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin: 10px 0 4px;
+}
+.meeting-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-row);
+}
+.meeting-preset-row .meeting-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meeting-preset-row input.meeting-dates {
+  width: 74px;
+  background: transparent;
+  color: var(--ink-1);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 2px 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: center;
+}
+.meeting-preset-row input.meeting-dates:focus { outline: none; border-bottom-color: var(--accent); }
+.meeting-preset-row .meeting-count {
+  width: 28px;
+  text-align: center;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.meeting-preset-row .meeting-amount {
+  width: 58px;
+  text-align: right;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>績效紀錄</h1>
+  <nav class="tabs">
+    <button class="tab active" data-view="today">今日</button>
+    <button class="tab" data-view="month">月表</button>
+    <button class="tab" data-view="settings">設定</button>
+  </nav>
+  <span class="day-mini-label" id="day-mini-label" style="display:none"></span>
+  <div class="header-spacer"></div>
+  <button class="icon-btn" id="open-mini" title="開啟迷你快輸視窗">🪟 迷你</button>
+  <button class="icon-btn" id="theme-toggle" title="切換主題">🌓</button>
+  <button class="icon-btn" id="export-day" title="複製當日計數為 sheet 一欄">📋 當日</button>
+</header>
+
+<div class="day-nav">
+  <button id="day-prev">←</button>
+  <input type="date" id="day-picker">
+  <button id="day-next">→</button>
+  <button id="day-today">今天</button>
+  <span class="day-label" id="day-label"></span>
+</div>
+
+<main>
+
+<!-- MINI QUICK VIEW (only shown when ?mode=quick) -->
+<section id="view-mini">
+  <div class="mini-rows" id="mini-rows"></div>
+  <div class="mini-summary">
+    <span>件數 <strong id="mini-count">0</strong></span>
+    <span>金額 <span id="mini-money" class="money-blur stat-money stat-num">0</span></span>
+  </div>
+</section>
+
+<!-- TODAY VIEW -->
+<section id="view-today" class="view active">
+  <div class="three-col">
+
+    <div class="panel" id="panel-counts">
+      <h2>計數類</h2>
+      <div id="counts-container"></div>
+    </div>
+
+    <!-- col 2: Procedure (上) + 待打報告 (下) -->
+    <div class="col-stack">
+      <div class="panel" id="panel-procedures">
+        <h2>Procedure</h2>
+        <div class="proc-input-row">
+          <input type="text" class="proc-medrec" id="preset-medrec" placeholder="病歷號">
+          <select id="preset-select"></select>
+          <input type="number" class="qty" id="preset-qty" value="1" min="1" step="1" placeholder="數量">
+          <button class="btn-primary" id="preset-add">＋</button>
+        </div>
+        <ul class="proc-list" id="proc-list"></ul>
+        <div class="proc-total" id="proc-total"><span>Procedure 合計</span><span class="stat-money">0</span></div>
+      </div>
+
+      <div class="panel" id="panel-pending">
+        <h2>待打報告</h2>
+        <div class="pending-grid" id="pending-grid"></div>
+      </div>
+    </div>
+
+    <!-- col 3: 當日統計 (上) + 會議 (下) -->
+    <div class="col-stack">
+      <div class="panel" id="panel-stats">
+        <h2>當日統計</h2>
+        <div id="stats-hero"></div>
+        <div class="subhead">件數</div>
+        <div id="count-summary"></div>
+        <div class="subhead" style="margin-top: 14px">收入 <button id="money-toggle" class="icon-btn" style="float:right;padding:1px 8px;font-size:11px">👁</button></div>
+        <div id="money-summary" class="money-blur unblur"></div>
+        <div class="meta-row" style="margin-top:10px">
+          <label>加班時數</label>
+          <input type="number" id="overtime-hours" step="0.5" min="0" style="flex:1">
+          <select id="overtime-type" title="加班類型(自動依星期幾;可手動 override)" style="width:80px;background:var(--bg-page);color:var(--ink-1);border:1px solid var(--border);border-radius:var(--r);padding:3px 6px;font-size:12px">
+            <option value="">自動</option>
+            <option value="平日">平日</option>
+            <option value="假日">假日</option>
+          </select>
+        </div>
+        <div class="meta-row"><label>備註</label><textarea id="day-notes"></textarea></div>
+      </div>
+
+    </div>
+
+  </div>
+</section>
+
+<!-- MONTH VIEW -->
+<section id="view-month" class="view">
+  <div class="month-controls">
+    <button id="month-prev" class="btn-secondary">←</button>
+    <select id="month-year-sel" class="btn-secondary" style="padding:4px 8px"></select>
+    <select id="month-month-sel" class="btn-secondary" style="padding:4px 8px"></select>
+    <button id="month-next" class="btn-secondary">→</button>
+    <span class="header-spacer" style="flex:1"></span>
+  </div>
+  <div style="overflow-x:auto">
+    <table class="pivot-table" id="month-pivot"></table>
+  </div>
+
+  <div class="month-3col">
+    <!-- col 1: Procedure 分項統計 -->
+    <div class="panel" id="panel-month-proc">
+      <h2>本月 Procedure 分項</h2>
+      <table class="settings-table" id="month-procbreakdown"></table>
+    </div>
+
+    <!-- col 2: 不值班預約 (2 collapsible months) -->
+    <div class="panel" id="panel-month-schedule">
+      <h2>不值班預約</h2>
+      <div id="schedule-blocks-container"></div>
+    </div>
+
+    <!-- col 3: 會議 -->
+    <div class="panel" id="panel-month-meeting">
+      <h2>會議 <span style="font-weight:normal;font-size:9px;color:var(--ink-muted);letter-spacing:0.06em" id="meeting-month-label"></span></h2>
+      <div id="meeting-container"></div>
+      <div class="proc-total" id="meeting-total"><span>月會議合計</span><span class="stat-money" id="meeting-total-amount">0</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- SETTINGS VIEW -->
+<section id="view-settings" class="view">
+
+  <details class="settings-section">
+    <summary>基礎單價(unitPrices)</summary>
+    <div class="settings-body"><table class="settings-table" id="settings-prices"></table></div>
+  </details>
+
+  <details class="settings-section">
+    <summary>Atomic Items(原子項目)</summary>
+    <div class="settings-body">
+      <p class="settings-hint">改 amount 時會 scan 所有用到此 atomic 的 preset,提示一鍵連動更新。includeInStats=否 → 月統計分項表不顯示;countsAs → 月統計改計入指定 bucket。</p>
+      <table class="settings-table" id="settings-atomics"></table>
+      <button class="btn-secondary" id="atomic-add" style="margin-top:8px">＋ 新增原子項</button>
+    </div>
+  </details>
+
+  <details class="settings-section">
+    <summary>Presets(組合包,28 項)</summary>
+    <div class="settings-body">
+      <p class="settings-hint">Preset 可指向多個 atomic,total 為其合計。改 atomic 金額會提示連動。</p>
+      <table class="settings-table" id="settings-presets"></table>
+    </div>
+  </details>
+
+  <details class="settings-section">
+    <summary>會議目錄(meetingCatalog)</summary>
+    <div class="settings-body"><table class="settings-table" id="settings-meetings"></table></div>
+  </details>
+
+  <details class="settings-section">
+    <summary>迷你視窗顯示項目</summary>
+    <div class="settings-body">
+      <p class="settings-hint">勾選要在迷你視窗顯示的計數項目。</p>
+      <table class="settings-table" id="settings-minilayout"></table>
+    </div>
+  </details>
+
+  <details class="settings-section">
+    <summary>Sheet 列順序對應(TSV export 用)</summary>
+    <div class="settings-body">
+      <p class="settings-hint">勾選並排序要 export 的計數項目;export 時會依此順序輸出 TSV(`\n` 分隔)。</p>
+      <table class="settings-table" id="settings-sheetorder"></table>
+    </div>
+  </details>
+
+  <details class="settings-section">
+    <summary>資料管理</summary>
+    <div class="settings-body">
+      <button class="btn-secondary" id="export-json">📤 匯出全部資料(JSON)</button>
+      <input type="file" id="import-json-input" accept=".json" style="display:none">
+      <button class="btn-secondary" id="import-json-btn">📥 匯入 JSON(整包覆蓋)</button>
+      <input type="file" id="merge-json-input" accept=".json" style="display:none">
+      <button class="btn-secondary" id="merge-json-btn">📥 匯入歷史(只合併 days)</button>
+      <button class="btn-secondary" id="reset-defaults" style="color:var(--danger)">⚠ 重設為預設 catalog</button>
+      <p class="settings-hint" style="margin-top:8px">「整包覆蓋」會取代所有資料(含 settings);「匯入歷史」只把 JSON 內的每日紀錄合併進來,不動 settings/catalog,適合分批匯入歷史月份。資料存在瀏覽器 localStorage,請定期匯出備份。</p>
+    </div>
+  </details>
+
+</section>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<!-- Modal mount point -->
+<div id="modal-mount"></div>
+
+<script type="module">
+'use strict';
+
+// ===== Firebase Setup =====
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+import { getDatabase, ref, set, get, onValue }
+  from "https://www.gstatic.com/firebasejs/10.13.2/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBsyN2w1iKQu10ePNAJEXSAgqemj5gOS-g",
+  authDomain: "income-41a40.firebaseapp.com",
+  databaseURL: "https://income-41a40-default-rtdb.firebaseio.com",
+  projectId: "income-41a40",
+  storageBucket: "income-41a40.firebasestorage.app",
+  messagingSenderId: "838512452225",
+  appId: "1:838512452225:web:6ff8de1afa0f117f66a380"
+};
+const ALLOWED_EMAIL = 'deer530530@gmail.com';
+
+const fbApp = initializeApp(firebaseConfig);
+const fbAuth = getAuth(fbApp);
+const fbDB = getDatabase(fbApp);
+let currentUser = null;
+let userDataRef = null;
+let suppressNextOnValue = false;  // 避免本機 save 觸發 onValue 又重抓蓋掉自己
+
+// ===== Seed data (從現有 sheet 抽出) =====
+const SEED = {
+  unitPrices: {
+    ct:    { opd: 350, er_adm_self: 420, ldct_health: 554 },
+    mr:    { opd: 700, er_adm_health: 840 },
+    bmd:   120,
+    special: {
+      swal: 231, hsg: 210,
+      eso_tbe: 90, ugi: 217, sb: 221, ugisb: 437, lgi: 200,
+      ivp: 145, vcug: 113, ttube: 123, cystography: 100, fistu: 153, intus: 437,
+    },
+    xray:  { opd: 25, portable: 25, er: 33 },
+    consult: 200,
+    sono: 150,
+    opd: 500
+  },
+  atomicItems: [
+    { id: 'pcn',     name: 'PCN',                amount: 3000, includeInStats: true },
+    { id: 'ap',      name: 'A-P',                amount: 315,  includeInStats: false },
+    { id: 'pcnr',    name: 'PCNR',               amount: 480,  includeInStats: true },
+    { id: 'ptc',     name: 'PTC',                amount: 1260, includeInStats: true },
+    { id: 'ptcd',    name: 'PTCD',               amount: 3840, includeInStats: true },
+    { id: 'ptcdr',   name: 'PTCDR',              amount: 480,  includeInStats: true },
+    { id: 'ptgbd',   name: 'PTGBD',              amount: 1728, includeInStats: true },
+    { id: 'guide',   name: 'Guide',              amount: 1520, includeInStats: true },
+    { id: 'av',      name: 'AV',                 amount: 2100, includeInStats: true },
+    { id: 'picc',    name: 'PICC',               amount: 1034, includeInStats: true },
+    { id: 'tae',     name: 'TAE',                amount: 8800, includeInStats: true },
+    { id: 'ctame',   name: 'cTAME',              amount: 8800, includeInStats: true, isMSK: true },
+    { id: 'cstame',  name: 'c(s)TAME',           amount: 8800, includeInStats: true, countsAs: 'stame', isMSK: true },
+    { id: 'stame',   name: 'sTAME',              amount: 1950, includeInStats: true, isMSK: true },
+    { id: 'extremity',     name: 'Extremity',     amount: 1950, includeInStats: true },
+    { id: 'extremity_echo',name: 'Extremity+echo',amount: 2100, includeInStats: true },
+    { id: 'aorta',   name: 'Aorta',              amount: 1932, includeInStats: true },
+    { id: 'aorta_a', name: 'Aorta A',            amount: 1932, includeInStats: true },
+    { id: 'aorta_t', name: 'Aorta T',            amount: 1691, includeInStats: true },
+    { id: 'pelvic',  name: 'Pelvic',             amount: 1932, includeInStats: true },
+    { id: 'renal',   name: 'Renal',              amount: 1691, includeInStats: true },
+    { id: 'celiac1', name: 'Celiac1',            amount: 2625, includeInStats: true },
+    { id: 'celiac2', name: 'Celiac2',            amount: 3940, includeInStats: true },
+    { id: 'celiaco2',name: 'Celiaco2',           amount: 5250, includeInStats: true },
+    { id: 'sono',    name: 'SONO',               amount: 150,  includeInStats: false },
+    { id: 'echo_guide', name: 'ECHO guide',      amount: 600,  includeInStats: true },
+    { id: 'drain_intra', name: 'Drain intraabdominal', amount: 4843, includeInStats: true },
+    { id: 'drain_sub',   name: 'Drain subphernic',     amount: 4598, includeInStats: true },
+    { id: 'lung',    name: 'Lung biopsy',        amount: 1520, includeInStats: true },
+    { id: 'bone',    name: 'Bone biopsy',        amount: 1520, includeInStats: true, isMSK: true },
+    { id: 'arthro',  name: 'Arthro',             amount: 360,  includeInStats: true, isMSK: true },
+    { id: 'inj',     name: 'INJ',                amount: 600,  includeInStats: true },
+    { id: 'rf',      name: 'RF',                 amount: 600,  includeInStats: true, isMSK: true },
+    { id: 'myelo',   name: 'Myelography',        amount: 907,  includeInStats: true, isMSK: true },
+    { id: 'caudal',  name: 'Caudal block',       amount: 540,  includeInStats: true, isMSK: true },
+    { id: 'tp',      name: 'TP',                 amount: 600,  includeInStats: true, isMSK: true },
+    { id: 'joint',   name: 'joint',              amount: 1000, includeInStats: true, isMSK: true },
+    { id: 'pro',     name: 'Pro',                amount: 1800, includeInStats: true, isMSK: true },
+    { id: 'nb',      name: 'NB',                 amount: 733,  includeInStats: true, isMSK: true },
+    { id: 'ct_nb',   name: 'CT NB',              amount: 3387, includeInStats: true, isMSK: true },
+    { id: 'nb_simple', name: 'NB simple',        amount: 133,  includeInStats: true },
+    { id: 'd3',      name: '3D',                 amount: 600,  includeInStats: false },
+    { id: 'res_share', name: '資源共享',         amount: 100,  includeInStats: false },
+  ],
+  presets: [
+    { id: 'ct_nb',          name: 'CT NB',          items: [{atomicId:'ct_nb', amount:3387}] },
+    { id: 'nb',             name: 'NB',             items: [{atomicId:'nb', amount:733}] },
+    { id: 'nb_arthro',      name: 'NB arthro',      items: [{atomicId:'nb', amount:733},{atomicId:'arthro', amount:360}] },
+    { id: 'tae',            name: 'TAE',            items: [{atomicId:'tae', amount:8800}] },
+    { id: 'ctame',          name: 'cTAME',          items: [{atomicId:'ctame', amount:8800}] },
+    { id: 'cstame',         name: 's(c)TAME',       items: [{atomicId:'cstame', amount:8800}] },
+    { id: 'stame',          name: 'sTAME',          items: [{atomicId:'stame', amount:1950}] },
+    { id: 'pcn_ap',         name: 'PCN+A-P',        items: [{atomicId:'pcn', amount:3000},{atomicId:'ap', amount:315}] },
+    { id: 'ptgbd_ptc',      name: 'PTGBD+PTC',      items: [{atomicId:'ptgbd', amount:1728},{atomicId:'ptc', amount:1260}] },
+    { id: 'dr_ptcd',        name: 'DR(PTCD)',       items: [{atomicId:'ptcd', amount:3840}] },
+    { id: 'dr_pcn',         name: 'DR(PCN)',        items: [{atomicId:'pcn', amount:3000},{atomicId:'ap', amount:315}] },
+    { id: 'picc_av',        name: 'PICC+AV',        items: [{atomicId:'picc', amount:1034},{atomicId:'av', amount:2100}] },
+    { id: 'lung',           name: 'Lung',           items: [{atomicId:'lung', amount:1520}] },
+    { id: 'bone',           name: 'Bone',           items: [{atomicId:'bone', amount:1520}] },
+    { id: 'arthro',         name: 'Arthro',         items: [{atomicId:'arthro', amount:360}] },
+    { id: 'inj',             name: 'INJ',            items: [{atomicId:'inj', amount:600}] },
+    { id: 'res_share',      name: '資源共享',        items: [{atomicId:'res_share', amount:100}] },
+    { id: 'res_share_6',    name: '資源共享*6',      items: [{atomicId:'res_share', amount:600}] },
+    { id: 'd3',             name: '3D',             items: [{atomicId:'d3', amount:600}] },
+    { id: 'rf_1',           name: 'RF*1',           items: [{atomicId:'rf', amount:2520}] },
+    { id: 'rf_2',           name: 'RF*2',           items: [{atomicId:'rf', amount:2976}] },
+    { id: 'rf_3',           name: 'RF*3',           items: [{atomicId:'rf', amount:3840}] },
+    { id: 'rf1_joint',      name: 'RF*1 + joint',   items: [{atomicId:'rf', amount:2520},{atomicId:'joint', amount:1000}] },
+    { id: 'rf1_nb1400',     name: 'RF*1 + NB 1400', items: [{atomicId:'rf', amount:2520},{atomicId:'nb', amount:1400}] },
+    { id: 'myelo',          name: 'Myelography',    items: [{atomicId:'myelo', amount:907}] },
+    { id: 'caudal',         name: 'Caudal block',   items: [{atomicId:'caudal', amount:540}] },
+    { id: 'tp',             name: 'TP',             items: [{atomicId:'tp', amount:600}] },
+    { id: 'joint',          name: 'joint',          items: [{atomicId:'joint', amount:1000}] },
+    { id: 'nb_1400',        name: 'NB 1400',        items: [{atomicId:'nb', amount:1400}] },
+    { id: 'pro',            name: 'Pro',            items: [{atomicId:'pro', amount:1800}] },
+    { id: 'nb_arthro_3500', name: 'NB Arthro 3500', items: [{atomicId:'nb', amount:733},{atomicId:'arthro', amount:1760}] },
+    { id: 'nb_arthro_1500', name: 'NB Arthro 1500', items: [{atomicId:'nb', amount:733},{atomicId:'arthro', amount:963}] },
+    { id: 'ct_arthro_sono_4500', name: 'CT arthro SONO 4500', items: [{atomicId:'arthro', amount:4280}] },
+    { id: 'nb_simple',      name: 'NB simple',       items: [{atomicId:'nb_simple', amount:133}] },
+    { id: 'ctame_1500_sono',name: 'cTAME & 1500 SONO',items: [{atomicId:'ctame', amount:8800},{atomicId:'sono', amount:600}] },
+    { id: 'other',          name: 'Other',          items: [] },
+  ],
+  meetingCatalog: [
+    { id: 'mtg_ortho_case',  role: '主講', name: '骨科手術案例討論',   amount: 3000 },
+    { id: 'mtg_resident',    role: '主講', name: '住院醫師核心課程',   amount: 3000 },
+    { id: 'mtg_bmd_biz',     role: '主講', name: 'BMD業務討論會',     amount: 0 },
+    { id: 'mtg_ortho_resi',  role: '主講', name: '骨科住院醫師核心課程', amount: 0 },
+    { id: 'mtg_gigs',        role: '參與', name: '月 GI-GS',          amount: 500 },
+    { id: 'mtg_case_disc',   role: '參與', name: '案例討論會',         amount: 500 },
+    { id: 'mtg_journal',     role: '參與', name: 'Journal reading',    amount: 500 },
+    { id: 'mtg_dept',        role: '參與', name: '部務會議',           amount: 1000 },
+    { id: 'mtg_attending',   role: '參與', name: '主治醫師會議',       amount: 500 },
+    { id: 'mtg_cancer',      role: '參與', name: '癌非癌',             amount: 500 },
+    { id: 'mtg_mm',          role: '參與', name: 'MM',                 amount: 500 },
+    { id: 'mtg_teach',       role: '參與', name: '教學檢討會議',       amount: 500 },
+    { id: 'mtg_office',      role: '參與', name: '科務會議',           amount: 0 },
+    { id: 'mtg_ortho_mm',    role: '參與', name: '骨科MM',             amount: 0 },
+    { id: 'mtg_hospital',    role: '參與', name: '全院',               amount: 0 },
+    { id: 'mtg_cr_biz',      role: '參與', name: 'CR業務討論會',       amount: 0 },
+    { id: 'mtg_pre_doc1',    role: '參與', name: '北榮 吳/林醫師',     amount: 500 },
+    { id: 'mtg_pre_doc2',    role: '參與', name: '張豐基教授課程',     amount: 0 },
+    { id: 'mtg_pre_doc3',    role: '參與', name: '鍾孝文醫師課程',     amount: 500 },
+  ],
+  sheetOrder: [
+    { key: 'ct.opd',           label: 'CT (主)',     enabled: true  },
+    { key: 'ct.er_adm_self',   label: 'CT 子(ER+ADM+自)', enabled: true  },
+    { key: 'ct.ldct_health',   label: 'LDCT 國健署', enabled: true  },
+    { key: 'mr.opd',           label: 'MR (主)',    enabled: true  },
+    { key: 'mr.er_adm_health', label: 'MR 子(ER+ADM+H)', enabled: true  },
+    { key: 'bmd',              label: 'BMD',        enabled: true  },
+    { key: 'special.total',    label: 'Special',    enabled: true  },
+    { key: 'special.swal',     label: '(Swal)',     enabled: true  },
+    { key: 'special.hsg',      label: '(HSG)',      enabled: true  },
+    { key: 'xray.opd',         label: 'X ray',      enabled: true  },
+    { key: 'xray.er',          label: '(ER)',       enabled: true  },
+    { key: 'consult',          label: '會診',       enabled: true  },
+    { key: 'sono',             label: 'Sono',       enabled: true  },
+    { key: 'opd',              label: 'OPD',        enabled: true  },
+  ],
+  miniLayout: [
+    'ct.opd','ct.er_adm_self','ct.ldct_health',
+    'mr.opd','mr.er_adm_health',
+    'bmd',
+    'special.swal','special.hsg',
+    'xray.opd','xray.er',
+    'consult','sono','opd',
+  ],
+  miniShowMoney: false,
+  overtimeRate: 300,
+  overtimeTargets: { weekday: 46, holiday: 16 },  // 月目標小時
+  theme: 'dark',
+};
+
+// Pending reports (待打報告) — running backlog state
+const PENDING_SCHEMA = [
+  { group: 'CT', items: [
+    { key: 'ct_opd',   label: 'OPD',   priceKey: 'ct.opd' },
+    { key: 'ct_ldct',  label: 'LDCT',  priceKey: 'ct.ldct_health' },
+    { key: 'ct_adm',   label: 'ADM',   priceKey: 'ct.er_adm_self' },
+    { key: 'ct_er_ld', label: 'ER LD', priceKey: 'ct.er_adm_self' },
+  ]},
+  { group: 'Special', items: [
+    { key: 'hsg',  label: 'HSG',     priceKey: 'special.hsg' },
+    { key: 'ivp',  label: 'IVP',     priceKey: 'special.ivp' },
+    { key: 'swal', label: 'Swallow', priceKey: 'special.swal' },
+  ]},
+  { group: 'MR', items: [
+    { key: 'mr_opd',   label: 'OPD',   priceKey: 'mr.opd' },
+    { key: 'mr_adm',   label: 'ADM',   priceKey: 'mr.er_adm_health' },
+  ]},
+  { group: 'BMD', items: [
+    { key: 'bmd',      label: '',      priceKey: 'bmd' },
+  ]},
+  { group: 'X-ray', items: [
+    { key: 'xray_now', label: 'Now',   priceKey: 'xray.opd' },
+    { key: 'xray_old', label: 'Old',   priceKey: 'xray.opd' },
+  ]},
+];
+const PENDING_DEFAULT = (() => {
+  const o = {};
+  for (const g of PENDING_SCHEMA) for (const it of g.items) o[it.key] = 0;
+  return o;
+})();
+
+// Counts schema
+const COUNTS_SCHEMA = [
+  { group: 'CT', children: [
+    { key: 'ct.opd',            label: 'OPD' },
+    { key: 'ct.er_adm_self',    label: 'ER+ADM+自' },
+    { key: 'ct.ldct_health',    label: 'LDCT' },
+  ]},
+  { group: 'MR', children: [
+    { key: 'mr.opd',            label: 'OPD' },
+    { key: 'mr.er_adm_health',  label: 'ER+ADM+H' },
+  ]},
+  { group: 'BMD', children: [
+    { key: 'bmd',               label: '' },
+  ]},
+  { group: 'Special', children: [
+    { key: 'special.__other_aggregate__', label: 'Other', isOtherAggregate: true,
+      subItems: [
+        { key: 'special.eso_tbe',     label: 'ESO, TBE' },
+        { key: 'special.ugi',         label: 'UGI' },
+        { key: 'special.sb',          label: 'SB' },
+        { key: 'special.ugisb',       label: 'UGISB' },
+        { key: 'special.lgi',         label: 'LGI' },
+        { key: 'special.ivp',         label: 'IVP' },
+        { key: 'special.vcug',        label: 'VCUG' },
+        { key: 'special.ttube',       label: 'T tube' },
+        { key: 'special.cystography', label: 'Cystography' },
+        { key: 'special.fistu',       label: 'Fistu' },
+        { key: 'special.intus',       label: 'Intus' },
+      ]
+    },
+    { key: 'special.hsg',  label: 'HSG' },
+    { key: 'special.swal', label: 'Swallow' },
+  ]},
+  { group: 'X-ray', children: [
+    { key: 'xray.opd',          label: 'OPD' },
+    { key: 'xray.portable',     label: 'Portable' },
+    { key: 'xray.er',           label: 'ER' },
+  ]},
+  { group: 'Other', children: [
+    { key: 'consult',           label: '會診' },
+    { key: 'sono',              label: 'Sono' },
+    { key: 'opd',               label: 'OPD 看診' },
+  ]},
+];
+
+// Special "Other" catalog — 11 不常用子項
+const SPECIAL_OTHER_CATALOG = [
+  { id: 'eso_tbe',     name: 'ESO, TBE' },
+  { id: 'ugi',         name: 'UGI' },
+  { id: 'sb',          name: 'SB' },
+  { id: 'ugisb',       name: 'UGISB' },
+  { id: 'lgi',         name: 'LGI' },
+  { id: 'ivp',         name: 'IVP' },
+  { id: 'vcug',        name: 'VCUG' },
+  { id: 'ttube',       name: 'T tube' },
+  { id: 'cystography', name: 'Cystography' },
+  { id: 'fistu',       name: 'Fistu' },
+  { id: 'intus',       name: 'Intus' },
+];
+const SPECIAL_OTHER_CAT_MAP = Object.fromEntries(SPECIAL_OTHER_CATALOG.map(c => [c.id, c]));
+
+// Main preset meetings always shown in meeting panel
+const MAIN_PRESET_MEETINGS = {
+  speaker:     ['mtg_ortho_case', 'mtg_resident'],
+  participant: ['mtg_dept', 'mtg_attending', 'mtg_cancer', 'mtg_case_disc', 'mtg_journal'],
+};
+
+// ===== Storage adapter =====
+const STORAGE_KEY = 'worknum_v1';
+
+// One-shot migrations (idempotent via flags)
+function runMigrations(data) {
+  data.migrations = data.migrations || {};
+
+  // v3 → v4:special.other (bundled) 拆解;v4 catalog 是 11 個獨立 sub-keys
+  if (!data.migrations.specialV4) {
+    for (const date of Object.keys(data.days)) {
+      const sp = data.days[date]?.counts?.special;
+      if (!sp) continue;
+      // v2 → v3 殘留(若有):ivp/ugi/lgi/sbs/vcug/eso/intu/ttube 早期分散 keys → 合進 other_unbundled
+      const oldV2Keys = ['sbs'];  // sbs 不在 v4 list,其他都對應到 v4 sub-key 直接保留
+      for (const k of oldV2Keys) {
+        if (sp[k] !== undefined) {
+          sp.other_unbundled = (sp.other_unbundled || 0) + Number(sp[k] || 0);
+          delete sp[k];
+        }
+      }
+      // v3 special.other (bundled total) → other_unbundled
+      if (sp.other !== undefined && sp.other !== 0) {
+        sp.other_unbundled = (sp.other_unbundled || 0) + Number(sp.other);
+      }
+      delete sp.other;
+    }
+    // Settings 殘留 keys 清掉
+    if (data.settings?.unitPrices?.special) {
+      const validKeys = new Set(['swal','hsg','eso_tbe','ugi','sb','ugisb','lgi','ivp','vcug','ttube','cystography','fistu','intus']);
+      for (const k of Object.keys(data.settings.unitPrices.special)) {
+        if (!validKeys.has(k)) delete data.settings.unitPrices.special[k];
+      }
+    }
+    data.migrations.specialV4 = true;
+    data.migrations.specialBundled = true;  // legacy flag
+  }
+
+  // v4 → v5:special.{otherSubKey} keyed counts → special.others = [{ catalogId, amount, count }]
+  if (!data.migrations.specialV5) {
+    const otherKeys = ['eso_tbe','ugi','sb','ugisb','lgi','ivp','vcug','ttube','cystography','fistu','intus'];
+    for (const date of Object.keys(data.days)) {
+      const sp = data.days[date]?.counts?.special;
+      if (!sp) continue;
+      if (!Array.isArray(sp.others)) sp.others = [];
+      for (const k of otherKeys) {
+        const c = Number(sp[k] || 0);
+        if (c > 0) {
+          const price = Number(data.settings?.unitPrices?.special?.[k] || 0);
+          sp.others.push({
+            id: `mig_${Date.now()}_${k}_${date}`,
+            catalogId: k,
+            amount: price,
+            count: c,
+          });
+        }
+        delete sp[k];
+      }
+    }
+    data.migrations.specialV5 = true;
+  }
+
+  // v5 → v6:確保 ct_nb atomic 存在,preset 'ct_nb' 用 atomicId='ct_nb'
+  if (!data.migrations.ctNbSplit) {
+    // 加 ct_nb atomic 若不存在
+    if (data.settings?.atomicItems && !data.settings.atomicItems.find(a => a.id === 'ct_nb')) {
+      data.settings.atomicItems.push({ id: 'ct_nb', name: 'CT NB', amount: 3387, includeInStats: true });
+    }
+    // 修正 preset 'ct_nb' 的 atomicId
+    const ctNbPreset = data.settings?.presets?.find(p => p.id === 'ct_nb');
+    if (ctNbPreset) {
+      for (const it of ctNbPreset.items) {
+        if (it.atomicId === 'nb') it.atomicId = 'ct_nb';
+      }
+    }
+    data.migrations.ctNbSplit = true;
+  }
+
+  // v6 → v7:atomic items 補 isMSK 預設值
+  if (!data.migrations.atomicMSK) {
+    const mskIds = new Set(['bone','arthro','inj','nb','ct_nb','nb_simple']);
+    for (const a of (data.settings?.atomicItems || [])) {
+      if (a.isMSK === undefined && mskIds.has(a.id)) a.isMSK = true;
+    }
+    data.migrations.atomicMSK = true;
+  }
+
+  // v7 → v8:重新定義 MSK = {CT NB, NB, TAME family, Arthro, RF, bone};加 rf atomic
+  if (!data.migrations.mskV2) {
+    const items = data.settings?.atomicItems;
+    if (items) {
+      // 加 rf 若不存在
+      if (!items.find(a => a.id === 'rf')) {
+        items.push({ id: 'rf', name: 'RF', amount: 600, includeInStats: true, isMSK: true });
+      }
+      const correctMSK = new Set(['ct_nb','nb','arthro','bone','ctame','cstame','stame','rf']);
+      for (const a of items) {
+        a.isMSK = correctMSK.has(a.id);
+      }
+    }
+    data.migrations.mskV2 = true;
+  }
+
+  // v8 → v9:加 6 個 MSK 注射相關 atomic + 9 個新 preset、移除舊 pRF*3
+  if (!data.migrations.mskCatalogV3) {
+    const items = data.settings?.atomicItems;
+    if (items) {
+      const adds = [
+        { id: 'myelo',   name: 'Myelography',  amount: 907, isMSK: true },
+        { id: 'caudal',  name: 'Caudal block', amount: 540, isMSK: true },
+        { id: 'tp',      name: 'TP',           amount: 600, isMSK: true },
+        { id: 'joint',   name: 'joint',        amount: 1000, isMSK: true },
+        { id: 'pro',     name: 'Pro',          amount: 1800, isMSK: true },
+      ];
+      for (const a of adds) {
+        if (!items.find(x => x.id === a.id)) items.push({ ...a, includeInStats: true });
+      }
+    }
+    const presets = data.settings?.presets;
+    if (presets) {
+      // 移除舊 pRF
+      const removeIds = new Set(['prf_6300_2500','prf_6300_3500','prf2_j']);
+      for (let i = presets.length - 1; i >= 0; i--) {
+        if (removeIds.has(presets[i].id)) presets.splice(i, 1);
+      }
+      // 加新
+      const newPresets = [
+        { id: 'rf_1',     name: 'RF*1',         items: [{atomicId:'rf', amount:2520}] },
+        { id: 'rf_2',     name: 'RF*2',         items: [{atomicId:'rf', amount:2976}] },
+        { id: 'rf_3',     name: 'RF*3',         items: [{atomicId:'rf', amount:3840}] },
+        { id: 'rf1_joint', name: 'RF*1 + joint', items: [{atomicId:'rf', amount:2520},{atomicId:'joint', amount:1000}] },
+        { id: 'rf1_nb1400', name: 'RF*1 + NB 1400', items: [{atomicId:'rf', amount:2520},{atomicId:'nb', amount:1400}] },
+        { id: 'myelo',    name: 'Myelography',  items: [{atomicId:'myelo', amount:907}] },
+        { id: 'caudal',   name: 'Caudal block', items: [{atomicId:'caudal', amount:540}] },
+        { id: 'tp',       name: 'TP',           items: [{atomicId:'tp', amount:600}] },
+        { id: 'joint',    name: 'joint',        items: [{atomicId:'joint', amount:1000}] },
+        { id: 'nb_1400',  name: 'NB 1400',      items: [{atomicId:'nb', amount:1400}] },
+        { id: 'pro',      name: 'Pro',          items: [{atomicId:'pro', amount:1800}] },
+      ];
+      for (const p of newPresets) {
+        if (!presets.find(x => x.id === p.id)) presets.push(p);
+      }
+    }
+    data.migrations.mskCatalogV3 = true;
+  }
+
+  // v9 → v10:miniLayout 擴充成全部 keys
+  if (!data.migrations.miniLayoutFull) {
+    if (data.settings) {
+      data.settings.miniLayout = [
+        'ct.opd','ct.er_adm_self','ct.ldct_health',
+        'mr.opd','mr.er_adm_health',
+        'bmd',
+        'special.swal','special.hsg',
+        'xray.opd','xray.er',
+        'consult','sono','opd',
+      ];
+    }
+    data.migrations.miniLayoutFull = true;
+  }
+  return data;
+}
+
+function _blankData() {
+  return {
+    days: {},
+    settings: deepClone(SEED),
+    pending: { ...PENDING_DEFAULT },
+    scheduleEvents: [],
+    monthlyMeta: {},
+    migrations: { specialBundled: true, specialV4: true, specialV5: true, ctNbSplit: true, atomicMSK: true, mskV2: true, mskCatalogV3: true, miniLayoutFull: true },
+  };
+}
+function _normalizeData(data) {
+  data.settings = { ...deepClone(SEED), ...(data.settings || {}) };
+  data.days = data.days || {};
+  data.pending = { ...PENDING_DEFAULT, ...(data.pending || {}) };
+  data.scheduleEvents = data.scheduleEvents || [];
+  data.monthlyMeta = data.monthlyMeta || {};
+  runMigrations(data);
+  return data;
+}
+
+const storage = {
+  // 同步 load:從 localStorage cache(boot 時 Firebase fetch 完已寫入)
+  load() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return _blankData();
+    try {
+      return _normalizeData(JSON.parse(raw));
+    } catch (e) {
+      console.error('Failed to parse storage', e);
+      return _blankData();
+    }
+  },
+  // 非同步:從 Firebase 拉(初次 boot 用)
+  async loadFromFirebase() {
+    if (!userDataRef) return null;
+    try {
+      const snap = await get(userDataRef);
+      if (!snap.exists()) return null;
+      return _normalizeData(snap.val());
+    } catch (e) {
+      console.error('Firebase load failed', e);
+      return null;
+    }
+  },
+  // save:localStorage 同步(瞬間)+ Firebase 非同步(背景)
+  save(data) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
+    bcChannel?.postMessage({ type: 'data-update' });
+    if (userDataRef) {
+      suppressNextOnValue = true;
+      set(userDataRef, data).catch(e => console.error('Firebase save failed', e));
+    }
+  },
+  reset() {
+    localStorage.removeItem(STORAGE_KEY);
+    if (userDataRef) {
+      suppressNextOnValue = true;
+      set(userDataRef, null).catch(e => console.error('Firebase reset failed', e));
+    }
+  }
+};
+
+// ===== State =====
+const state = {
+  data: null,
+  currentDate: null,
+  currentMonth: null,
+  saveDebounce: null,
+  isMini: new URLSearchParams(location.search).get('mode') === 'quick',
+  specialOtherOpen: false,    // counts panel Other 收合(不存)
+  specialOtherDraft: null,     // 新增 row 草稿:{ catalogId, amount, count }
+  scheduleBlocks: {},          // { 'YYYY-MM': open?:bool }
+};
+
+const bcChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('worknum') : null;
+function syncFromStorage() {
+  state.data = storage.load();
+  renderAll();
+}
+bcChannel?.addEventListener('message', (e) => {
+  if (e.data?.type === 'data-update') syncFromStorage();
+});
+// Storage event:當另一個 tab/window 寫 localStorage 時觸發(BC 在 BG tab throttle 時的備援)
+window.addEventListener('storage', (e) => {
+  if (e.key === STORAGE_KEY && e.newValue) syncFromStorage();
+});
+
+// ===== Utils =====
+function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
+function $(id) { return document.getElementById(id); }
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'class') e.className = v;
+    else if (k === 'html') e.innerHTML = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) e.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c == null) continue;
+    e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  }
+  return e;
+}
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function isoToMonth(iso) { return iso.slice(0, 7); }
+function shiftDate(iso, days) {
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function weekdayCh(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return ['週日','週一','週二','週三','週四','週五','週六'][d.getDay()];
+}
+function getCount(day, key) {
+  const parts = key.split('.');
+  let v = day?.counts;
+  for (const p of parts) v = v?.[p];
+  return Number(v) || 0;
+}
+function setCount(day, key, val) {
+  if (!day.counts) day.counts = {};
+  const parts = key.split('.');
+  let target = day.counts;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!target[parts[i]]) target[parts[i]] = {};
+    target = target[parts[i]];
+  }
+  target[parts.at(-1)] = Math.max(0, Number(val) || 0);
+}
+function getDay(date) {
+  if (!state.data.days[date]) {
+    state.data.days[date] = { counts: {}, procedures: [], meetings: [], overtimeHours: 0, schedule: {}, notes: '', updatedAt: new Date().toISOString() };
+  }
+  return state.data.days[date];
+}
+function persist() {
+  clearTimeout(state.saveDebounce);
+  state.saveDebounce = setTimeout(() => {
+    state.data.days[state.currentDate].updatedAt = new Date().toISOString();
+    storage.save(state.data);
+  }, 350);
+}
+function toast(msg, type = '') {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = `toast show ${type}`;
+  setTimeout(() => t.className = 'toast', 2200);
+}
+function fmtMoney(n) { return Number(n || 0).toLocaleString(); }
+
+function getUnitPriceForKey(key, settings) {
+  const p = settings.unitPrices;
+  const parts = key.split('.');
+  let v = p;
+  for (const k of parts) v = v?.[k];
+  return typeof v === 'number' ? v : 0;
+}
+
+// 把 isOtherAggregate 子展開,維持原順序
+function flatChildren(grp) {
+  const out = [];
+  for (const child of grp.children) {
+    if (child.isOtherAggregate) out.push(...child.subItems);
+    else out.push(child);
+  }
+  return out;
+}
+
+// Special.others helpers
+function getSpecialOthers(day) { return day?.counts?.special?.others || []; }
+function ensureSpecialOthers(day) {
+  if (!day.counts) day.counts = {};
+  if (!day.counts.special) day.counts.special = {};
+  if (!Array.isArray(day.counts.special.others)) day.counts.special.others = [];
+  return day.counts.special.others;
+}
+function specialOthersTotalCount(day) {
+  return getSpecialOthers(day).reduce((s, o) => s + Number(o.count || 0), 0);
+}
+function specialOthersTotalRev(day) {
+  return getSpecialOthers(day).reduce((s, o) => s + Number(o.amount || 0) * Number(o.count || 0), 0);
+}
+
+// ===== Calculations =====
+function calcCountTotal(day) {
+  let total = 0;
+  for (const grp of COUNTS_SCHEMA) {
+    for (const c of grp.children) {
+      if (c.isOtherAggregate) total += specialOthersTotalCount(day);
+      else total += getCount(day, c.key);
+    }
+  }
+  return total;
+}
+function calcBaseRevenue(day, settings) {
+  const p = settings.unitPrices;
+  let r = 0;
+  r += getCount(day,'ct.opd') * p.ct.opd;
+  r += getCount(day,'ct.er_adm_self') * p.ct.er_adm_self;
+  r += getCount(day,'ct.ldct_health') * p.ct.ldct_health;
+  r += getCount(day,'mr.opd') * p.mr.opd;
+  r += getCount(day,'mr.er_adm_health') * p.mr.er_adm_health;
+  r += getCount(day,'bmd') * p.bmd;
+  r += getCount(day,'special.swal') * (p.special.swal || 0);
+  r += getCount(day,'special.hsg')  * (p.special.hsg || 0);
+  r += specialOthersTotalRev(day);
+  r += getCount(day,'xray.opd') * p.xray.opd;
+  r += getCount(day,'xray.portable') * (p.xray.portable || 0);
+  r += getCount(day,'xray.er') * p.xray.er;
+  r += getCount(day,'consult') * p.consult;
+  r += getCount(day,'sono') * p.sono;
+  r += getCount(day,'opd') * p.opd;
+  return r;
+}
+function calcProcRevenue(day) {
+  return (day.procedures || []).reduce((s, p) =>
+    s + (p.items || []).reduce((ss, it) => ss + Number(it.amount||0), 0), 0);
+}
+function calcMeetingRevenue(day) {
+  return (day.meetings || []).reduce((s, m) => s + Number(m.amount||0), 0);
+}
+function calcOvertimeRevenue(day, settings) {
+  return (Number(day.overtimeHours)||0) * (Number(settings.overtimeRate)||0);
+}
+// 當日總收入:歷史匯入日優先用 sheet 原始值(importedRevenue),否則用計數×單價重算
+function getDayRevenue(day, settings) {
+  if (day && typeof day.importedRevenue === 'number') return day.importedRevenue;
+  return calcBaseRevenue(day, settings) + calcProcRevenue(day);
+}
+function isImportedDay(day) {
+  return !!(day && typeof day.importedRevenue === 'number');
+}
+
+// 推日期型態:'平日' or '假日'(含周末+國定假日);day.overtimeType override 優先
+function getDayType(date, day) {
+  if (day?.overtimeType === '平日' || day?.overtimeType === '假日') return day.overtimeType;
+  const dow = new Date(date + 'T00:00:00').getDay();
+  return (dow === 0 || dow === 6) ? '假日' : '平日';
+}
+function calcMonthlyOvertime(month) {
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  let weekday = 0, holiday = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = `${month}-${String(d).padStart(2,'0')}`;
+    const day = state.data.days[date];
+    if (!day) continue;
+    const hrs = Number(day.overtimeHours || 0);
+    if (hrs <= 0) continue;
+    const type = getDayType(date, day);
+    if (type === '假日') holiday += hrs;
+    else weekday += hrs;
+  }
+  return { weekday, holiday, total: weekday + holiday };
+}
+
+// ===== Renderers =====
+
+function renderAll() {
+  renderDayLabel();
+  if (state.isMini) {
+    renderMini();
+    return;
+  }
+  renderToday();
+  renderMonth();
+  renderSettings();
+}
+
+function renderMini() {
+  const day = getDay(state.currentDate);
+  const layout = state.data.settings.miniLayout || [];
+  const layoutSet = new Set(layout);
+
+  const rows = $('mini-rows');
+  rows.innerHTML = '';
+
+  // 用 COUNTS_SCHEMA 為來源,過濾 layout,維持原 sheet 那種 group 直排
+  for (const grp of COUNTS_SCHEMA) {
+    let firstShownInGroup = true;
+    for (const child of grp.children) {
+      if (!layoutSet.has(child.key)) continue;
+      const v = getCount(day, child.key);
+      const groupCell = el('span', { class: 'count-groupcell' }, firstShownInGroup ? grp.group : '');
+      firstShownInGroup = false;
+      const subText = (grp.children.length === 1 && !child.label) ? '' : (child.label || '');
+      const subLabel = el('span', { class: 'count-sublabel' }, subText);
+      rows.appendChild(el('div', { class: 'count-row mini-row' },
+        groupCell, subLabel,
+        el('div', { class: 'count-controls' },
+          el('button', { class: 'btn-step', onclick: () => bumpCount(child.key, -1) }, '−'),
+          el('input', { class: 'count-input', type: 'number', value: String(v), min: '0',
+            oninput: (e) => setCountAndRender(child.key, e.target.value) }),
+          el('button', { class: 'btn-step', onclick: () => bumpCount(child.key, +1) }, '＋')
+        )
+      ));
+    }
+  }
+
+  $('mini-count').textContent = String(calcCountTotal(day));
+
+  const baseR = calcBaseRevenue(day, state.data.settings);
+  const procR = calcProcRevenue(day);
+  const mtgR  = calcMeetingRevenue(day);
+  const otR   = calcOvertimeRevenue(day, state.data.settings);
+  $('mini-money').textContent = fmtMoney(baseR + procR + mtgR + otR);
+  $('mini-money').classList.toggle('unblur', !!state.data.settings.miniShowMoney);
+
+  // header 小字日期/週次
+  const lbl = $('day-mini-label');
+  if (lbl) lbl.textContent = `${state.currentDate} ${weekdayCh(state.currentDate)}`;
+}
+
+function renderDayLabel() {
+  $('day-picker').value = state.currentDate;
+  $('day-label').innerHTML = `${state.currentDate} <span class="weekday-tag">${weekdayCh(state.currentDate)}</span>`;
+}
+
+// --- Today: counts panel ---
+function renderCountsPanel() {
+  const day = getDay(state.currentDate);
+  const settings = state.data.settings;
+  const c = $('counts-container');
+  c.innerHTML = '';
+  for (const grp of COUNTS_SCHEMA) {
+    const groupEl = el('div', { class: 'count-group' });
+    const singleNoLabel = grp.children.length === 1 && !grp.children[0].label;
+
+    let renderedFirst = false;
+
+    for (const child of grp.children) {
+      const isFirst = !renderedFirst;
+      renderedFirst = true;
+      const groupCell = el('span', { class: 'count-groupcell' }, isFirst ? grp.group : '');
+
+      // === Other aggregate header(虛擬列)===
+      if (child.isOtherAggregate) {
+        const totalCount = specialOthersTotalCount(day);
+        const totalRev = specialOthersTotalRev(day);
+        const isOpen = state.specialOtherOpen;
+
+        groupEl.appendChild(el('div', { class: 'count-row count-other-head' },
+          groupCell,
+          el('span', { class: 'count-sublabel' },
+            el('button', {
+              class: 'btn-other-toggle',
+              onclick: () => { state.specialOtherOpen = !isOpen; renderCountsPanel(); }
+            }, (isOpen ? '▼ ' : '▶ ') + child.label),
+            totalCount > 0 ? el('span', { class: 'count-other-count' }, ` × ${totalCount}` ) : null,
+            totalRev > 0 ? el('span', { class: 'count-other-rev-inline' }, ` $${fmtMoney(totalRev)}`) : null
+          ),
+          el('div', { class: 'count-controls' })
+        ));
+
+        if (isOpen) {
+          const others = getSpecialOthers(day);
+          // 已有 entry 各一行
+          for (const entry of others) {
+            const idx = others.indexOf(entry);
+            const amountInp = el('input', { class: 'special-other-amount', type: 'number',
+              value: String(entry.amount || 0), min: '0',
+              title: '單筆金額(可改)',
+              oninput: (e) => updateSpecialOther(idx, 'amount', Number(e.target.value)||0),
+              onblur: () => renderCountsPanel() });
+            const sel = el('select', { class: 'special-other-cat',
+              onchange: (e) => {
+                const newCat = e.target.value;
+                const newPrice = Number(settings.unitPrices.special[newCat] || 0);
+                amountInp.value = String(newPrice);
+                updateSpecialOtherFields(idx, { catalogId: newCat, amount: newPrice });
+              } });
+            for (const cat of SPECIAL_OTHER_CATALOG) {
+              const opt = el('option', { value: cat.id }, cat.name);
+              if (cat.id === entry.catalogId) opt.selected = true;
+              sel.appendChild(opt);
+            }
+            groupEl.appendChild(el('div', { class: 'count-row count-other-sub special-other-row' },
+              el('span', { class: 'count-groupcell' }, ''),
+              sel,
+              amountInp,
+              el('input', { class: 'special-other-count', type: 'number', value: String(entry.count || 0), min: '0',
+                title: '數量',
+                oninput: (e) => updateSpecialOther(idx, 'count', Number(e.target.value)||0),
+                onblur: () => renderCountsPanel() }),
+              el('button', { class: 'btn-row-del', title: '刪除',
+                onclick: () => removeSpecialOther(idx) }, '×')
+            ));
+          }
+          // 新增 row(預設不選任何項;選後 amount auto-fill)
+          if (!state.specialOtherDraft) {
+            state.specialOtherDraft = { catalogId: '', amount: 0, count: 1 };
+          }
+          const draft = state.specialOtherDraft;
+          const addAmt = el('input', { class: 'special-other-amount', type: 'number',
+            value: draft.amount ? String(draft.amount) : '', min: '0', placeholder: '金額',
+            oninput: (e) => { draft.amount = Number(e.target.value) || 0; } });
+          const addCnt = el('input', { class: 'special-other-count', type: 'number',
+            value: String(draft.count || 1), min: '1', placeholder: '數量',
+            oninput: (e) => { draft.count = Number(e.target.value) || 1; } });
+          const addSel = el('select', { class: 'special-other-cat',
+            onchange: (e) => {
+              draft.catalogId = e.target.value;
+              draft.amount = Number(settings.unitPrices.special[draft.catalogId] || 0);
+              addAmt.value = draft.amount ? String(draft.amount) : '';
+            } });
+          // placeholder
+          addSel.appendChild(el('option', { value: '' }, '— 選項目 —'));
+          for (const cat of SPECIAL_OTHER_CATALOG) {
+            const opt = el('option', { value: cat.id }, cat.name);
+            if (cat.id === draft.catalogId) opt.selected = true;
+            addSel.appendChild(opt);
+          }
+          groupEl.appendChild(el('div', { class: 'count-row count-other-sub special-other-add' },
+            el('span', { class: 'count-groupcell' }, ''),
+            addSel, addAmt, addCnt,
+            el('button', { class: 'btn-other-add', title: '新增',
+              onclick: () => {
+                if (!draft.catalogId) { toast('請先選項目', ''); return; }
+                addSpecialOtherFull(draft.catalogId, draft.amount, draft.count || 1);
+                // reset count;catalog 保留
+                draft.count = 1;
+              } }, '＋')
+          ));
+        }
+        continue;
+      }
+
+      // === 正常列 ===
+      const v = getCount(day, child.key);
+      const unitPrice = getUnitPriceForKey(child.key, settings);
+      const subText = singleNoLabel ? '' : (child.label || '');
+      const fullTitle = `${grp.group} ${subText}${unitPrice > 0 ? ' ($' + fmtMoney(unitPrice) + ')' : ''}`;
+      const subLabel = el('span', { class: 'count-sublabel', title: fullTitle },
+        subText,
+        unitPrice > 0 ? el('span', { class: 'count-unitprice' }, `(${fmtMoney(unitPrice)})`) : null
+      );
+
+      groupEl.appendChild(el('div', { class: 'count-row' },
+        groupCell, subLabel,
+        el('div', { class: 'count-controls' },
+          el('button', { class: 'btn-step', onclick: () => bumpCount(child.key, -1) }, '−'),
+          el('input', { class: 'count-input', type: 'number', value: String(v), min: '0',
+            oninput: (e) => setCountAndRender(child.key, e.target.value) }),
+          el('button', { class: 'btn-step', onclick: () => bumpCount(child.key, +1) }, '＋')
+        )
+      ));
+    }
+    c.appendChild(groupEl);
+  }
+
+  // 計數類總金額(只算 base revenue,不含 procedure)
+  const baseRev = calcBaseRevenue(day, settings);
+  c.appendChild(el('div', { class: 'count-base-total' },
+    el('span', null, '計數類總金額'),
+    el('span', { class: 'count-base-total-num' }, fmtMoney(baseRev))
+  ));
+}
+
+function bumpCount(key, delta) {
+  const day = getDay(state.currentDate);
+  setCount(day, key, getCount(day, key) + delta);
+  day.updatedAt = new Date().toISOString();
+  storage.save(state.data);  // 立刻 save → broadcast,別的視窗同步
+  if (state.isMini) renderMini();
+  else { renderCountsPanel(); renderStatsPanel(); }
+}
+
+// Special.others CRUD
+function addSpecialOtherFull(catalogId, amount, count) {
+  const day = getDay(state.currentDate);
+  const others = ensureSpecialOthers(day);
+  others.push({
+    id: 'sor_' + Date.now(),
+    catalogId,
+    amount: Number(amount) || 0,
+    count: Number(count) || 1,
+  });
+  day.updatedAt = new Date().toISOString();
+  storage.save(state.data);
+  renderCountsPanel();
+  renderStatsPanel();
+}
+function updateSpecialOther(idx, field, value) {
+  const day = getDay(state.currentDate);
+  const others = ensureSpecialOthers(day);
+  if (!others[idx]) return;
+  others[idx][field] = value;
+  day.updatedAt = new Date().toISOString();
+  clearTimeout(state.saveDebounce);
+  state.saveDebounce = setTimeout(() => storage.save(state.data), 100);
+  renderStatsPanel();
+}
+function updateSpecialOtherFields(idx, fields) {
+  const day = getDay(state.currentDate);
+  const others = ensureSpecialOthers(day);
+  if (!others[idx]) return;
+  Object.assign(others[idx], fields);
+  day.updatedAt = new Date().toISOString();
+  clearTimeout(state.saveDebounce);
+  state.saveDebounce = setTimeout(() => storage.save(state.data), 100);
+  renderCountsPanel();  // 重 render 讓 Other 頂列 × N $XXX 跟著更新
+  renderStatsPanel();
+}
+function removeSpecialOther(idx) {
+  const day = getDay(state.currentDate);
+  const others = ensureSpecialOthers(day);
+  others.splice(idx, 1);
+  day.updatedAt = new Date().toISOString();
+  storage.save(state.data);
+  renderCountsPanel();
+  renderStatsPanel();
+}
+function setCountAndRender(key, val) {
+  const day = getDay(state.currentDate);
+  setCount(day, key, val);
+  day.updatedAt = new Date().toISOString();
+  storage.save(state.data);   // 立刻 save → BC 廣播
+  if (state.isMini) renderMini();
+  else renderStatsPanel();
+}
+
+// --- Today: procedures panel ---
+function renderProceduresPanel() {
+  const day = getDay(state.currentDate);
+  const sel = $('preset-select');
+  sel.innerHTML = '';
+  for (const p of state.data.settings.presets) {
+    const total = p.items.reduce((s,it)=>s+Number(it.amount||0),0);
+    sel.appendChild(el('option', { value: p.id }, `${p.name}  (${fmtMoney(total)})`));
+  }
+
+  const list = $('proc-list');
+  list.innerHTML = '';
+  let procTotal = 0;
+  for (const [i, rec] of (day.procedures || []).entries()) {
+    procTotal += rec.items.reduce((s,it)=>s+Number(it.amount||0),0);
+    const detailText = rec.items.map(it => `${it.name} ${fmtMoney(it.amount)}`).join(' + ');
+    list.appendChild(el('li', { class: 'proc-item' },
+      el('div', { style: 'flex:1;min-width:0' },
+        el('div', { class: 'proc-item-name' },
+          el('input', {
+            class: 'proc-item-medrec', type: 'text',
+            value: rec.medRecord || '',
+            placeholder: '病歷號',
+            title: '可編輯病歷號',
+            oninput: (e) => updateProcMedRec(i, e.target.value),
+          }),
+          el('span', { class: 'proc-item-presetname' }, rec.presetName)
+        ),
+        el('div', { class: 'proc-item-detail' }, detailText)
+      ),
+      el('div', { class: 'proc-item-amount' }, fmtMoney(rec.items.reduce((s,it)=>s+Number(it.amount||0),0))),
+      el('button', { class: 'btn-del', title: '刪除', onclick: () => removeProc(i) }, '×')
+    ));
+  }
+  $('proc-total').children[1].textContent = fmtMoney(procTotal);
+}
+
+function updateProcMedRec(i, val) {
+  const day = getDay(state.currentDate);
+  if (!day.procedures || !day.procedures[i]) return;
+  day.procedures[i].medRecord = val;
+  day.updatedAt = new Date().toISOString();
+  clearTimeout(state.saveDebounce);
+  state.saveDebounce = setTimeout(() => storage.save(state.data), 200);
+}
+
+function addPresetToToday() {
+  const id = $('preset-select').value;
+  const qty = Number($('preset-qty').value) || 1;
+  const medRec = ($('preset-medrec').value || '').trim();
+  const preset = state.data.settings.presets.find(p => p.id === id);
+  if (!preset) return;
+  const day = getDay(state.currentDate);
+  if (!day.procedures) day.procedures = [];
+  for (let n = 0; n < qty; n++) {
+    day.procedures.push({
+      presetId: preset.id,
+      presetName: preset.name,
+      medRecord: medRec,
+      items: preset.items.map(it => {
+        const atom = state.data.settings.atomicItems.find(a => a.id === it.atomicId);
+        return { atomicId: it.atomicId, name: atom?.name || it.atomicId, amount: Number(it.amount||0) };
+      }),
+      time: new Date().toISOString()
+    });
+  }
+  // Reset medrec input
+  $('preset-medrec').value = '';
+  persist();
+  renderProceduresPanel();
+  renderStatsPanel();
+}
+
+function removeProc(i) {
+  const day = getDay(state.currentDate);
+  day.procedures.splice(i, 1);
+  persist();
+  renderProceduresPanel();
+  renderStatsPanel();
+}
+
+function removeMeeting(i) {
+  const day = getDay(state.currentDate);
+  day.meetings.splice(i, 1);
+  persist();
+  renderMeetingPanel();
+  renderStatsPanel();
+}
+
+// --- Meeting batch-entry panel (monthly) ---
+function getMeetingDatesStr(month, catalogId) {
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const dates = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = `${month}-${String(d).padStart(2,'0')}`;
+    const dayRec = state.data.days[date];
+    if (!dayRec) continue;
+    if ((dayRec.meetings || []).some(mtg => mtg.catalogId === catalogId)) dates.push(d);
+  }
+  return dates.join(' ');
+}
+
+// 取會議資訊:先查 meetingCatalog,沒有(例如匯入的 imp_xxx)就從該月 day.meetings[] 撈
+function getMeetingInfo(month, catalogId) {
+  const cat = state.data.settings.meetingCatalog.find(c => c.id === catalogId);
+  if (cat) return { id: cat.id, name: cat.name, role: cat.role, amount: Number(cat.amount) || 0 };
+  const [y, m] = month.split('-').map(Number);
+  const dim = new Date(y, m, 0).getDate();
+  for (let d = 1; d <= dim; d++) {
+    const dr = state.data.days[`${month}-${String(d).padStart(2,'0')}`];
+    if (!dr) continue;
+    const mtg = (dr.meetings || []).find(x => x.catalogId === catalogId);
+    if (mtg) return {
+      id: catalogId, name: mtg.name || catalogId,
+      role: mtg.role || '參與', amount: Number(mtg.amount) || 0,
+    };
+  }
+  return null;
+}
+
+function setMeetingDates(month, catalogId, datesStr) {
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const dates = datesStr.split(/[\s,，、]+/).map(Number).filter(d => d >= 1 && d <= daysInMonth);
+
+  // 清除前先抓會議資訊(imported imp_xxx 也撈得到)
+  const info = getMeetingInfo(month, catalogId);
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = `${month}-${String(d).padStart(2,'0')}`;
+    const dayRec = state.data.days[date];
+    if (!dayRec) continue;
+    dayRec.meetings = (dayRec.meetings || []).filter(mtg => mtg.catalogId !== catalogId);
+  }
+  if (info) {
+    for (const d of dates) {
+      const date = `${month}-${String(d).padStart(2,'0')}`;
+      const dayRec = getDay(date);
+      if (!dayRec.meetings) dayRec.meetings = [];
+      dayRec.meetings.push({ catalogId: info.id, role: info.role, name: info.name, amount: info.amount });
+    }
+  }
+  storage.save(state.data);
+  renderMeetingPanel();
+  renderStatsPanel();
+}
+
+function calcMonthlyMeetingRevenue(month) {
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  let total = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = `${month}-${String(d).padStart(2,'0')}`;
+    const dayRec = state.data.days[date];
+    if (!dayRec) continue;
+    for (const mtg of (dayRec.meetings || [])) total += Number(mtg.amount || 0);
+  }
+  return total;
+}
+
+function renderMeetingPanel() {
+  const month = state.currentMonth;
+  const container = $('meeting-container');
+  const labelEl = $('meeting-month-label');
+  if (!container) return;
+  if (labelEl) labelEl.textContent = `(${month})`;
+
+  const catalog = state.data.settings.meetingCatalog;
+  const mainIds = new Set([
+    ...MAIN_PRESET_MEETINGS.speaker,
+    ...MAIN_PRESET_MEETINGS.participant,
+  ]);
+
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const activeExtraIds = new Set();
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = `${month}-${String(d).padStart(2,'0')}`;
+    const dayRec = state.data.days[date];
+    if (!dayRec) continue;
+    for (const mtg of (dayRec.meetings || [])) {
+      if (mtg.catalogId && !mainIds.has(mtg.catalogId)) activeExtraIds.add(mtg.catalogId);
+    }
+  }
+
+  container.innerHTML = '';
+
+  function makeRow(catalogId) {
+    const info = getMeetingInfo(month, catalogId);
+    if (!info) return null;
+    const datesStr = getMeetingDatesStr(month, catalogId);
+    const count = datesStr.trim() ? datesStr.trim().split(/\s+/).length : 0;
+    const total = count * info.amount;
+    const input = el('input', {
+      class: 'meeting-dates', type: 'text',
+      value: datesStr, placeholder: '日期',
+      title: '輸入該月日期，空格/逗號分隔（如:3 15 22）',
+    });
+    input.addEventListener('change', (e) => setMeetingDates(month, catalogId, e.target.value.trim()));
+    return el('div', { class: 'meeting-preset-row' },
+      el('span', { class: 'meeting-name', title: `[${info.role}] ${info.name}` }, info.name),
+      input,
+      el('span', { class: 'meeting-count' }, count ? `×${count}` : ''),
+      el('span', { class: 'meeting-amount' }, total ? fmtMoney(total) : '')
+    );
+  }
+
+  const speakerRows = MAIN_PRESET_MEETINGS.speaker.map(makeRow).filter(Boolean);
+  if (speakerRows.length) {
+    container.appendChild(el('div', { class: 'meeting-role-head' }, '主講'));
+    speakerRows.forEach(r => container.appendChild(r));
+  }
+
+  // 參與:照當月最早日期排序,空日期墊底
+  const firstDateOf = (catalogId) => {
+    const s = getMeetingDatesStr(month, catalogId).trim();
+    if (!s) return Infinity;
+    const tokens = s.split(/\s+/).map(Number).filter(n => n >= 1);
+    return tokens.length ? Math.min(...tokens) : Infinity;
+  };
+  const participantSorted = [...MAIN_PRESET_MEETINGS.participant]
+    .sort((a, b) => firstDateOf(a) - firstDateOf(b));
+  const participantRows = participantSorted.map(makeRow).filter(Boolean);
+  if (participantRows.length) {
+    container.appendChild(el('div', { class: 'meeting-role-head' }, '參與'));
+    participantRows.forEach(r => container.appendChild(r));
+  }
+
+  const extraRows = [...activeExtraIds].map(makeRow).filter(Boolean);
+  if (extraRows.length) {
+    container.appendChild(el('div', { class: 'meeting-role-head' }, '其他'));
+    extraRows.forEach(r => container.appendChild(r));
+  }
+
+  const addSel = el('select', { style: 'flex:1;min-width:0;background:var(--bg-page);color:var(--ink-1);border:1px solid var(--border);border-radius:var(--r);padding:3px 6px;font-size:12px' });
+  addSel.appendChild(el('option', { value: '' }, '— 新增其他會議 —'));
+  for (const cat of catalog) {
+    if (mainIds.has(cat.id) || activeExtraIds.has(cat.id)) continue;
+    addSel.appendChild(el('option', { value: cat.id }, `[${cat.role}] ${cat.name} (${fmtMoney(cat.amount)})`));
+  }
+  container.appendChild(el('div', { style: 'display:flex;gap:6px;margin-top:6px;align-items:center' },
+    addSel,
+    el('button', { class: 'btn-secondary', style: 'padding:3px 10px;font-size:12px',
+      onclick: () => { const id = addSel.value; if (!id) return; activeExtraIds.add(id); renderMeetingPanel(); }
+    }, '＋')
+  ));
+
+  const totalEl = $('meeting-total-amount');
+  if (totalEl) totalEl.textContent = fmtMoney(calcMonthlyMeetingRevenue(month));
+}
+
+// --- Today: stats panel ---
+function renderStatsPanel() {
+  const day = getDay(state.currentDate);
+  const settings = state.data.settings;
+
+  const baseR = calcBaseRevenue(day, settings);
+  const procR = calcProcRevenue(day);
+  const imported = isImportedDay(day);
+  const dayTotal = getDayRevenue(day, settings);  // 歷史匯入日用 sheet 原始值,否則 base+proc
+  const totalCount = calcCountTotal(day);
+
+  // Hero number(只剩 label + 大數字,移除 mini-grid)
+  const hero = $('stats-hero');
+  if (hero) {
+    const moneyVisible = $('money-summary')?.classList.contains('unblur') ?? true;
+    hero.innerHTML = '';
+    hero.appendChild(el('div', { class: 'stats-hero' },
+      el('div', { class: 'stats-hero-label' }, imported ? '當日收入(歷史匯入原始值)' : '當日收入(報告+Procedure)'),
+      el('div', { class: `stats-hero-num money-blur${moneyVisible ? ' unblur' : ''}` }, fmtMoney(dayTotal))
+    ));
+  }
+
+  // Count summary — always 顯示每群組合計(即使 0)
+  const cs = $('count-summary');
+  cs.innerHTML = '';
+  for (const grp of COUNTS_SCHEMA) {
+    let groupSum = 0;
+    for (const c of grp.children) {
+      if (c.isOtherAggregate) groupSum += specialOthersTotalCount(day);
+      else groupSum += getCount(day, c.key);
+    }
+    cs.appendChild(el('div', { class: 'stat-row' },
+      el('span', null, grp.group),
+      el('span', { class: 'stat-num' }, String(groupSum))
+    ));
+  }
+
+  // Money summary — 報告 + Procedure(基礎改名為報告);匯入日 報告/Procedure 為估值
+  const ms = $('money-summary');
+  ms.innerHTML = '';
+  ms.appendChild(el('div', { class: 'stat-row' }, el('span', null, imported ? '報告(估)' : '報告'), el('span', { class: 'stat-money stat-num' }, fmtMoney(baseR))));
+  ms.appendChild(el('div', { class: 'stat-row' }, el('span', null, imported ? 'Procedure(估)' : 'Procedure'), el('span', { class: 'stat-money stat-num' }, fmtMoney(procR))));
+  ms.appendChild(el('div', { class: 'stat-row total' }, el('span', null, imported ? '當日總計(原始)' : '當日總計'), el('span', { class: 'stat-money stat-num' }, fmtMoney(dayTotal))));
+
+  if ($('overtime-hours')) $('overtime-hours').value = day.overtimeHours || '';
+  if ($('overtime-type')) {
+    $('overtime-type').value = day.overtimeType || '';
+    // 顯示「自動 (平日/假日)」hint via title
+    const autoType = getDayType(state.currentDate, day);
+    $('overtime-type').title = `自動推斷:${autoType}(可手動 override)`;
+  }
+  if ($('day-notes')) $('day-notes').value = day.notes || '';
+}
+
+function renderToday() {
+  renderCountsPanel();
+  renderProceduresPanel();
+  renderStatsPanel();
+  renderPendingPanel();
+}
+
+// --- Pending reports (待打) ---
+function renderPendingPanel() {
+  const grid = $('pending-grid');
+  if (!grid) return;
+  const settings = state.data.settings;
+  const pending = state.data.pending || PENDING_DEFAULT;
+  grid.innerHTML = '';
+
+  let totalCount = 0, totalMoney = 0;
+
+  for (const grp of PENDING_SCHEMA) {
+    // 群組件數/金額 sum
+    let grpCount = 0, grpMoney = 0;
+    for (const it of grp.items) {
+      const v = Number(pending[it.key] || 0);
+      grpCount += v;
+      grpMoney += v * getUnitPriceForKey(it.priceKey, settings);
+    }
+    totalCount += grpCount;
+    totalMoney += grpMoney;
+
+    const block = el('div', { class: 'pending-group' },
+      el('div', { class: 'pending-group-title' },
+        el('span', { class: 'pending-group-name' }, grp.group),
+        grpCount > 0 ? el('span', { class: 'pending-group-stat' }, ` ${grpCount} · ${fmtMoney(grpMoney)}`) : null
+      )
+    );
+    for (const it of grp.items) {
+      const v = Number(pending[it.key] || 0);
+      block.appendChild(el('div', { class: 'pending-row' },
+        el('span', { class: 'pending-label' }, it.label || grp.group),
+        el('div', { class: 'pending-controls' },
+          el('button', { class: 'btn-step', onclick: () => bumpPending(it.key, -1) }, '−'),
+          el('input', { class: 'pending-input', type: 'number', value: String(v), min: '0',
+            oninput: (e) => setPendingAndRender(it.key, e.target.value) }),
+          el('button', { class: 'btn-step', onclick: () => bumpPending(it.key, +1) }, '＋')
+        )
+      ));
+    }
+    grid.appendChild(block);
+  }
+
+  // Total summary cell
+  grid.appendChild(el('div', { class: 'pending-summary' },
+    el('span', { class: 'pending-sum-label' }, '總計件數'),
+    el('span', { class: 'pending-sum-count' }, String(totalCount)),
+    el('span', { class: 'pending-sum-label', style: 'margin-left:14px' }, '預期收入'),
+    el('span', { class: 'pending-sum-money' }, fmtMoney(totalMoney))
+  ));
+}
+
+function bumpPending(key, delta) {
+  if (!state.data.pending) state.data.pending = { ...PENDING_DEFAULT };
+  state.data.pending[key] = Math.max(0, (Number(state.data.pending[key]) || 0) + delta);
+  storage.save(state.data);  // 立刻 save → broadcast
+  renderPendingPanel();
+}
+function setPendingAndRender(key, val) {
+  if (!state.data.pending) state.data.pending = { ...PENDING_DEFAULT };
+  state.data.pending[key] = Math.max(0, Number(val) || 0);
+  storage.save(state.data);
+  renderPendingPanel();
+}
+
+// --- Schedule events (不值班預約) ---
+function aggregateNoDutyDates(month) {
+  const events = (state.data.scheduleEvents || []).filter(e => e.month === month && e.type === 'noDuty');
+  const dates = new Set();
+  for (const e of events) {
+    const tokens = (e.dates || '').split(/[\s,，、]+/).filter(Boolean);
+    for (const tok of tokens) {
+      const m = tok.match(/^(\d+)\s*-\s*(\d+)$/);
+      if (m) {
+        const a = Number(m[1]), b = Number(m[2]);
+        for (let d = Math.min(a,b); d <= Math.max(a,b); d++) dates.add(d);
+      } else {
+        const n = Number(tok);
+        if (n >= 1 && n <= 31) dates.add(n);
+      }
+    }
+  }
+  return [...dates].sort((a,b) => a-b);
+}
+
+function nextMonthOf(month) {
+  const [y, m] = month.split('-').map(Number);
+  const d = new Date(y, m, 1);  // m 是 1-indexed,Date 月份 0-indexed,所以 m 直接是下個月
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+function renderScheduleBlock() {
+  const container = $('schedule-blocks-container');
+  if (!container) return;
+  const cur = state.currentMonth;
+  const nxt = nextMonthOf(cur);
+  // 預設:本月開、下月收合
+  if (state.scheduleBlocks[cur] === undefined) state.scheduleBlocks[cur] = true;
+  if (state.scheduleBlocks[nxt] === undefined) state.scheduleBlocks[nxt] = false;
+
+  container.innerHTML = '';
+  container.appendChild(renderScheduleMonthBlock(cur));
+  container.appendChild(renderScheduleMonthBlock(nxt));
+}
+
+function renderScheduleMonthBlock(month) {
+  const isOpen = !!state.scheduleBlocks[month];
+  const events = (state.data.scheduleEvents || []).filter(e => e.month === month && (e.type || 'noDuty') === 'noDuty');
+  const dates = aggregateNoDutyDates(month);
+  const meta = state.data.monthlyMeta?.[month] || {};
+
+  const block = el('div', { class: `schedule-month-block${isOpen ? '' : ' collapsed'}` });
+
+  const head = el('div', { class: 'schedule-month-head' },
+    el('span', { class: 'schedule-month-title' }, `${Number(month.slice(5,7))}月預班`),
+    el('span', { class: 'schedule-month-summary' }, dates.length ? `${dates.length} 天` : '—'),
+    el('span', null, isOpen ? '▼' : '▶')
+  );
+  head.addEventListener('click', () => {
+    state.scheduleBlocks[month] = !state.scheduleBlocks[month];
+    renderScheduleBlock();
+  });
+  block.appendChild(head);
+
+  const body = el('div', { class: 'schedule-month-body' });
+
+  const ensureMeta = () => {
+    if (!state.data.monthlyMeta) state.data.monthlyMeta = {};
+    if (!state.data.monthlyMeta[month]) state.data.monthlyMeta[month] = {};
+    return state.data.monthlyMeta[month];
+  };
+
+  // 當月值班數目(例:IR2平1假)
+  const dutyInput = el('input', {
+    class: 'schedule-duty-input', type: 'text',
+    value: meta.dutyNote || '',
+    placeholder: '例:IR2平1假'
+  });
+  dutyInput.addEventListener('input', (e) => {
+    ensureMeta().dutyNote = e.target.value;
+    clearTimeout(state.noteDebounce);
+    state.noteDebounce = setTimeout(() => storage.save(state.data), 350);
+  });
+  body.appendChild(el('div', { class: 'schedule-duty-row' },
+    el('span', { class: 'schedule-duty-label' }, '當月值班'),
+    dutyInput
+  ));
+
+  // 統整 row
+  const noteInput = el('input', {
+    class: 'schedule-overview-note-input', type: 'text',
+    value: meta.noDutyOverviewNote || '',
+    placeholder: '備註(例:no IR)'
+  });
+  noteInput.addEventListener('input', (e) => {
+    ensureMeta().noDutyOverviewNote = e.target.value;
+    clearTimeout(state.noteDebounce);
+    state.noteDebounce = setTimeout(() => storage.save(state.data), 350);
+  });
+
+  body.appendChild(el('div', { class: 'schedule-overview-row' },
+    el('span', { class: 'schedule-overview-dates-line' }, dates.length ? dates.join(' ') : '—'),
+    noteInput
+  ));
+
+  // event 列表
+  const grid = el('div', { class: 'schedule-event-grid' });
+  for (const ev of events) {
+    const idx = state.data.scheduleEvents.indexOf(ev);
+    const reasonInput = el('input', { type: 'text', value: ev.reason || '', placeholder: '理由+預約日期(例:OPD 13 27)' });
+    reasonInput.addEventListener('input', (e) => updateScheduleEvent(idx, 'reason', e.target.value, false));
+    const datesInput = el('input', { type: 'text', value: ev.dates || '', placeholder: '不值班日期(例:11-13, 25-27)' });
+    datesInput.addEventListener('input', (e) => updateScheduleEvent(idx, 'dates', e.target.value, false));
+    grid.appendChild(el('div', { class: 'schedule-event-row' },
+      reasonInput,
+      datesInput,
+      el('button', { class: 'btn-row-del', title: '刪除',
+        onclick: () => deleteScheduleEvent(idx) }, '×')
+    ));
+  }
+  body.appendChild(grid);
+
+  body.appendChild(el('button', { class: 'schedule-add-btn',
+    onclick: () => addScheduleEvent(month) }, '＋ 新增預約'));
+
+  block.appendChild(body);
+  return block;
+}
+
+function updateScheduleEvent(idx, field, value, rerender) {
+  const e = state.data.scheduleEvents[idx];
+  if (!e) return;
+  e[field] = value;
+  clearTimeout(state.schedDebounce);
+  state.schedDebounce = setTimeout(() => {
+    storage.save(state.data);
+    if (field === 'dates') renderScheduleBlock();   // 更新統整
+  }, 250);
+  if (rerender) renderScheduleBlock();
+}
+function deleteScheduleEvent(idx) {
+  state.data.scheduleEvents.splice(idx, 1);
+  storage.save(state.data);
+  renderScheduleBlock();
+}
+function addScheduleEvent(month) {
+  if (!state.data.scheduleEvents) state.data.scheduleEvents = [];
+  state.data.scheduleEvents.push({
+    id: 'evt_' + Date.now(),
+    type: 'noDuty',
+    month: month || state.currentMonth,
+    reason: '',
+    dates: '',
+    createdAt: new Date().toISOString(),
+  });
+  storage.save(state.data);
+  renderScheduleBlock();
+}
+
+// --- Month view ---
+// ADM 計價歸併 cutover:2026-04 起 ADM 跟 ER 同價同列;之前 ADM 併入 OPD
+const ADM_CUTOVER = '2026-04';
+function monthSubLabel(month, child) {
+  // 2026-04 前:CT/MR 的 er_adm 子列只含 ER(ADM 在 OPD)→ 標示改 'ER'
+  if (month < ADM_CUTOVER) {
+    if (child.key === 'ct.er_adm_self') return 'ER';
+    if (child.key === 'mr.er_adm_health') return 'ER';
+  }
+  return child.label;
+}
+
+function setMonthCellCount(date, key, val) {
+  const day = getDay(date);
+  setCount(day, key, val);
+  day.updatedAt = new Date().toISOString();
+  clearTimeout(state.monthSaveDebounce);
+  state.monthSaveDebounce = setTimeout(() => storage.save(state.data), 200);
+}
+function setMonthCellOvertime(date, val) {
+  const day = getDay(date);
+  day.overtimeHours = Number(val) || 0;
+  day.updatedAt = new Date().toISOString();
+  clearTimeout(state.monthSaveDebounce);
+  state.monthSaveDebounce = setTimeout(() => storage.save(state.data), 200);
+}
+
+function renderMonth() {
+  const month = state.currentMonth;
+  // 填年/月下拉(取代原 month-picker)
+  const yearSel = $('month-year-sel');
+  const monthSel = $('month-month-sel');
+  if (yearSel && monthSel) {
+    const [yStr, mStr] = month.split('-');
+    const curYear = Number(yStr);
+    // 年的選項範圍:從資料最舊年份 - 1 到 今年 + 1
+    const allDates = Object.keys(state.data.days);
+    let minY = curYear, maxY = curYear;
+    for (const d of allDates) {
+      const yy = Number(d.slice(0, 4));
+      if (yy < minY) minY = yy;
+      if (yy > maxY) maxY = yy;
+    }
+    const todayY = new Date().getFullYear();
+    // 下限永遠含 2023(歷史 import 最早就是 2023),上限 = 今年+1
+    minY = Math.min(minY, todayY, 2023);
+    maxY = Math.max(maxY, todayY, curYear) + 1;
+    yearSel.innerHTML = '';
+    for (let y = maxY; y >= minY; y--) {
+      const opt = document.createElement('option');
+      opt.value = String(y); opt.textContent = String(y);
+      if (y === curYear) opt.selected = true;
+      yearSel.appendChild(opt);
+    }
+    monthSel.innerHTML = '';
+    for (let m = 1; m <= 12; m++) {
+      const opt = document.createElement('option');
+      opt.value = String(m).padStart(2, '0');
+      opt.textContent = String(m).padStart(2, '0') + ' 月';
+      if (opt.value === mStr) opt.selected = true;
+      monthSel.appendChild(opt);
+    }
+  }
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const days = Array.from({length: daysInMonth}, (_, i) => `${month}-${String(i+1).padStart(2,'0')}`);
+
+  const t = $('month-pivot');
+  t.innerHTML = '';
+
+  // 週 class helper:週一左邊 = 週界線(切在 日|一 中間);週六日 = 週末底色
+  const WD_CHAR = ['日','一','二','三','四','五','六'];
+  const weekClsCache = {};
+  function weekCls(dateStr) {
+    if (weekClsCache[dateStr] !== undefined) return weekClsCache[dateStr];
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
+    let c = '';
+    if (dow === 1) c += ' pivot-week-start';
+    if (dow === 0 || dow === 6) c += ' pivot-weekend';
+    weekClsCache[dateStr] = c;
+    return c;
+  }
+
+  // Header row: 月份 | (空) | 1...N(含星期小字)
+  const headRow = el('tr', null,
+    el('th', { class: 'row-label' }, month.slice(5)),
+    el('th', { class: 'col-total' }, '')
+  );
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${month}-${String(d).padStart(2,'0')}`;
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
+    headRow.appendChild(el('th', { class: weekCls(dateStr).trim() },
+      el('div', null, String(d)),
+      el('div', { class: 'pivot-wd' + (dow === 0 || dow === 6 ? ' wd-end' : '') }, WD_CHAR[dow])
+    ));
+  }
+  t.appendChild(headRow);
+
+  // === 計數類群組 ===
+  // helper: render an editable count row (給 row label + per-day editable input)
+  const renderEditableCountRow = (label, key, opts = {}) => {
+    let total = 0;
+    const cellData = days.map(date => {
+      const day = state.data.days[date];
+      const v = day ? getCount(day, key) : 0;
+      total += v;
+      return { date, val: v };
+    });
+    const tr = el('tr', { class: opts.groupRow ? 'pivot-group-row' : null },
+      el('td', { class: 'row-label' + (opts.indent ? ' row-indent' : '') + (opts.groupRow ? ' group-name' : '') },
+        opts.indent ? `(${label})` : label),
+      el('td', { class: 'col-total' }, total ? String(total) : '0')
+    );
+    for (const c of cellData) {
+      tr.appendChild(el('td', { class: 'pivot-cell' + weekCls(c.date) },
+        el('input', { class: 'pivot-input', type: 'number', value: c.val ? String(c.val) : '', min: '0',
+          oninput: (e) => setMonthCellCount(c.date, key, e.target.value),
+          onblur: () => renderMonth()
+        })
+      ));
+    }
+    return tr;
+  };
+
+  for (const grp of COUNTS_SCHEMA) {
+    // 「Other」群組(consult/sono/opd 等獨立項):每 child 直接當頂層 row
+    if (grp.group === 'Other') {
+      for (const child of grp.children) {
+        if (child.isOtherAggregate) continue;
+        t.appendChild(renderEditableCountRow(child.label, child.key, { groupRow: true }));
+      }
+      continue;
+    }
+
+    // primary = 第一個 child(可能是 aggregate);group row 顯示 primary 的 daily
+    const primary = grp.children[0];
+    const realChildren = grp.children.filter(c => !c.isOtherAggregate);
+    const hasAggregate = grp.children.some(c => c.isOtherAggregate);
+    const singleChild = realChildren.length === 1;
+
+    // Group row: label=group name;daily 綁 primary;月計=群組合計
+    {
+      let groupMonthTotal = 0;
+      const groupDaily = days.map(date => {
+        const day = state.data.days[date];
+        if (!day) return 0;
+        let s = 0;
+        for (const c of grp.children) {
+          if (c.isOtherAggregate) s += specialOthersTotalCount(day);
+          else s += getCount(day, c.key);
+        }
+        return s;
+      });
+      groupMonthTotal = groupDaily.reduce((a,b)=>a+b, 0);
+
+      if (primary.isOtherAggregate) {
+        // primary 是 aggregate(Special 樣式)→ 自製 row,daily=primary aggregate count
+        const primaryDaily = days.map(date => {
+          const day = state.data.days[date];
+          return day ? specialOthersTotalCount(day) : 0;
+        });
+        const tr = el('tr', { class: 'pivot-group-row' },
+          el('td', { class: 'row-label' }, grp.group),
+          el('td', { class: 'col-total' }, groupMonthTotal ? String(groupMonthTotal) : '0')
+        );
+        for (let di = 0; di < primaryDaily.length; di++) {
+          tr.appendChild(el('td', { class: weekCls(days[di]).trim() }, primaryDaily[di] ? String(primaryDaily[di]) : ''));
+        }
+        t.appendChild(tr);
+      } else {
+        const primaryRow = renderEditableCountRow(grp.group, primary.key, { groupRow: true });
+        primaryRow.children[1].textContent = groupMonthTotal ? String(groupMonthTotal) : '0';
+        t.appendChild(primaryRow);
+      }
+    }
+
+    if (singleChild && !hasAggregate) continue;  // BMD 樣式無 sub
+
+    // Sub-rows:跳過 primary;0-sum 不顯示(老月份 Swallow 等空列自動藏)
+    for (const child of grp.children) {
+      if (child === primary) continue;
+      if (child.isOtherAggregate) {
+        let monthSum = 0;
+        const cells = days.map(date => {
+          const day = state.data.days[date];
+          const v = day ? specialOthersTotalCount(day) : 0;
+          monthSum += v;
+          return v;
+        });
+        if (monthSum === 0) continue;  // 整月 0 不顯示
+        const tr = el('tr', null,
+          el('td', { class: 'row-label row-indent' }, '(' + child.label + ')'),
+          el('td', { class: 'col-total' }, String(monthSum))
+        );
+        for (let di = 0; di < cells.length; di++) {
+          tr.appendChild(el('td', { class: weekCls(days[di]).trim() }, cells[di] ? String(cells[di]) : ''));
+        }
+        t.appendChild(tr);
+        continue;
+      }
+      // 一般 sub:預檢月計,0 跳過
+      let subMonth = 0;
+      for (const date of days) {
+        const day = state.data.days[date];
+        if (day) subMonth += getCount(day, child.key);
+      }
+      if (subMonth === 0) continue;
+      t.appendChild(renderEditableCountRow(monthSubLabel(month, child), child.key, { indent: true }));
+    }
+  }
+
+  // === 底部:病歷號 row + Total 收入 + Procedure 金額 + 加班刷卡 ===
+
+  // Procedure row:cell 顯示「名稱*次數」聚合;點 cell 跳 popover 列各筆病歷號
+  const noteTr = el('tr', { class: 'pivot-note-row' },
+    el('td', { class: 'row-label' }, 'Procedure'),
+    el('td', { class: 'col-total' }, '')
+  );
+  for (const date of days) {
+    const day = state.data.days[date];
+    const procs = day?.procedures || [];
+    const cell = el('td', { class: 'pivot-cell pivot-note-cell' + weekCls(date) });
+    if (procs.length) {
+      // 同 presetName 聚合計數
+      const agg = {};
+      for (const p of procs) {
+        const nm = p.presetName || '?';
+        agg[nm] = (agg[nm] || 0) + 1;
+      }
+      for (const [nm, cnt] of Object.entries(agg)) {
+        const short = nm.replace(/\s+/g, '').slice(0, 6);
+        cell.appendChild(el('div', { class: 'pivot-note-tag' }, `${short}*${cnt}`));
+      }
+      cell.classList.add('pivot-note-clickable');
+      cell.addEventListener('click', (e) => showProcPopover(e.currentTarget, date, procs));
+    }
+    noteTr.appendChild(cell);
+  }
+  t.appendChild(noteTr);
+
+  // Total 收入 (read-only) — 歷史匯入日優先用 importedRevenue
+  let revMonth = 0;
+  const revCells = days.map(date => {
+    const day = state.data.days[date];
+    const v = day ? getDayRevenue(day, state.data.settings) : 0;
+    revMonth += v;
+    return { v, imported: isImportedDay(day) };
+  });
+  const totalTr = el('tr', { class: 'pivot-bottom-row' },
+    el('td', { class: 'row-label' }, 'Total'),
+    el('td', { class: 'col-total' }, fmtMoney(revMonth))
+  );
+  for (let di = 0; di < revCells.length; di++) {
+    const rc = revCells[di];
+    totalTr.appendChild(el('td', {
+      class: 'pivot-cell pivot-rev-cell' + weekCls(days[di]) + (rc.imported ? ' pivot-rev-imported' : ''),
+      title: rc.imported ? '原始匯入值' : ''
+    }, rc.v ? fmtMoney(rc.v) : ''));
+  }
+  t.appendChild(totalTr);
+
+  // Procedure 金額 (read-only, IR 部分)
+  let procMonth = 0;
+  const procCells = days.map(date => {
+    const day = state.data.days[date];
+    const v = day ? calcProcRevenue(day) : 0;
+    procMonth += v;
+    return v;
+  });
+  const procTr = el('tr', { class: 'pivot-bottom-row' },
+    el('td', { class: 'row-label' }, 'Procedure'),
+    el('td', { class: 'col-total' }, fmtMoney(procMonth))
+  );
+  for (let di = 0; di < procCells.length; di++) {
+    procTr.appendChild(el('td', { class: 'pivot-cell pivot-rev-cell' + weekCls(days[di]) },
+      procCells[di] ? fmtMoney(procCells[di]) : ''));
+  }
+  t.appendChild(procTr);
+
+  // 加班刷卡 (editable)
+  let otMonth = 0;
+  const otCells = days.map(date => {
+    const day = state.data.days[date];
+    const v = day ? Number(day.overtimeHours || 0) : 0;
+    otMonth += v;
+    return { date, val: v };
+  });
+  const otTr = el('tr', { class: 'pivot-bottom-row' },
+    el('td', { class: 'row-label' }, '加班刷卡'),
+    el('td', { class: 'col-total' }, otMonth ? String(otMonth) : '0')
+  );
+  for (const c of otCells) {
+    const dayObj = state.data.days[c.date];
+    const dayType = getDayType(c.date, dayObj || {});
+    otTr.appendChild(el('td', {
+      class: 'pivot-cell pivot-ot-cell pivot-ot-' + (dayType === '假日' ? 'holiday' : 'weekday') + weekCls(c.date),
+      title: dayType
+    },
+      el('input', { class: 'pivot-input', type: 'number', step: '0.5', value: c.val ? String(c.val) : '', min: '0',
+        oninput: (e) => setMonthCellOvertime(c.date, e.target.value),
+        onblur: () => renderMonth()
+      })
+    ));
+  }
+  t.appendChild(otTr);
+
+  // 加班統計 — 平日/假日合併成一列
+  const otStats = calcMonthlyOvertime(month);
+  const targets = state.data.settings.overtimeTargets || { weekday: 46, holiday: 16 };
+  const colspan = daysInMonth;
+  const wdPct = targets.weekday > 0 ? Math.round(otStats.weekday / targets.weekday * 100) : 0;
+  const hdPct = targets.holiday > 0 ? Math.round(otStats.holiday / targets.holiday * 100) : 0;
+  t.appendChild(el('tr', { class: 'pivot-bottom-row pivot-ot-summary' },
+    el('td', { class: 'row-label' }, '加班統計'),
+    el('td', { class: 'col-total' }, String(otStats.total)),
+    el('td', { colspan: String(colspan), class: 'pivot-ot-summary-cell' },
+      el('div', { class: 'ot-merged' },
+        el('div', { class: 'ot-merged-item' },
+          el('span', { class: 'ot-merged-label' }, '平日'),
+          el('div', { class: 'ot-bar' },
+            el('div', { class: 'ot-bar-fill', style: `width:${Math.min(100, wdPct)}%` }),
+            el('span', { class: 'ot-bar-label' }, `${otStats.weekday} / ${targets.weekday} hr · ${wdPct}%`)
+          )
+        ),
+        el('div', { class: 'ot-merged-item' },
+          el('span', { class: 'ot-merged-label' }, '假日'),
+          el('div', { class: 'ot-bar' },
+            el('div', { class: 'ot-bar-fill', style: `width:${Math.min(100, hdPct)}%` }),
+            el('span', { class: 'ot-bar-label' }, `${otStats.holiday} / ${targets.holiday} hr · ${hdPct}%`)
+          )
+        )
+      )
+    )
+  ));
+
+  // 月收入摘要 — 我的Total(自動)/ 績效總額 / 最後稅前薪水
+  const mm = state.data.monthlyMeta?.[month] || {};
+  const ensureMM = () => {
+    if (!state.data.monthlyMeta) state.data.monthlyMeta = {};
+    if (!state.data.monthlyMeta[month]) state.data.monthlyMeta[month] = {};
+    return state.data.monthlyMeta[month];
+  };
+  const mkIncomeField = (label, sublabel, value, editable, key) => {
+    const valEl = editable
+      ? el('input', { class: 'income-field-input', type: 'number', value: value != null ? String(value) : '',
+          placeholder: '—',
+          oninput: (e) => {
+            ensureMM()[key] = e.target.value === '' ? undefined : Number(e.target.value) || 0;
+            clearTimeout(state.mmDebounce);
+            state.mmDebounce = setTimeout(() => storage.save(state.data), 300);
+          } })
+      : el('div', { class: 'income-field-val' }, fmtMoney(value || 0));
+    return el('div', { class: 'income-field' },
+      el('div', { class: 'income-field-label' }, label),
+      valEl,
+      el('div', { class: 'income-field-sub' }, sublabel)
+    );
+  };
+  t.appendChild(el('tr', { class: 'pivot-bottom-row pivot-income-row' },
+    el('td', { class: 'row-label' }, '月收入'),
+    el('td', { class: 'col-total' }, ''),
+    el('td', { colspan: String(colspan), class: 'pivot-income-cell' },
+      el('div', { class: 'income-summary' },
+        mkIncomeField('我的 Total', '自己算', revMonth, false, null),
+        mkIncomeField('績效總額', '科上(含值班費)', mm.perfTotal, true, 'perfTotal'),
+        mkIncomeField('最後稅前薪水', '醫院實付', mm.pretaxSalary, true, 'pretaxSalary')
+      )
+    )
+  ));
+
+  renderMonthProcBreakdown();
+  renderScheduleBlock();
+  renderMeetingPanel();
+}
+
+// --- Procedure cell popover(點 cell 列各筆病歷號)---
+function closeProcPopover() {
+  if (state._procPopover) { state._procPopover.remove(); state._procPopover = null; }
+  document.removeEventListener('mousedown', _procPopoverOutside, true);
+}
+function _procPopoverOutside(e) {
+  if (state._procPopover && !state._procPopover.contains(e.target)) closeProcPopover();
+}
+function showProcPopover(anchorEl, date, procs) {
+  const open = state._procPopover;
+  closeProcPopover();
+  if (open && open.dataset.date === date) return;  // 點同一格 = toggle 關
+
+  const pop = el('div', { class: 'proc-popover' });
+  pop.dataset.date = date;
+  pop.appendChild(el('div', { class: 'proc-popover-head' }, `${date} · ${procs.length} 筆`));
+  for (const p of procs) {
+    const amt = (p.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
+    pop.appendChild(el('div', { class: 'proc-popover-row' },
+      el('span', { class: 'proc-popover-name' }, p.presetName || '?'),
+      el('span', { class: 'proc-popover-mr' }, p.medRecord || '—'),
+      el('span', { class: 'proc-popover-amt' }, amt ? fmtMoney(amt) : '')
+    ));
+  }
+  document.body.appendChild(pop);
+  // 定位:cell 下方,空間不夠就上方;水平不超出視窗
+  const r = anchorEl.getBoundingClientRect();
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let left = r.left;
+  if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+  let top = r.bottom + 4;
+  if (top + ph > window.innerHeight - 8) top = r.top - ph - 4;
+  pop.style.left = Math.max(8, left) + 'px';
+  pop.style.top = Math.max(8, top) + 'px';
+  state._procPopover = pop;
+  setTimeout(() => document.addEventListener('mousedown', _procPopoverOutside, true), 0);
+}
+
+function renderMonthProcBreakdown() {
+  const month = state.currentMonth;
+  const t = $('month-procbreakdown');
+  const atomicMap = Object.fromEntries(state.data.settings.atomicItems.map(a => [a.id, a]));
+  const buckets = {};
+  let monthRevenue = 0;
+  let totalCount = 0, totalAmount = 0;
+  let mskCount = 0, mskAmount = 0;
+  for (const date of Object.keys(state.data.days)) {
+    if (!date.startsWith(month + '-')) continue;
+    for (const rec of (state.data.days[date].procedures || [])) {
+      for (const it of (rec.items || [])) {
+        const atom = atomicMap[it.atomicId];
+        const amt = Number(it.amount||0);
+        monthRevenue += amt;
+        if (!atom || atom.includeInStats === false) continue;
+        const bucketKey = atom.countsAs || atom.id;
+        const bucketAtom = atomicMap[bucketKey];
+        const bucketName = bucketAtom?.name || bucketKey;
+        if (!buckets[bucketName]) buckets[bucketName] = { count: 0, amount: 0, isMSK: !!bucketAtom?.isMSK };
+        buckets[bucketName].count += 1;
+        buckets[bucketName].amount += amt;
+        totalCount += 1;
+        totalAmount += amt;
+        if (bucketAtom?.isMSK) { mskCount += 1; mskAmount += amt; }
+      }
+    }
+  }
+
+  t.innerHTML = '';
+
+  // 上方 summary row(MSK / 總)
+  const cntRatio = totalCount > 0 ? Math.round(mskCount / totalCount * 100) : 0;
+  const amtRatio = totalAmount > 0 ? Math.round(mskAmount / totalAmount * 100) : 0;
+  t.appendChild(el('tr', { class: 'procbreakdown-summary' },
+    el('td', { colspan: '4' },
+      el('div', { class: 'procbreakdown-summary-inner' },
+        el('span', { class: 'pb-label' }, '總計'),
+        el('span', { class: 'pb-val' }, `${totalCount} 次 · $${fmtMoney(totalAmount)}`),
+        el('span', { class: 'pb-sep' }, '·'),
+        el('span', { class: 'pb-label' }, 'MSK 相關'),
+        el('span', { class: 'pb-val' }, `${mskCount} 次 · $${fmtMoney(mskAmount)}`),
+        el('span', { class: 'pb-sep' }, '·'),
+        el('span', { class: 'pb-label' }, '占比'),
+        el('span', { class: 'pb-val' }, `${cntRatio}% 次 / ${amtRatio}% 金額`)
+      )
+    )
+  ));
+
+  t.appendChild(el('tr', null,
+    el('th', null, '項目'),
+    el('th', null, '次數'),
+    el('th', null, '金額'),
+    el('th', null, '占比'),
+  ));
+  const sorted = Object.entries(buckets).sort((a,b) => b[1].amount - a[1].amount);
+  for (const [name, b] of sorted) {
+    const pct = monthRevenue ? (b.amount / monthRevenue * 100).toFixed(1) : '0.0';
+    t.appendChild(el('tr', { class: b.isMSK ? 'pb-msk' : null },
+      el('td', null, name + (b.isMSK ? ' ◆' : '')),
+      el('td', null, String(b.count)),
+      el('td', null, fmtMoney(b.amount)),
+      el('td', null, pct + '%'),
+    ));
+  }
+  if (sorted.length === 0) {
+    t.appendChild(el('tr', null, el('td', { colspan: '4', style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '本月尚無 procedure 紀錄')));
+  }
+}
+
+// --- TSV export ---
+function exportDayTSV() {
+  const day = getDay(state.currentDate);
+  const order = state.data.settings.sheetOrder.filter(o => o.enabled);
+  const lines = [];
+  for (const item of order) {
+    if (item.key === 'special.total') {
+      let s = 0;
+      for (const k of Object.keys(state.data.settings.unitPrices.special)) s += getCount(day, `special.${k}`);
+      lines.push(s ? String(s) : '');
+    } else {
+      const v = getCount(day, item.key);
+      lines.push(v ? String(v) : '');
+    }
+  }
+  const tsv = lines.join('\n');
+  navigator.clipboard.writeText(tsv).then(() => {
+    toast(`✓ 已複製 ${state.currentDate} 計數(${lines.length} 列)到剪貼簿`, 'success');
+  }).catch(() => {
+    prompt('複製失敗,請手動複製:', tsv);
+  });
+}
+
+function exportMonthTSV() {
+  const month = state.currentMonth;
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const order = state.data.settings.sheetOrder.filter(o => o.enabled);
+  const rows = [];
+  rows.push(['項目', ...Array.from({length: daysInMonth}, (_, i) => String(i+1)), '月計'].join('\t'));
+  for (const item of order) {
+    const cells = [item.label];
+    let total = 0;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = `${month}-${String(d).padStart(2,'0')}`;
+      const day = state.data.days[date];
+      let v = 0;
+      if (day) {
+        if (item.key === 'special.total') {
+          for (const k of Object.keys(state.data.settings.unitPrices.special)) v += getCount(day, `special.${k}`);
+        } else v = getCount(day, item.key);
+      }
+      total += v;
+      cells.push(v ? String(v) : '');
+    }
+    cells.push(total ? String(total) : '');
+    rows.push(cells.join('\t'));
+  }
+  const tsv = rows.join('\n');
+  navigator.clipboard.writeText(tsv).then(() => {
+    toast(`✓ 已複製 ${month} 整月 pivot(${rows.length} 列)到剪貼簿`, 'success');
+  }).catch(() => {
+    prompt('複製失敗,請手動複製:', tsv);
+  });
+}
+
+// --- Settings ---
+function renderSettings() {
+  renderSettingsPrices();
+  renderSettingsAtomics();
+  renderSettingsPresets();
+  renderSettingsMeetings();
+  renderSettingsMiniLayout();
+  renderSettingsSheetOrder();
+}
+
+function renderSettingsMiniLayout() {
+  const t = $('settings-minilayout');
+  if (!t) return;
+  t.innerHTML = '';
+  t.appendChild(el('tr', null,
+    el('th', { class: 'col-narrow' }, '顯示'),
+    el('th', null, '項目'),
+    el('th', null, 'key')
+  ));
+  const layout = state.data.settings.miniLayout || [];
+  for (const grp of COUNTS_SCHEMA) {
+    for (const child of grp.children) {
+      const checked = layout.includes(child.key);
+      const labelText = child.label ? `${grp.group} – ${child.label}` : grp.group;
+      t.appendChild(el('tr', null,
+        el('td', { class: 'col-narrow' },
+          el('input', { type: 'checkbox', ...(checked ? {checked:''} : {}),
+            'data-key': child.key,
+            onchange: (e) => toggleMiniLayout(e.target.dataset.key, e.target.checked) })
+        ),
+        el('td', null, labelText),
+        el('td', null, el('code', null, child.key))
+      ));
+    }
+  }
+}
+function toggleMiniLayout(key, on) {
+  let layout = state.data.settings.miniLayout || [];
+  if (on && !layout.includes(key)) layout.push(key);
+  else if (!on) layout = layout.filter(k => k !== key);
+  state.data.settings.miniLayout = layout;
+  storage.save(state.data);
+}
+
+function renderSettingsPrices() {
+  const t = $('settings-prices');
+  const p = state.data.settings.unitPrices;
+  t.innerHTML = '';
+  t.appendChild(el('tr', null, el('th', null, '項目'), el('th', null, '單價')));
+  const flat = [
+    ['CT OPD', 'ct.opd'], ['CT ER+ADM+自費LDCT', 'ct.er_adm_self'], ['LDCT 國健署', 'ct.ldct_health'],
+    ['MR OPD', 'mr.opd'], ['MR ER+ADM+Health', 'mr.er_adm_health'],
+    ['BMD', 'bmd'],
+    ['Special Swallow', 'special.swal'], ['Special HSG', 'special.hsg'],
+    ['Special — ESO, TBE',     'special.eso_tbe'],
+    ['Special — UGI',          'special.ugi'],
+    ['Special — SB',           'special.sb'],
+    ['Special — UGISB',        'special.ugisb'],
+    ['Special — LGI',          'special.lgi'],
+    ['Special — IVP',          'special.ivp'],
+    ['Special — VCUG',         'special.vcug'],
+    ['Special — T tube',       'special.ttube'],
+    ['Special — Cystography',  'special.cystography'],
+    ['Special — Fistu',        'special.fistu'],
+    ['Special — Intus',        'special.intus'],
+    ['X-ray OPD', 'xray.opd'], ['X-ray Portable', 'xray.portable'], ['X-ray ER', 'xray.er'],
+    ['會診', 'consult'], ['Sono', 'sono'], ['OPD 看診', 'opd'],
+    ['加班/小時', 'overtimeRate'],
+    ['加班目標 · 平日 hr', 'overtimeTargets.weekday'],
+    ['加班目標 · 假日 hr', 'overtimeTargets.holiday'],
+  ];
+  for (const [label, key] of flat) {
+    let v;
+    if (key === 'overtimeRate') v = state.data.settings.overtimeRate;
+    else if (key.startsWith('overtimeTargets.')) {
+      const sub = key.split('.')[1];
+      v = state.data.settings.overtimeTargets?.[sub];
+    } else v = key.split('.').reduce((o,k)=>o?.[k], p);
+    t.appendChild(el('tr', null,
+      el('td', null, label),
+      el('td', null, el('input', { class: 'amount', type: 'number', value: String(v ?? 0),
+        oninput: (e) => setUnitPrice(key, e.target.value) }))
+    ));
+  }
+}
+function setUnitPrice(key, val) {
+  const v = Number(val) || 0;
+  if (key === 'overtimeRate') { state.data.settings.overtimeRate = v; }
+  else if (key.startsWith('overtimeTargets.')) {
+    const sub = key.split('.')[1];
+    if (!state.data.settings.overtimeTargets) state.data.settings.overtimeTargets = { weekday: 46, holiday: 16 };
+    state.data.settings.overtimeTargets[sub] = v;
+  } else {
+    const parts = key.split('.');
+    let target = state.data.settings.unitPrices;
+    for (let i = 0; i < parts.length - 1; i++) target = target[parts[i]];
+    target[parts.at(-1)] = v;
+  }
+  storage.save(state.data);
+  renderStatsPanel();
+}
+
+function renderSettingsAtomics() {
+  const t = $('settings-atomics');
+  t.innerHTML = '';
+  t.appendChild(el('tr', null,
+    el('th', { class: 'col-drag' }, ''),
+    el('th', null, '名稱'), el('th', null, '金額'),
+    el('th', { class: 'col-narrow' }, '統計'),
+    el('th', { class: 'col-narrow' }, 'MSK'),
+    el('th', null, '計次歸入'),
+    el('th', { class: 'col-narrow' }, '')
+  ));
+  const arr = state.data.settings.atomicItems;
+  for (const [i, a] of arr.entries()) {
+    const select = el('select', { onchange: (e) => { a.countsAs = e.target.value || undefined; storage.save(state.data); renderMonthProcBreakdown(); } });
+    select.appendChild(el('option', { value: '' }, '(本身)'));
+    for (const other of arr) {
+      if (other.id === a.id) continue;
+      const opt = el('option', { value: other.id }, other.name);
+      if (a.countsAs === other.id) opt.selected = true;
+      select.appendChild(opt);
+    }
+    const handle = el('td', { class: 'col-drag drag-handle', draggable: 'true', title: '拖拉重排' }, '⋮⋮');
+    handle.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(i));
+      tr.classList.add('dragging');
+    });
+    handle.addEventListener('dragend', () => tr.classList.remove('dragging'));
+
+    const tr = el('tr', null,
+      handle,
+      el('td', null, el('input', { type: 'text', value: a.name, oninput: (e) => { a.name = e.target.value; storage.save(state.data); } })),
+      el('td', null, el('input', { class: 'amount', type: 'number', value: String(a.amount),
+        onchange: (e) => onAtomicAmountChange(a, Number(e.target.value)||0) })),
+      el('td', { class: 'col-narrow' },
+        el('input', { type: 'checkbox', ...(a.includeInStats !== false ? {checked:''} : {}),
+          onchange: (e) => { a.includeInStats = e.target.checked; storage.save(state.data); renderMonthProcBreakdown(); } })
+      ),
+      el('td', { class: 'col-narrow' },
+        el('input', { type: 'checkbox', ...(a.isMSK ? {checked:''} : {}),
+          onchange: (e) => { a.isMSK = e.target.checked; storage.save(state.data); renderMonthProcBreakdown(); } })
+      ),
+      el('td', null, select),
+      el('td', { class: 'col-narrow' },
+        el('button', { class: 'btn-del', onclick: () => { arr.splice(i,1); storage.save(state.data); renderSettings(); renderProceduresPanel(); } }, '×')
+      )
+    );
+    // Drop target on whole row
+    tr.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; tr.classList.add('drag-over'); });
+    tr.addEventListener('dragleave', () => tr.classList.remove('drag-over'));
+    tr.addEventListener('drop', (e) => {
+      e.preventDefault();
+      tr.classList.remove('drag-over');
+      const from = Number(e.dataTransfer.getData('text/plain'));
+      const to = i;
+      if (Number.isNaN(from) || from === to) return;
+      const [moved] = arr.splice(from, 1);
+      arr.splice(to, 0, moved);
+      storage.save(state.data);
+      renderSettingsAtomics();
+      renderMonthProcBreakdown();
+    });
+    t.appendChild(tr);
+  }
+}
+
+function onAtomicAmountChange(atom, newAmount) {
+  const oldAmount = atom.amount;
+  if (oldAmount === newAmount) return;
+  const affected = state.data.settings.presets.filter(p =>
+    p.items.some(it => it.atomicId === atom.id && it.amount === oldAmount)
+  );
+  atom.amount = newAmount;
+  storage.save(state.data);
+  if (affected.length === 0) {
+    toast(`✓ ${atom.name} 金額更新為 ${fmtMoney(newAmount)}`, 'success');
+    return;
+  }
+  showCascadeModal(atom, oldAmount, newAmount, affected);
+}
+
+function showCascadeModal(atom, oldAmt, newAmt, affected) {
+  const mount = $('modal-mount');
+  const checkboxes = affected.map(p => {
+    const cb = el('input', { type: 'checkbox', checked: '', 'data-preset-id': p.id });
+    return { preset: p, cb };
+  });
+  const overlay = el('div', { class: 'modal-overlay' },
+    el('div', { class: 'modal' },
+      el('h3', null, '金額連動更新?'),
+      el('p', null, `${atom.name} 金額已改為 ${fmtMoney(newAmt)} (原 ${fmtMoney(oldAmt)})。下列 preset 也用此原子,選要一起更新的:`),
+      el('ul', { class: 'cascade-list' },
+        ...checkboxes.map(({preset, cb}) => {
+          const oldTotal = preset.items.reduce((s,it)=>s+Number(it.amount||0),0);
+          const delta = newAmt - oldAmt;
+          const newTotal = oldTotal + delta;
+          return el('li', null, cb,
+            el('span', null, `${preset.name}: 內 ${atom.name} `),
+            el('code', null, `${fmtMoney(oldAmt)} → ${fmtMoney(newAmt)}`),
+            el('span', { style: 'color:var(--ink-muted);margin-left:auto' }, `total ${fmtMoney(oldTotal)}→${fmtMoney(newTotal)}`)
+          );
+        })
+      ),
+      el('div', { class: 'modal-actions' },
+        el('button', { class: 'btn-secondary', onclick: () => { mount.innerHTML = ''; toast(`已更新 ${atom.name} 但未連動 preset`, ''); } }, '略過'),
+        el('button', { class: 'btn-primary', onclick: () => {
+          for (const {preset, cb} of checkboxes) {
+            if (cb.checked) {
+              for (const it of preset.items) if (it.atomicId === atom.id) it.amount = newAmt;
+            }
+          }
+          storage.save(state.data);
+          mount.innerHTML = '';
+          renderSettings();
+          renderProceduresPanel();
+          toast(`✓ 已連動更新 ${checkboxes.filter(c => c.cb.checked).length} 個 preset`, 'success');
+        }}, '套用勾選')
+      )
+    )
+  );
+  mount.innerHTML = '';
+  mount.appendChild(overlay);
+}
+
+function renderSettingsPresets() {
+  const t = $('settings-presets');
+  t.innerHTML = '';
+  t.appendChild(el('tr', null,
+    el('th', null, '名稱'), el('th', null, 'Items (atomic + amount)'), el('th', null, 'Total')
+  ));
+  for (const p of state.data.settings.presets) {
+    const total = p.items.reduce((s,it)=>s+Number(it.amount||0),0);
+    const itemsText = p.items.map(it => {
+      const atom = state.data.settings.atomicItems.find(a => a.id === it.atomicId);
+      return `${atom?.name || it.atomicId}:${fmtMoney(it.amount)}`;
+    }).join(' + ') || '(空)';
+    t.appendChild(el('tr', null,
+      el('td', null, el('input', { type: 'text', value: p.name, oninput: (e) => { p.name = e.target.value; storage.save(state.data); renderProceduresPanel(); } })),
+      el('td', null, itemsText),
+      el('td', null, fmtMoney(total))
+    ));
+  }
+}
+
+function renderSettingsMeetings() {
+  const t = $('settings-meetings');
+  t.innerHTML = '';
+  t.appendChild(el('tr', null, el('th', null, '角色'), el('th', null, '名稱'), el('th', null, '出席費')));
+  for (const m of state.data.settings.meetingCatalog) {
+    const sel = el('select', { onchange: (e) => { m.role = e.target.value; storage.save(state.data); } },
+      el('option', { value: '主講', ...(m.role==='主講'?{selected:''}:{}) }, '主講'),
+      el('option', { value: '參與', ...(m.role==='參與'?{selected:''}:{}) }, '參與')
+    );
+    t.appendChild(el('tr', null,
+      el('td', { style: 'width:80px' }, sel),
+      el('td', null, el('input', { type: 'text', value: m.name, oninput: (e) => { m.name = e.target.value; storage.save(state.data); renderProceduresPanel(); } })),
+      el('td', null, el('input', { class: 'amount', type: 'number', value: String(m.amount), oninput: (e) => { m.amount = Number(e.target.value)||0; storage.save(state.data); renderProceduresPanel(); } }))
+    ));
+  }
+}
+
+function renderSettingsSheetOrder() {
+  const t = $('settings-sheetorder');
+  t.innerHTML = '';
+  t.appendChild(el('tr', null,
+    el('th', { class: 'col-narrow' }, ''),
+    el('th', null, '順序'),
+    el('th', null, 'Sheet 列名'),
+    el('th', null, '對應 key')
+  ));
+  for (const [i, item] of state.data.settings.sheetOrder.entries()) {
+    t.appendChild(el('tr', null,
+      el('td', { class: 'col-narrow' },
+        el('input', { type: 'checkbox', ...(item.enabled ? {checked:''} : {}),
+          onchange: (e) => { item.enabled = e.target.checked; storage.save(state.data); } })
+      ),
+      el('td', { class: 'col-narrow' },
+        el('button', { class: 'btn-step', onclick: () => moveSheetOrder(i, -1) }, '↑'),
+        el('button', { class: 'btn-step', onclick: () => moveSheetOrder(i, +1) }, '↓')
+      ),
+      el('td', null, el('input', { type: 'text', value: item.label, oninput: (e) => { item.label = e.target.value; storage.save(state.data); } })),
+      el('td', null, el('code', null, item.key))
+    ));
+  }
+}
+function moveSheetOrder(i, dir) {
+  const arr = state.data.settings.sheetOrder;
+  const j = i + dir;
+  if (j < 0 || j >= arr.length) return;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+  storage.save(state.data);
+  renderSettingsSheetOrder();
+}
+
+// ===== Init / wiring =====
+function applyTheme(mode) {
+  if (mode === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  state.data.settings.theme = mode;
+  storage.save(state.data);
+}
+
+function setView(name) {
+  for (const v of document.querySelectorAll('.view')) v.classList.remove('active');
+  $(`view-${name}`).classList.add('active');
+  for (const t of document.querySelectorAll('.tab')) t.classList.toggle('active', t.dataset.view === name);
+  // 月表/設定不顯示日期切換 bar(那只給今日 view 用)
+  const dn = document.querySelector('.day-nav');
+  if (dn) dn.style.display = (name === 'today' ? '' : 'none');
+  if (name === 'month') renderMonth();
+  if (name === 'settings') renderSettings();
+}
+
+function showLoginUI(errMsg) {
+  document.body.innerHTML = `
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0e1117;color:#e6edf3;font-family:system-ui,sans-serif;">
+      <div style="text-align:center;padding:40px;background:#161b22;border-radius:12px;border:1px solid #30363d;min-width:280px;">
+        <h2 style="margin:0 0 8px;">📊 Worknum 績效紀錄</h2>
+        <p style="margin:0 0 24px;color:#8b949e;font-size:13px;">放射科個人記錄系統</p>
+        <button id="login-btn" style="padding:12px 28px;font-size:15px;background:#1f6feb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+          🔐 用 Google 登入
+        </button>
+        ${errMsg ? `<p style="margin-top:20px;color:#f85149;font-size:13px;">⚠️ ${errMsg}</p>` : ''}
+        <p style="margin-top:24px;color:#8b949e;font-size:11px;">僅限 ${ALLOWED_EMAIL}</p>
+      </div>
+    </div>
+  `;
+  document.getElementById('login-btn').addEventListener('click', async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(fbAuth, provider);
+      // onAuthStateChanged 會 fire 並 reload
+    } catch (e) {
+      showLoginUI('登入失敗:' + e.message);
+    }
+  });
+}
+
+async function init() {
+  // === Auth gate ===
+  const user = await new Promise(resolve => {
+    const unsub = onAuthStateChanged(fbAuth, (u) => { unsub(); resolve(u); });
+  });
+  if (!user) { showLoginUI(); return; }
+  if (user.email !== ALLOWED_EMAIL) {
+    await signOut(fbAuth);
+    showLoginUI(`此帳號(${user.email})無權限`);
+    return;
+  }
+  currentUser = user;
+  userDataRef = ref(fbDB, `users/${user.uid}/worknum`);
+
+  // === 載入資料:Firebase 優先;若 Firebase 空,把本地 localStorage 推上去當初始 ===
+  const fbData = await storage.loadFromFirebase();
+  if (fbData) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(fbData));
+    state.data = fbData;
+  } else {
+    state.data = storage.load();  // 從 localStorage
+    if (Object.keys(state.data.days).length || state.data.settings) {
+      // 第一次上 Firebase:把本地推上去
+      suppressNextOnValue = true;
+      set(userDataRef, state.data).catch(e => console.error('initial push failed', e));
+    }
+  }
+
+  // === 監聽 Firebase 遠端變動(跨裝置同步)===
+  onValue(userDataRef, (snap) => {
+    if (suppressNextOnValue) { suppressNextOnValue = false; return; }
+    if (!snap.exists()) return;
+    const remote = snap.val();
+    const localRaw = localStorage.getItem(STORAGE_KEY);
+    if (JSON.stringify(remote) === localRaw) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
+    state.data = _normalizeData(remote);
+    renderAll();
+  });
+
+  state.currentDate = todayISO();
+  state.currentMonth = isoToMonth(state.currentDate);
+  applyTheme(state.data.settings.theme || 'dark');
+
+  if (state.isMini) {
+    document.body.classList.add('mini-mode');
+    document.title = '績效快輸';
+    $('export-day').style.display = 'none';
+    $('day-mini-label').style.display = '';
+  }
+
+  renderAll();
+
+  for (const btn of document.querySelectorAll('.tab')) btn.addEventListener('click', () => setView(btn.dataset.view));
+  $('day-prev').onclick = () => { state.currentDate = shiftDate(state.currentDate, -1); state.currentMonth = isoToMonth(state.currentDate); renderAll(); };
+  $('day-next').onclick = () => { state.currentDate = shiftDate(state.currentDate, +1); state.currentMonth = isoToMonth(state.currentDate); renderAll(); };
+  $('day-today').onclick = () => { state.currentDate = todayISO(); state.currentMonth = isoToMonth(state.currentDate); renderAll(); };
+  $('day-picker').onchange = (e) => { state.currentDate = e.target.value; state.currentMonth = isoToMonth(e.target.value); renderAll(); };
+  $('month-prev').onclick = () => { const [y,m] = state.currentMonth.split('-').map(Number); const d = new Date(y, m-2, 1); state.currentMonth = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderMonth(); };
+  $('month-next').onclick = () => { const [y,m] = state.currentMonth.split('-').map(Number); const d = new Date(y, m, 1); state.currentMonth = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderMonth(); };
+  const _onMonthSelChange = () => {
+    const y = $('month-year-sel').value;
+    const m = $('month-month-sel').value;
+    state.currentMonth = `${y}-${m}`;
+    renderMonth();
+  };
+  $('month-year-sel').onchange = _onMonthSelChange;
+  $('month-month-sel').onchange = _onMonthSelChange;
+
+  $('preset-add').onclick = addPresetToToday;
+
+  $('overtime-hours').oninput = (e) => { getDay(state.currentDate).overtimeHours = Number(e.target.value)||0; persist(); renderStatsPanel(); };
+  $('overtime-type').onchange = (e) => { const d = getDay(state.currentDate); d.overtimeType = e.target.value || undefined; persist(); };
+  $('day-notes').oninput = (e) => { getDay(state.currentDate).notes = e.target.value; persist(); };
+
+  $('export-day').onclick = exportDayTSV;
+
+  $('theme-toggle').onclick = () => applyTheme(state.data.settings.theme === 'light' ? 'dark' : 'light');
+
+  $('open-mini').onclick = () => {
+    const url = location.pathname + '?mode=quick';
+    window.open(url, 'worknum-mini', 'width=340,height=560,popup=yes');
+  };
+
+  $('money-toggle').onclick = () => {
+    const ms = $('money-summary');
+    const show = !ms.classList.contains('unblur');
+    ms.classList.toggle('unblur', show);
+    const heroNum = document.querySelector('.stats-hero-num');
+    if (heroNum) heroNum.classList.toggle('unblur', show);
+    state.data.settings.miniShowMoney = show;
+    storage.save(state.data);
+  };
+
+  $('atomic-add').onclick = () => {
+    const id = 'atom_' + Date.now();
+    state.data.settings.atomicItems.push({ id, name: '新原子項', amount: 0, includeInStats: true });
+    storage.save(state.data);
+    renderSettingsAtomics();
+  };
+
+  $('export-json').onclick = () => {
+    const blob = new Blob([JSON.stringify(state.data, null, 2)], { type: 'application/json' });
+    const a = el('a', { href: URL.createObjectURL(blob), download: `worknum-${todayISO()}.json` });
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+  $('import-json-btn').onclick = () => $('import-json-input').click();
+  $('import-json-input').onchange = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const data = JSON.parse(r.result);
+        if (!data.days || !data.settings) throw new Error('格式錯誤');
+        if (!confirm('將取代目前所有資料,確定?')) return;
+        state.data = data;
+        storage.save(state.data);
+        renderAll();
+        toast('✓ 匯入完成', 'success');
+      } catch (err) { toast('✗ 匯入失敗:' + err.message, ''); }
+    };
+    r.readAsText(f);
+  };
+
+  // 合併匯入歷史:只 merge days,不動 settings
+  $('merge-json-btn').onclick = () => $('merge-json-input').click();
+  $('merge-json-input').onchange = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const data = JSON.parse(r.result);
+        const days = (data && data.days) ? data.days : data;
+        if (!days || typeof days !== 'object') throw new Error('找不到 days');
+        const dateKeys = Object.keys(days).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k));
+        if (!dateKeys.length) throw new Error('沒有有效日期 key');
+        const overlap = dateKeys.filter(d => state.data.days[d]);
+        const mmCount = data.monthlyMeta ? Object.keys(data.monthlyMeta).length : 0;
+        const msg = `將合併 ${dateKeys.length} 天歷史資料`
+          + (mmCount ? ` + ${mmCount} 個月的值班/備註` : '')
+          + (overlap.length ? `(其中 ${overlap.length} 天已存在會被覆蓋)` : '')
+          + ',settings/catalog 不變。確定?';
+        if (!confirm(msg)) return;
+        for (const d of dateKeys) state.data.days[d] = days[d];
+        if (data.monthlyMeta) {
+          if (!state.data.monthlyMeta) state.data.monthlyMeta = {};
+          for (const m of Object.keys(data.monthlyMeta)) {
+            state.data.monthlyMeta[m] = { ...state.data.monthlyMeta[m], ...data.monthlyMeta[m] };
+          }
+        }
+        storage.save(state.data);
+        renderAll();
+        toast(`✓ 已合併 ${dateKeys.length} 天歷史資料`, 'success');
+      } catch (err) { toast('✗ 合併失敗:' + err.message, ''); }
+    };
+    r.readAsText(f);
+  };
+
+  $('reset-defaults').onclick = () => {
+    if (!confirm('將重設所有 catalog 為預設值(每日紀錄會保留),確定?')) return;
+    state.data.settings = deepClone(SEED);
+    storage.save(state.data);
+    renderAll();
+    toast('✓ 已重設 catalog', 'success');
+  };
+}
+
+init().catch(e => {
+  console.error('Init failed', e);
+  document.body.innerHTML = `<pre style="color:red;padding:20px">初始化失敗:${e.message}\n${e.stack}</pre>`;
+});
+</script>
+
+</body>
+</html>
