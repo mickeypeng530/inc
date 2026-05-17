@@ -841,6 +841,39 @@ select.btn-secondary option {
 @media (max-width: 900px) { .month-3col { gap: 8px; } }
 @media (max-width: 600px) { .month-3col { grid-template-columns: 1fr; } }
 
+/* 月表 collapsible panels — <details>/<summary> 樣式對齊 .panel */
+.collapsible-panel { padding: 0; }
+.collapsible-panel > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 14px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  user-select: none;
+}
+.collapsible-panel > summary::-webkit-details-marker { display: none; }
+.collapsible-panel > summary::before {
+  content: '▶';
+  font-size: 9px;
+  color: var(--ink-muted);
+  transition: transform 0.15s;
+  display: inline-block;
+}
+.collapsible-panel[open] > summary::before { transform: rotate(90deg); }
+.collapsible-panel > summary > h2 {
+  margin: 0;
+  background: none;
+  padding: 0;
+  border: none;
+}
+.collapsible-panel[open] > summary { border-bottom-color: var(--border); }
+.collapsible-panel > :not(summary) { padding: 12px 14px; }
+.collapsible-panel > table { margin: 12px 14px; width: calc(100% - 28px); padding: 0; }
+
 /* === Schedule month blocks (collapsible) === */
 .schedule-month-block {
   border: 1px solid var(--border);
@@ -1592,32 +1625,32 @@ body:not(.mini-mode) #view-mini { display: none; }
     <table class="pivot-table" id="month-pivot"></table>
   </div>
 
-  <!-- 歷月紀錄(cross-month max/min/avg)-->
-  <div class="panel" id="panel-month-records" style="margin-top:14px">
-    <h2>歷月紀錄 <span style="font-weight:normal;font-size:10px;color:var(--ink-muted);letter-spacing:0.06em" id="records-month-label"></span></h2>
-    <table class="settings-table" id="month-records-table"></table>
-  </div>
-
   <div class="month-3col">
-    <!-- col 1: Procedure 分項統計 -->
-    <div class="panel" id="panel-month-proc">
-      <h2>本月 Procedure 分項</h2>
+    <!-- col 1: Procedure 分項統計(預設收合) -->
+    <details class="panel collapsible-panel" id="panel-month-proc">
+      <summary><h2>本月 Procedure 分項</h2></summary>
       <table class="settings-table" id="month-procbreakdown"></table>
-    </div>
+    </details>
 
-    <!-- col 2: 不值班預約 (2 collapsible months) -->
-    <div class="panel" id="panel-month-schedule">
-      <h2>不值班預約</h2>
+    <!-- col 2: 值班相關(預設收合) -->
+    <details class="panel collapsible-panel" id="panel-month-schedule">
+      <summary><h2>值班相關</h2></summary>
       <div id="schedule-blocks-container"></div>
-    </div>
+    </details>
 
-    <!-- col 3: 會議 -->
-    <div class="panel" id="panel-month-meeting">
-      <h2>會議 <span style="font-weight:normal;font-size:9px;color:var(--ink-muted);letter-spacing:0.06em" id="meeting-month-label"></span></h2>
+    <!-- col 3: 會議(預設收合) -->
+    <details class="panel collapsible-panel" id="panel-month-meeting">
+      <summary><h2>會議 <span style="font-weight:normal;font-size:9px;color:var(--ink-muted);letter-spacing:0.06em" id="meeting-month-label"></span></h2></summary>
       <div id="meeting-container"></div>
       <div class="proc-total" id="meeting-total"><span>月會議合計</span><span class="stat-money" id="meeting-total-amount">0</span></div>
-    </div>
+    </details>
   </div>
+
+  <!-- 歷月紀錄(放最下、預設收合)-->
+  <details class="panel collapsible-panel" id="panel-month-records" style="margin-top:14px">
+    <summary><h2>歷月紀錄 <span style="font-weight:normal;font-size:10px;color:var(--ink-muted);letter-spacing:0.06em" id="records-month-label"></span></h2></summary>
+    <table class="settings-table" id="month-records-table"></table>
+  </details>
 </section>
 
 <!-- SETTINGS VIEW -->
@@ -3619,6 +3652,12 @@ function renderMonthProcBreakdown() {
   let monthRevenue = 0;
   let totalCount = 0, totalAmount = 0;
   let mskCount = 0, mskAmount = 0;
+  // 已知 MSK 關鍵字(用於 import 來的未登錄 atomic ID 自動判 MSK)
+  const MSK_KEYWORDS = ['nb', 'caudal', 'arthro', 'bone', 'biopsy', 'rf', 'myelo', 'joint', 'tp', 'inj', 'msk'];
+  const isMSKByName = (s) => {
+    const l = String(s || '').toLowerCase();
+    return MSK_KEYWORDS.some(k => l.includes(k));
+  };
   for (const date of Object.keys(state.data.days)) {
     if (!date.startsWith(month + '-')) continue;
     for (const rec of (state.data.days[date].procedures || [])) {
@@ -3626,16 +3665,25 @@ function renderMonthProcBreakdown() {
         const atom = atomicMap[it.atomicId];
         const amt = Number(it.amount||0);
         monthRevenue += amt;
-        if (!atom || atom.includeInStats === false) continue;
-        const bucketKey = atom.countsAs || atom.id;
-        const bucketAtom = atomicMap[bucketKey];
-        const bucketName = bucketAtom?.name || bucketKey;
-        if (!buckets[bucketName]) buckets[bucketName] = { count: 0, amount: 0, isMSK: !!bucketAtom?.isMSK };
+        // atom 不存在(import 來的新 aid 沒登錄到 catalog)→ 用 snapshot name 當 bucket
+        if (atom && atom.includeInStats === false) continue;
+        let bucketName, bucketIsMSK;
+        if (atom) {
+          const bucketKey = atom.countsAs || atom.id;
+          const bucketAtom = atomicMap[bucketKey];
+          bucketName = bucketAtom?.name || bucketKey;
+          bucketIsMSK = !!bucketAtom?.isMSK;
+        } else {
+          // unknown atom → 用 it.name(snapshot)當 bucket;MSK 用關鍵字判
+          bucketName = it.name || it.atomicId || '未知';
+          bucketIsMSK = isMSKByName(bucketName) || isMSKByName(it.atomicId);
+        }
+        if (!buckets[bucketName]) buckets[bucketName] = { count: 0, amount: 0, isMSK: bucketIsMSK };
         buckets[bucketName].count += 1;
         buckets[bucketName].amount += amt;
         totalCount += 1;
         totalAmount += amt;
-        if (bucketAtom?.isMSK) { mskCount += 1; mskAmount += amt; }
+        if (bucketIsMSK) { mskCount += 1; mskAmount += amt; }
       }
     }
   }
@@ -3712,8 +3760,6 @@ function renderMonthRecords() {
     { key: 'xray',     name: 'X-ray 總計',  fn: d => getGroupSum(d, 'X-ray') },
     { key: 'bmd',      name: 'BMD',         fn: d => getCount(d, 'bmd') },
     { key: 'special',  name: 'Special 總計', fn: d => getGroupSum(d, 'Special') },
-    { key: 'consult',  name: '會診',         fn: d => getCount(d, 'consult') },
-    { key: 'sono',     name: 'Sono',         fn: d => getCount(d, 'sono') },
     { key: 'opd',      name: 'OPD 看診',     fn: d => getCount(d, 'opd') },
     { key: 'proc_cnt', name: 'Procedure 筆數', fn: d => (d.procedures || []).length },
     { key: 'proc_rev', name: 'Procedure 收入', fn: d => (d.procedures || []).reduce((s,p) => s + (p.items || []).reduce((ss,it) => ss + Number(it.amount||0), 0), 0) },
