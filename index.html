@@ -4286,7 +4286,14 @@ async function init() {
   $('day-next').onclick = () => { state.currentDate = shiftDate(state.currentDate, +1); state.currentMonth = isoToMonth(state.currentDate); renderAll(); };
   $('day-today').onclick = () => { state.currentDate = todayISO(); state.currentMonth = isoToMonth(state.currentDate); renderAll(); };
   $('day-picker').onchange = (e) => { state.currentDate = e.target.value; state.currentMonth = isoToMonth(e.target.value); renderAll(); };
-  $('month-prev').onclick = () => { const [y,m] = state.currentMonth.split('-').map(Number); const d = new Date(y, m-2, 1); state.currentMonth = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderMonth(); };
+  const EARLIEST_MONTH = '2023-12';
+  $('month-prev').onclick = () => {
+    const [y,m] = state.currentMonth.split('-').map(Number);
+    const d = new Date(y, m-2, 1);
+    const next = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    if (next < EARLIEST_MONTH) return;  // 不允許往前超過 2023-12
+    state.currentMonth = next; renderMonth();
+  };
   $('month-next').onclick = () => { const [y,m] = state.currentMonth.split('-').map(Number); const d = new Date(y, m, 1); state.currentMonth = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderMonth(); };
   const _onMonthSelChange = () => {
     const y = $('month-year-sel').value;
