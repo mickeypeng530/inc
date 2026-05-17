@@ -2136,6 +2136,18 @@ function _normalizeData(data) {
   data.pending = { ...PENDING_DEFAULT, ...(data.pending || {}) };
   data.scheduleEvents = data.scheduleEvents || [];
   data.monthlyMeta = data.monthlyMeta || {};
+  // Firebase RTDB 不存空 array → 讀回來變 undefined,補回 []
+  (data.settings.presets || []).forEach(p => { if (!Array.isArray(p.items)) p.items = []; });
+  (data.settings.atomicItems || []).forEach(a => { /* atomic 無 nested array */ });
+  (data.settings.meetingCatalog || []).forEach(m => { /* 無 nested array */ });
+  // days 每天可能有 procedures / meetings,空 array 也會掉
+  for (const date in data.days) {
+    const d = data.days[date];
+    if (!Array.isArray(d.procedures)) d.procedures = [];
+    if (!Array.isArray(d.meetings)) d.meetings = [];
+    // 每筆 procedure 內的 items 也要保
+    d.procedures.forEach(p => { if (!Array.isArray(p.items)) p.items = []; });
+  }
   runMigrations(data);
   return data;
 }
@@ -2651,8 +2663,9 @@ function renderProceduresPanel() {
   const day = getDay(state.currentDate);
   const sel = $('preset-select');
   sel.innerHTML = '';
-  for (const p of state.data.settings.presets) {
-    const total = p.items.reduce((s,it)=>s+Number(it.amount||0),0);
+  for (const p of (state.data.settings.presets || [])) {
+    const items = p.items || [];
+    const total = items.reduce((s,it)=>s+Number(it.amount||0),0);
     sel.appendChild(el('option', { value: p.id }, `${p.name}  (${fmtMoney(total)})`));
   }
 
@@ -2660,8 +2673,9 @@ function renderProceduresPanel() {
   list.innerHTML = '';
   let procTotal = 0;
   for (const [i, rec] of (day.procedures || []).entries()) {
-    procTotal += rec.items.reduce((s,it)=>s+Number(it.amount||0),0);
-    const detailText = rec.items.map(it => `${it.name} ${fmtMoney(it.amount)}`).join(' + ');
+    const items = rec.items || [];
+    procTotal += items.reduce((s,it)=>s+Number(it.amount||0),0);
+    const detailText = items.map(it => `${it.name} ${fmtMoney(it.amount)}`).join(' + ');
     list.appendChild(el('li', { class: 'proc-item' },
       el('div', { style: 'flex:1;min-width:0' },
         el('div', { class: 'proc-item-name' },
@@ -2676,7 +2690,7 @@ function renderProceduresPanel() {
         ),
         el('div', { class: 'proc-item-detail' }, detailText)
       ),
-      el('div', { class: 'proc-item-amount' }, fmtMoney(rec.items.reduce((s,it)=>s+Number(it.amount||0),0))),
+      el('div', { class: 'proc-item-amount' }, fmtMoney(items.reduce((s,it)=>s+Number(it.amount||0),0))),
       el('button', { class: 'btn-del', title: '刪除', onclick: () => removeProc(i) }, '×')
     ));
   }
