@@ -1164,6 +1164,14 @@ select.btn-secondary option {
   font-variant-numeric: tabular-nums;
 }
 .procbreakdown-summary-inner .pb-sep { color: var(--ink-muted); }
+.procbreakdown-summary-inner .pb-pct-total { color: var(--accent); font-weight: 500; font-size: 11px; }
+.procbreakdown-summary-inner .pb-divider {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 4px;
+}
 .pb-msk td { background: rgba(233, 162, 59, 0.05); color: var(--accent); }
 .pivot-table .pivot-ot-summary .pivot-ot-summary-cell { padding: 4px 8px; text-align: left; }
 .ot-bar {
@@ -3700,7 +3708,13 @@ function renderMonthProcBreakdown() {
 
   t.innerHTML = '';
 
-  // 上方 summary row(MSK / 總)
+  // 計算本月總收入(用於 procedure 占月總收入 %)
+  let monthTotalRevenue = 0;
+  for (const date of Object.keys(state.data.days)) {
+    if (!date.startsWith(month + '-')) continue;
+    monthTotalRevenue += getDayRevenue(state.data.days[date], state.data.settings);
+  }
+  const procTotalPct = monthTotalRevenue > 0 ? Math.round(totalAmount / monthTotalRevenue * 100) : 0;
   const cntRatio = totalCount > 0 ? Math.round(mskCount / totalCount * 100) : 0;
   const amtRatio = totalAmount > 0 ? Math.round(mskAmount / totalAmount * 100) : 0;
   t.appendChild(el('tr', { class: 'procbreakdown-summary' },
@@ -3708,7 +3722,8 @@ function renderMonthProcBreakdown() {
       el('div', { class: 'procbreakdown-summary-inner' },
         el('span', { class: 'pb-label' }, '總計'),
         el('span', { class: 'pb-val' }, `${totalCount} 次 · $${fmtMoney(totalAmount)}`),
-        el('span', { class: 'pb-sep' }, '·'),
+        el('span', { class: 'pb-val pb-pct-total' }, `(總收入占比 ${procTotalPct}%)`),
+        el('span', { class: 'pb-divider' }),
         el('span', { class: 'pb-label' }, 'MSK 相關'),
         el('span', { class: 'pb-val' }, `${mskCount} 次 · $${fmtMoney(mskAmount)}`),
         el('span', { class: 'pb-sep' }, '·'),
