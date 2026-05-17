@@ -3697,6 +3697,11 @@ function renderMonthProcBreakdown() {
           // unknown atom → 用 it.name(snapshot)當 bucket;MSK 用關鍵字判
           bucketName = it.name || it.atomicId || '未知';
           bucketIsMSK = isMSKByName(bucketName) || isMSKByName(it.atomicId);
+          // TAE 家族(tae / tae_spinal / tae_aorta / TAE+xxx)→ 合併到 'TAE' bucket
+          if (/^tae(?:[_+ ]|$)/i.test(it.atomicId || '') || /^TAE(?:[+ ]|$)/i.test(bucketName)) {
+            bucketName = 'TAE';
+            bucketIsMSK = false;
+          }
         }
         if (!buckets[bucketName]) buckets[bucketName] = { count: 0, amount: 0, isMSK: bucketIsMSK };
         buckets[bucketName].count += 1;
