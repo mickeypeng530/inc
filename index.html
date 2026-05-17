@@ -874,6 +874,11 @@ select.btn-secondary option {
 .collapsible-panel > :not(summary) { padding: 12px 14px; }
 .collapsible-panel > table { margin: 12px 14px; width: calc(100% - 28px); padding: 0; }
 
+/* 3-col 內的 collapsible panel 緊一點 padding(歷月紀錄是 full-width 不受影響)*/
+.month-3col .collapsible-panel > summary { padding: 8px 10px; }
+.month-3col .collapsible-panel > :not(summary) { padding: 6px 10px; }
+.month-3col .collapsible-panel > table { margin: 6px 10px; width: calc(100% - 20px); }
+
 /* === Schedule month blocks (collapsible) === */
 .schedule-month-block {
   border: 1px solid var(--border);
