@@ -1592,6 +1592,12 @@ body:not(.mini-mode) #view-mini { display: none; }
     <table class="pivot-table" id="month-pivot"></table>
   </div>
 
+  <!-- 歷月紀錄(cross-month max/min/avg)-->
+  <div class="panel" id="panel-month-records" style="margin-top:14px">
+    <h2>歷月紀錄 <span style="font-weight:normal;font-size:10px;color:var(--ink-muted);letter-spacing:0.06em" id="records-month-label"></span></h2>
+    <table class="settings-table" id="month-records-table"></table>
+  </div>
+
   <div class="month-3col">
     <!-- col 1: Procedure 分項統計 -->
     <div class="panel" id="panel-month-proc">
@@ -3562,6 +3568,7 @@ function renderMonth() {
   ));
 
   renderMonthProcBreakdown();
+  renderMonthRecords();
   renderScheduleBlock();
   renderMeetingPanel();
 }
@@ -3659,7 +3666,11 @@ function renderMonthProcBreakdown() {
     el('th', null, '金額'),
     el('th', null, '占比'),
   ));
-  const sorted = Object.entries(buckets).sort((a,b) => b[1].amount - a[1].amount);
+  // 排序:MSK 優先(◆ 在最上),同 group 內按金額降冪
+  const sorted = Object.entries(buckets).sort((a,b) => {
+    if (a[1].isMSK !== b[1].isMSK) return a[1].isMSK ? -1 : 1;
+    return b[1].amount - a[1].amount;
+  });
   for (const [name, b] of sorted) {
     const pct = monthRevenue ? (b.amount / monthRevenue * 100).toFixed(1) : '0.0';
     t.appendChild(el('tr', { class: b.isMSK ? 'pb-msk' : null },
@@ -3672,6 +3683,94 @@ function renderMonthProcBreakdown() {
   if (sorted.length === 0) {
     t.appendChild(el('tr', null, el('td', { colspan: '4', style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '本月尚無 procedure 紀錄')));
   }
+}
+
+// 歷月紀錄:每個類別跨所有月份的最多月 / 最少月 / 平均 / 本月
+function renderMonthRecords() {
+  const t = $('month-records-table');
+  const label = $('records-month-label');
+  if (!t) return;
+  t.innerHTML = '';
+
+  // 收集所有月份(從 days key 抽前 7 碼)
+  const monthSet = new Set();
+  for (const date of Object.keys(state.data.days)) {
+    monthSet.add(date.slice(0, 7));
+  }
+  const months = Array.from(monthSet).sort();
+  if (!months.length) {
+    t.appendChild(el('tr', null, el('td', { colspan: '5', style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '尚無歷史資料')));
+    if (label) label.textContent = '';
+    return;
+  }
+  if (label) label.textContent = `(${months.length} 個月:${months[0]} ~ ${months[months.length-1]})`;
+
+  // 各類別 reducer:回傳該月的整數值
+  const reducers = [
+    { key: 'ct',       name: 'CT 總計',     fn: d => getGroupSum(d, 'CT') },
+    { key: 'mr',       name: 'MR 總計',     fn: d => getGroupSum(d, 'MR') },
+    { key: 'xray',     name: 'X-ray 總計',  fn: d => getGroupSum(d, 'X-ray') },
+    { key: 'bmd',      name: 'BMD',         fn: d => getCount(d, 'bmd') },
+    { key: 'special',  name: 'Special 總計', fn: d => getGroupSum(d, 'Special') },
+    { key: 'consult',  name: '會診',         fn: d => getCount(d, 'consult') },
+    { key: 'sono',     name: 'Sono',         fn: d => getCount(d, 'sono') },
+    { key: 'opd',      name: 'OPD 看診',     fn: d => getCount(d, 'opd') },
+    { key: 'proc_cnt', name: 'Procedure 筆數', fn: d => (d.procedures || []).length },
+    { key: 'proc_rev', name: 'Procedure 收入', fn: d => (d.procedures || []).reduce((s,p) => s + (p.items || []).reduce((ss,it) => ss + Number(it.amount||0), 0), 0) },
+    { key: 'ot',       name: '加班時數',     fn: d => Number(d.overtimeHours || 0) },
+  ];
+
+  // 加 header
+  t.appendChild(el('tr', null,
+    el('th', null, '類別'),
+    el('th', null, '最多月'),
+    el('th', null, '最少月'),
+    el('th', null, '月均'),
+    el('th', null, '本月'),
+  ));
+
+  const curMonth = state.currentMonth;
+
+  for (const r of reducers) {
+    // 各月聚合
+    const monthVals = months.map(m => {
+      let sum = 0;
+      for (const date of Object.keys(state.data.days)) {
+        if (date.startsWith(m + '-')) sum += r.fn(state.data.days[date]);
+      }
+      return { m, v: sum };
+    });
+    // 過濾 0 值月(沒做這項的月)
+    const nonZero = monthVals.filter(x => x.v > 0);
+    if (!nonZero.length) continue;
+    const max = nonZero.reduce((a,b) => b.v > a.v ? b : a);
+    const min = nonZero.reduce((a,b) => b.v < a.v ? b : a);
+    const avg = Math.round(nonZero.reduce((s,x) => s+x.v, 0) / nonZero.length);
+    const curEntry = monthVals.find(x => x.m === curMonth);
+    const curVal = curEntry ? curEntry.v : 0;
+    const fmt = (v) => r.key === 'proc_rev' ? '$' + fmtMoney(v) : String(v);
+    t.appendChild(el('tr', null,
+      el('td', null, r.name),
+      el('td', null, `${max.m.slice(5)}月 · ${fmt(max.v)}`),
+      el('td', null, `${min.m.slice(5)}月 · ${fmt(min.v)}`),
+      el('td', null, fmt(avg)),
+      el('td', { style: curVal === max.v && curVal > 0 ? 'color:#3fb950;font-weight:600' :
+                        curVal === min.v && curVal > 0 ? 'color:#f0883e;font-weight:600' : null },
+        curVal ? fmt(curVal) : '—'),
+    ));
+  }
+}
+
+// helper:某天某 group 的合計(包含 aggregate)
+function getGroupSum(day, groupName) {
+  const grp = COUNTS_SCHEMA.find(g => g.group === groupName);
+  if (!grp) return 0;
+  let s = 0;
+  for (const c of grp.children) {
+    if (c.isOtherAggregate) s += specialOthersTotalCount(day);
+    else s += getCount(day, c.key);
+  }
+  return s;
 }
 
 // --- TSV export ---
