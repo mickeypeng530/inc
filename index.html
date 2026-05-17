@@ -3481,9 +3481,15 @@ function renderMonth() {
   // === 底部:病歷號 row + Total 收入 + Procedure 金額 + 加班刷卡 ===
 
   // Procedure row:cell 顯示「名稱*次數」聚合;點 cell 跳 popover 列各筆病歷號
+  // 月計欄 = 本月 procedure 總筆數
+  let procMonthCount = 0;
+  for (const date of days) {
+    const day = state.data.days[date];
+    procMonthCount += (day?.procedures || []).length;
+  }
   const noteTr = el('tr', { class: 'pivot-note-row' },
     el('td', { class: 'row-label' }, 'Procedure'),
-    el('td', { class: 'col-total' }, '')
+    el('td', { class: 'col-total' }, procMonthCount ? String(procMonthCount) : '')
   );
   for (const date of days) {
     const day = state.data.days[date];
