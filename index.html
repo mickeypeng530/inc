@@ -3546,13 +3546,14 @@ function renderMonth() {
   }
   t.appendChild(procTr);
 
-  // 加班刷卡 (editable)
+  // 加班刷卡 (editable):day entry 存在就顯示數字(含 0),否則空白
   let otMonth = 0;
   const otCells = days.map(date => {
     const day = state.data.days[date];
-    const v = day ? Number(day.overtimeHours || 0) : 0;
-    otMonth += v;
-    return { date, val: v };
+    // val 為 number(含 0)若該日有 entry;否則 null(=空白)
+    const v = day ? Number(day.overtimeHours || 0) : null;
+    if (v) otMonth += v;
+    return { date, val: v, hasDay: !!day };
   });
   const otTr = el('tr', { class: 'pivot-bottom-row' },
     el('td', { class: 'row-label' }, '加班刷卡'),
@@ -3565,7 +3566,9 @@ function renderMonth() {
       class: 'pivot-cell pivot-ot-cell pivot-ot-' + (dayType === '假日' ? 'holiday' : 'weekday') + weekCls(c.date),
       title: dayType
     },
-      el('input', { class: 'pivot-input', type: 'number', step: '0.5', value: c.val ? String(c.val) : '', min: '0',
+      el('input', { class: 'pivot-input', type: 'number', step: '0.5',
+        value: c.val != null ? String(c.val) : '',
+        min: '0',
         oninput: (e) => setMonthCellOvertime(c.date, e.target.value),
         onblur: () => renderMonth()
       })
