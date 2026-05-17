@@ -874,6 +874,20 @@ select.btn-secondary option {
 .collapsible-panel > :not(summary) { padding: 12px 14px; }
 .collapsible-panel > table { margin: 12px 14px; width: calc(100% - 28px); padding: 0; }
 
+/* 值班相關 標題列的 dutyNote inline input */
+.schedule-duty-inline {
+  margin-left: auto;
+  width: 110px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background: var(--bg-input, var(--bg-panel));
+  color: var(--ink-1);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.schedule-duty-inline:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
 /* 3-col 內的 collapsible panel 緊一點 padding(歷月紀錄是 full-width 不受影響)*/
 .month-3col .collapsible-panel > summary { padding: 8px 10px; }
 .month-3col .collapsible-panel > :not(summary) { padding: 6px 10px; }
@@ -1647,9 +1661,12 @@ body:not(.mini-mode) #view-mini { display: none; }
       <table class="settings-table" id="month-procbreakdown"></table>
     </details>
 
-    <!-- col 2: 值班相關(預設收合) -->
+    <!-- col 2: 值班相關(預設收合;標題列顯示本月值班數)-->
     <details class="panel collapsible-panel" id="panel-month-schedule">
-      <summary><h2>值班相關</h2></summary>
+      <summary>
+        <h2>值班相關</h2>
+        <input id="schedule-duty-inline" class="schedule-duty-inline" type="text" placeholder="例:IR2平1假" onclick="event.stopPropagation()" />
+      </summary>
       <div id="schedule-blocks-container"></div>
     </details>
 
@@ -3126,6 +3143,20 @@ function renderScheduleBlock() {
   if (state.scheduleBlocks[cur] === undefined) state.scheduleBlocks[cur] = true;
   if (state.scheduleBlocks[nxt] === undefined) state.scheduleBlocks[nxt] = false;
 
+  // panel summary 旁的 dutyNote inline 編輯
+  const dutyInline = $('schedule-duty-inline');
+  if (dutyInline) {
+    const meta = state.data.monthlyMeta?.[cur] || {};
+    dutyInline.value = meta.dutyNote || '';
+    dutyInline.oninput = (e) => {
+      if (!state.data.monthlyMeta) state.data.monthlyMeta = {};
+      if (!state.data.monthlyMeta[cur]) state.data.monthlyMeta[cur] = {};
+      state.data.monthlyMeta[cur].dutyNote = e.target.value;
+      clearTimeout(state.noteDebounce);
+      state.noteDebounce = setTimeout(() => storage.save(state.data), 350);
+    };
+  }
+
   container.innerHTML = '';
   container.appendChild(renderScheduleMonthBlock(cur));
   container.appendChild(renderScheduleMonthBlock(nxt));
@@ -3140,7 +3171,7 @@ function renderScheduleMonthBlock(month) {
   const block = el('div', { class: `schedule-month-block${isOpen ? '' : ' collapsed'}` });
 
   const head = el('div', { class: 'schedule-month-head' },
-    el('span', { class: 'schedule-month-title' }, `${Number(month.slice(5,7))}月預班`),
+    el('span', { class: 'schedule-month-title' }, `${Number(month.slice(5,7))}月 預約不值班`),
     el('span', { class: 'schedule-month-summary' }, dates.length ? `${dates.length} 天` : '—'),
     el('span', null, isOpen ? '▼' : '▶')
   );
@@ -3158,21 +3189,7 @@ function renderScheduleMonthBlock(month) {
     return state.data.monthlyMeta[month];
   };
 
-  // 當月值班數目(例:IR2平1假)
-  const dutyInput = el('input', {
-    class: 'schedule-duty-input', type: 'text',
-    value: meta.dutyNote || '',
-    placeholder: '例:IR2平1假'
-  });
-  dutyInput.addEventListener('input', (e) => {
-    ensureMeta().dutyNote = e.target.value;
-    clearTimeout(state.noteDebounce);
-    state.noteDebounce = setTimeout(() => storage.save(state.data), 350);
-  });
-  body.appendChild(el('div', { class: 'schedule-duty-row' },
-    el('span', { class: 'schedule-duty-label' }, '當月值班'),
-    dutyInput
-  ));
+  // (本月值班數已移到 panel summary 標題列 — 下方僅保留「預約不值班」清單)
 
   // 統整 row
   const noteInput = el('input', {
