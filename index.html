@@ -1475,6 +1475,14 @@ body:not(.mini-mode) #view-mini { display: none; }
 </head>
 <body>
 
+<!-- 登入畫面(靜態 HTML,iOS Safari popup 需 user-gesture 不能用 innerHTML 動態建)-->
+<div id="login-screen" style="display:none;min-height:100vh;align-items:center;justify-content:center;background:#0e1117;font-family:system-ui,sans-serif;">
+  <button id="login-btn" title="Sign in" aria-label="Sign in" style="width:64px;height:64px;border-radius:50%;background:#161b22;color:#8b949e;border:1px solid #30363d;cursor:pointer;font-size:24px;display:flex;align-items:center;justify-content:center;">→</button>
+  <div id="login-err" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);color:#8b949e;font-size:11px;background:#161b22;padding:8px 12px;border-radius:6px;border:1px solid #30363d;"></div>
+</div>
+
+<div id="app-root" style="display:none;">
+
 <header>
   <h1>績效紀錄</h1>
   <nav class="tabs">
@@ -4015,25 +4023,30 @@ function setView(name) {
   if (name === 'settings') renderSettings();
 }
 
+// 靜態 login-screen show/hide(playbook: iOS Safari popup 需 user-gesture
+// preserve,所以 button 必須是預先在 HTML 內的靜態元素,不能 innerHTML 動態建)
 function showLoginUI(errMsg) {
   document.title = '';
-  document.body.innerHTML = `
-    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0e1117;font-family:system-ui,sans-serif;">
-      <button id="login-btn" title="Sign in" aria-label="Sign in" style="width:64px;height:64px;border-radius:50%;background:#161b22;color:#8b949e;border:1px solid #30363d;cursor:pointer;font-size:24px;display:flex;align-items:center;justify-content:center;">
-        →
-      </button>
-      ${errMsg ? `<div style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);color:#8b949e;font-size:11px;background:#161b22;padding:8px 12px;border-radius:6px;border:1px solid #30363d;">${errMsg}</div>` : ''}
-    </div>
-  `;
-  document.getElementById('login-btn').addEventListener('click', async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(fbAuth, provider);
-    } catch (e) {
-      showLoginUI('Auth failed');
-    }
-  });
+  document.getElementById('app-root').style.display = 'none';
+  const ls = document.getElementById('login-screen');
+  ls.style.display = 'flex';
+  const errEl = document.getElementById('login-err');
+  if (errMsg) { errEl.textContent = errMsg; errEl.style.display = ''; }
+  else errEl.style.display = 'none';
 }
+// 一次性綁 login button click(靜態 HTML 元素)
+document.getElementById('login-btn').addEventListener('click', async () => {
+  try {
+    const provider = new GoogleAuthProvider();
+    await signInWithPopup(fbAuth, provider);
+    // onAuthStateChanged 不會自動 re-trigger init,需 reload
+    location.reload();
+  } catch (e) {
+    const errEl = document.getElementById('login-err');
+    errEl.textContent = 'Auth failed: ' + (e.code || e.message);
+    errEl.style.display = '';
+  }
+});
 
 async function init() {
   // === Auth gate ===
@@ -4043,11 +4056,14 @@ async function init() {
   if (!user) { showLoginUI(); return; }
   if (user.email !== ALLOWED_EMAIL) {
     await signOut(fbAuth);
-    showLoginUI(`此帳號(${user.email})無權限`);
+    showLoginUI(`Account not allowed`);
     return;
   }
   currentUser = user;
   userDataRef = ref(fbDB, `users/${user.uid}/worknum`);
+  // 通過 auth → 顯示 app
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-root').style.display = '';
 
   // === 載入資料:Firebase 優先;若 Firebase 空,把本地 localStorage 推上去當初始 ===
   const fbData = await storage.loadFromFirebase();
@@ -4209,6 +4225,8 @@ init().catch(e => {
   document.body.innerHTML = `<pre style="color:red;padding:20px">初始化失敗:${e.message}\n${e.stack}</pre>`;
 });
 </script>
+
+</div><!-- /app-root -->
 
 </body>
 </html>
