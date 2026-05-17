@@ -3289,8 +3289,13 @@ function renderMonth() {
       if (y === curYear) opt.selected = true;
       yearSel.appendChild(opt);
     }
+    // 歷史最早月份(整個 app 不該早於 2023-12 — 那是 import 的起點)
+    const EARLIEST = '2023-12';
+    const [earliestY, earliestM] = EARLIEST.split('-').map(Number);
     monthSel.innerHTML = '';
     for (let m = 1; m <= 12; m++) {
+      // 在最早年份 → 只允許 >= 最早月份;之後年份 → 全 12 月
+      if (curYear === earliestY && m < earliestM) continue;
       const opt = document.createElement('option');
       opt.value = String(m).padStart(2, '0');
       opt.textContent = String(m).padStart(2, '0') + ' 月';
