@@ -1803,15 +1803,15 @@ let suppressNextOnValue = false;  // 避免本機 save 觸發 onValue 又重抓�
 // ===== Seed data (從現有 sheet 抽出) =====
 const SEED = {
   unitPrices: {
-    ct:    { opd: 350, er_adm_self: 420, ldct_health: 554 },
-    mr:    { opd: 700, er_adm_health: 840 },
+    ct:    { opd: 350, er_adm_self: 420, ldct_health: 554, ph: 350 },
+    mr:    { opd: 700, er_adm_health: 840, ph: 700 },
     bmd:   120,
     special: {
       swal: 231, hsg: 210,
       eso_tbe: 90, ugi: 217, sb: 221, ugisb: 437, lgi: 200,
       ivp: 145, vcug: 113, ttube: 123, cystography: 100, fistu: 153, intus: 437,
     },
-    xray:  { opd: 25, portable: 25, er: 33 },
+    xray:  { opd: 25, portable: 25, er: 33, ph: 25 },
     consult: 200,
     sono: 150,
     opd: 500
@@ -1987,10 +1987,12 @@ const COUNTS_SCHEMA = [
     { key: 'ct.opd',            label: 'OPD' },
     { key: 'ct.er_adm_self',    label: 'ER+ADM+自' },
     { key: 'ct.ldct_health',    label: 'LDCT' },
+    { key: 'ct.ph',             label: 'PH 澎湖' },
   ]},
   { group: 'MR', children: [
     { key: 'mr.opd',            label: 'OPD' },
     { key: 'mr.er_adm_health',  label: 'ER+ADM+H' },
+    { key: 'mr.ph',             label: 'PH 澎湖' },
   ]},
   { group: 'BMD', children: [
     { key: 'bmd',               label: '' },
@@ -2018,6 +2020,7 @@ const COUNTS_SCHEMA = [
     { key: 'xray.opd',          label: 'OPD' },
     { key: 'xray.portable',     label: 'Portable' },
     { key: 'xray.er',           label: 'ER' },
+    { key: 'xray.ph',           label: 'PH 澎湖' },
   ]},
   { group: 'Other', children: [
     { key: 'consult',           label: '會診' },
@@ -2427,8 +2430,10 @@ function calcBaseRevenue(day, settings) {
   r += getCount(day,'ct.opd') * p.ct.opd;
   r += getCount(day,'ct.er_adm_self') * p.ct.er_adm_self;
   r += getCount(day,'ct.ldct_health') * p.ct.ldct_health;
+  r += getCount(day,'ct.ph') * (p.ct.ph || 0);
   r += getCount(day,'mr.opd') * p.mr.opd;
   r += getCount(day,'mr.er_adm_health') * p.mr.er_adm_health;
+  r += getCount(day,'mr.ph') * (p.mr.ph || 0);
   r += getCount(day,'bmd') * p.bmd;
   r += getCount(day,'special.swal') * (p.special.swal || 0);
   r += getCount(day,'special.hsg')  * (p.special.hsg || 0);
@@ -2436,6 +2441,7 @@ function calcBaseRevenue(day, settings) {
   r += getCount(day,'xray.opd') * p.xray.opd;
   r += getCount(day,'xray.portable') * (p.xray.portable || 0);
   r += getCount(day,'xray.er') * p.xray.er;
+  r += getCount(day,'xray.ph') * (p.xray.ph || 0);
   r += getCount(day,'consult') * p.consult;
   r += getCount(day,'sono') * p.sono;
   r += getCount(day,'opd') * p.opd;
