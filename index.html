@@ -3659,15 +3659,20 @@ function renderMonth() {
       el('div', { class: 'income-field-sub' }, sublabel)
     );
   };
+  const incomeFields = [
+    mkIncomeField('我的 Total', '自己算', revMonth, false, null),
+  ];
+  // 澎湖兼職月份(2025-06~10)→ 多顯示「含澎湖」(本院 + PH)
+  if (mm.phRevenue != null) {
+    incomeFields.push(mkIncomeField('含澎湖 Total', `本院 + PH ${fmtMoney(mm.phRevenue)}`, (mm.totalWithPH != null ? mm.totalWithPH : revMonth + mm.phRevenue), false, null));
+  }
+  incomeFields.push(mkIncomeField('績效總額', '科上(含值班費)', mm.perfTotal, true, 'perfTotal'));
+  incomeFields.push(mkIncomeField('最後稅前薪水', '醫院實付', mm.pretaxSalary, true, 'pretaxSalary'));
   t.appendChild(el('tr', { class: 'pivot-bottom-row pivot-income-row' },
     el('td', { class: 'row-label' }, '月收入'),
     el('td', { class: 'col-total' }, ''),
     el('td', { colspan: String(colspan), class: 'pivot-income-cell' },
-      el('div', { class: 'income-summary' },
-        mkIncomeField('我的 Total', '自己算', revMonth, false, null),
-        mkIncomeField('績效總額', '科上(含值班費)', mm.perfTotal, true, 'perfTotal'),
-        mkIncomeField('最後稅前薪水', '醫院實付', mm.pretaxSalary, true, 'pretaxSalary')
-      )
+      el('div', { class: 'income-summary' }, ...incomeFields)
     )
   ));
 
