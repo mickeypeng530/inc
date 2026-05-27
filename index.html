@@ -3729,7 +3729,7 @@ function renderMonthProcBreakdown() {
   let totalCount = 0, totalAmount = 0;
   let mskCount = 0, mskAmount = 0;
   // 已知 MSK 關鍵字(用於 import 來的未登錄 atomic ID 自動判 MSK)
-  const MSK_KEYWORDS = ['nb', 'caudal', 'arthro', 'bone', 'biopsy', 'rf', 'myelo', 'joint', 'tp', 'inj', 'msk'];
+  const MSK_KEYWORDS = ['nb', 'caudal', 'arthro', 'bone', 'biopsy', 'rf', 'myelo', 'joint', 'tp', 'inj', 'msk', 'muscle'];
   const isMSKByName = (s) => {
     const l = String(s || '').toLowerCase();
     return MSK_KEYWORDS.some(k => l.includes(k));
