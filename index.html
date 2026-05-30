@@ -2466,6 +2466,11 @@ function calcProcRevenue(day) {
 function calcAddonRevenue(day) {
   return (day.addons || []).reduce((s, a) => s + Number(a.count || 1) * Number(a.amount || 0), 0);
 }
+// 每日 procedure 收入:2512+ 有醫師手算的 irRevenue 則優先(逐筆 NB 無法從 detail 分辨)
+function getDayProcRevenue(day) {
+  if (day && typeof day.irRevenue === 'number') return day.irRevenue;
+  return calcProcRevenue(day);
+}
 function calcMeetingRevenue(day) {
   return (day.meetings || []).reduce((s, m) => s + Number(m.amount||0), 0);
 }
@@ -3606,11 +3611,11 @@ function renderMonth() {
   }
   t.appendChild(totalTr);
 
-  // Procedure 金額 (read-only, IR 部分)
+  // Procedure 金額 (read-only, IR 部分) — 2512+ 有 irRevenue 則用醫師手算權威值
   let procMonth = 0;
   const procCells = days.map(date => {
     const day = state.data.days[date];
-    const v = day ? calcProcRevenue(day) : 0;
+    const v = day ? getDayProcRevenue(day) : 0;
     procMonth += v;
     return v;
   });
