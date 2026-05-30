@@ -1297,6 +1297,16 @@ select.btn-secondary option {
 .pivot-input::-webkit-inner-spin-button,
 .pivot-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .pivot-input { -moz-appearance: textfield; appearance: textfield; }
+/* 月表編輯模式:非編輯時格子鎖定,編輯時解鎖 + 視覺提示 */
+.pivot-table:not(.edit-mode) .pivot-input { pointer-events: none; }
+.pivot-table.edit-mode .pivot-input { background: var(--bg-page); outline: 1px solid var(--border); border-radius: 2px; }
+.pivot-table.edit-mode .pivot-edit-cell input {
+  width: 100%; background: var(--bg-page); color: var(--ink-1);
+  border: none; outline: 1px solid var(--border); border-radius: 2px;
+  text-align: center; font-family: var(--font-mono); font-size: 11px; padding: 2px;
+}
+.pivot-table.edit-mode .pivot-edit-cell input:focus { outline: 1px solid var(--accent); }
+#month-edit-toggle.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 /* === Settings 3-col layout (collapsible details) === */
 #view-settings.active {
@@ -1676,6 +1686,7 @@ body:not(.mini-mode) #view-mini { display: none; }
     <select id="month-month-sel" class="btn-secondary" style="padding:4px 8px"></select>
     <button id="month-next" class="btn-secondary">→</button>
     <span class="header-spacer" style="flex:1"></span>
+    <button id="month-edit-toggle" class="btn-secondary" title="切換編輯模式:解鎖所有格子(計數/加班/收入/IR)">✏️ 編輯</button>
   </div>
   <div style="overflow-x:auto">
     <table class="pivot-table" id="month-pivot"></table>
@@ -2311,6 +2322,7 @@ const state = {
   specialOtherOpen: false,    // counts panel Other 收合(不存)
   specialOtherDraft: null,     // 新增 row 草稿:{ catalogId, amount, count }
   scheduleBlocks: {},          // { 'YYYY-MM': open?:bool }
+  monthEditMode: false,        // 月表編輯模式:解鎖所有格子(不存)
 };
 
 const bcChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('worknum') : null;
@@ -3335,6 +3347,24 @@ function setMonthCellOvertime(date, val) {
   clearTimeout(state.monthSaveDebounce);
   state.monthSaveDebounce = setTimeout(() => storage.save(state.data), 200);
 }
+// 編輯模式:改每日總收入 → 存 importedRevenue override(空字串=清除,回到計算值)
+function setMonthCellRevenue(date, val) {
+  const day = getDay(date);
+  if (val === '' || val == null) delete day.importedRevenue;
+  else day.importedRevenue = Number(val) || 0;
+  day.updatedAt = new Date().toISOString();
+  clearTimeout(state.monthSaveDebounce);
+  state.monthSaveDebounce = setTimeout(() => storage.save(state.data), 200);
+}
+// 編輯模式:改每日 procedure 金額 → 存 irRevenue override
+function setMonthCellIR(date, val) {
+  const day = getDay(date);
+  if (val === '' || val == null) delete day.irRevenue;
+  else day.irRevenue = Number(val) || 0;
+  day.updatedAt = new Date().toISOString();
+  clearTimeout(state.monthSaveDebounce);
+  state.monthSaveDebounce = setTimeout(() => storage.save(state.data), 200);
+}
 
 function renderMonth() {
   const month = state.currentMonth;
@@ -3383,6 +3413,7 @@ function renderMonth() {
 
   const t = $('month-pivot');
   t.innerHTML = '';
+  t.className = 'pivot-table' + (state.monthEditMode ? ' edit-mode' : '');
 
   // 週 class helper:週一左邊 = 週界線(切在 日|一 中間);週六日 = 週末底色
   const WD_CHAR = ['日','一','二','三','四','五','六'];
@@ -3608,10 +3639,19 @@ function renderMonth() {
   );
   for (let di = 0; di < revCells.length; di++) {
     const rc = revCells[di];
-    totalTr.appendChild(el('td', {
-      class: 'pivot-cell pivot-rev-cell' + weekCls(days[di]) + (rc.imported ? ' pivot-rev-imported' : ''),
+    const date = days[di];
+    const cell = el('td', {
+      class: 'pivot-cell pivot-rev-cell' + (state.monthEditMode ? ' pivot-edit-cell' : '') + weekCls(date) + (rc.imported ? ' pivot-rev-imported' : ''),
       title: rc.imported ? '原始匯入值' : ''
-    }, rc.v ? fmtMoney(rc.v) : ''));
+    });
+    if (state.monthEditMode) {
+      cell.appendChild(el('input', { type: 'number', value: rc.v ? String(Math.round(rc.v)) : '',
+        oninput: (e) => setMonthCellRevenue(date, e.target.value),
+        onblur: () => renderMonth() }));
+    } else {
+      cell.textContent = rc.v ? fmtMoney(rc.v) : '';
+    }
+    totalTr.appendChild(cell);
   }
   t.appendChild(totalTr);
 
@@ -3628,8 +3668,16 @@ function renderMonth() {
     el('td', { class: 'col-total' }, fmtMoney(procMonth))
   );
   for (let di = 0; di < procCells.length; di++) {
-    procTr.appendChild(el('td', { class: 'pivot-cell pivot-rev-cell' + weekCls(days[di]) },
-      procCells[di] ? fmtMoney(procCells[di]) : ''));
+    const date = days[di];
+    const cell = el('td', { class: 'pivot-cell pivot-rev-cell' + (state.monthEditMode ? ' pivot-edit-cell' : '') + weekCls(date) });
+    if (state.monthEditMode) {
+      cell.appendChild(el('input', { type: 'number', value: procCells[di] ? String(Math.round(procCells[di])) : '',
+        oninput: (e) => setMonthCellIR(date, e.target.value),
+        onblur: () => renderMonth() }));
+    } else {
+      cell.textContent = procCells[di] ? fmtMoney(procCells[di]) : '';
+    }
+    procTr.appendChild(cell);
   }
   t.appendChild(procTr);
 
@@ -4546,6 +4594,13 @@ async function init() {
   };
   $('month-year-sel').onchange = _onMonthSelChange;
   $('month-month-sel').onchange = _onMonthSelChange;
+
+  $('month-edit-toggle').onclick = () => {
+    state.monthEditMode = !state.monthEditMode;
+    $('month-edit-toggle').classList.toggle('active', state.monthEditMode);
+    $('month-edit-toggle').textContent = state.monthEditMode ? '✓ 完成' : '✏️ 編輯';
+    renderMonth();
+  };
 
   $('preset-add').onclick = addPresetToToday;
 
