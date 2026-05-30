@@ -1382,6 +1382,12 @@ select.btn-secondary option {
 .settings-table tr.dragging { opacity: 0.4; }
 .settings-table tr.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
 
+/* Preset items 編輯區 */
+.preset-items-edit { display: flex; flex-direction: column; gap: 4px; }
+.preset-item-row { display: flex; align-items: center; gap: 4px; }
+.preset-item-row select { flex: 1; min-width: 0; }
+.preset-item-row .amount { width: 72px; flex: none; }
+
 /* === Modal === */
 .modal-overlay {
   position: fixed; inset: 0;
@@ -1722,16 +1728,21 @@ body:not(.mini-mode) #view-mini { display: none; }
   </details>
 
   <details class="settings-section">
-    <summary>Presets(組合包,28 項)</summary>
+    <summary>Presets(組合包)</summary>
     <div class="settings-body">
-      <p class="settings-hint">Preset 可指向多個 atomic,total 為其合計。改 atomic 金額會提示連動。</p>
+      <p class="settings-hint">Preset 可指向多個 atomic,total 為其合計。改 atomic 金額會提示連動。拖 ⋮⋮ 可重排。</p>
       <table class="settings-table" id="settings-presets"></table>
+      <button class="btn-secondary" id="preset-catalog-add" style="margin-top:8px">＋ 新增 Preset</button>
     </div>
   </details>
 
   <details class="settings-section">
     <summary>會議目錄(meetingCatalog)</summary>
-    <div class="settings-body"><table class="settings-table" id="settings-meetings"></table></div>
+    <div class="settings-body">
+      <p class="settings-hint">拖 ⋮⋮ 可上下重排。</p>
+      <table class="settings-table" id="settings-meetings"></table>
+      <button class="btn-secondary" id="meeting-add" style="margin-top:8px">＋ 新增會議</button>
+    </div>
   </details>
 
   <details class="settings-section">
@@ -4255,40 +4266,115 @@ function showCascadeModal(atom, oldAmt, newAmt, affected) {
   mount.appendChild(overlay);
 }
 
+// 通用拖拉重排:回傳 { handle, attach(tr) }。arr=陣列, i=索引, rerender=重繪函數
+function dragReorder(arr, i, rerender) {
+  let trRef = null;
+  const handle = el('td', { class: 'col-drag drag-handle', draggable: 'true', title: '拖拉重排' }, '⋮⋮');
+  handle.addEventListener('dragstart', (e) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(i));
+    if (trRef) trRef.classList.add('dragging');
+  });
+  handle.addEventListener('dragend', () => { if (trRef) trRef.classList.remove('dragging'); });
+  const attach = (tr) => {
+    trRef = tr;
+    tr.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; tr.classList.add('drag-over'); });
+    tr.addEventListener('dragleave', () => tr.classList.remove('drag-over'));
+    tr.addEventListener('drop', (e) => {
+      e.preventDefault();
+      tr.classList.remove('drag-over');
+      const from = Number(e.dataTransfer.getData('text/plain'));
+      if (Number.isNaN(from) || from === i) return;
+      const [moved] = arr.splice(from, 1);
+      arr.splice(i, 0, moved);
+      storage.save(state.data);
+      rerender();
+    });
+  };
+  return { handle, attach };
+}
+
 function renderSettingsPresets() {
   const t = $('settings-presets');
   t.innerHTML = '';
   t.appendChild(el('tr', null,
-    el('th', null, '名稱'), el('th', null, 'Items (atomic + amount)'), el('th', null, 'Total')
+    el('th', { class: 'col-drag' }, ''),
+    el('th', null, '名稱'), el('th', null, 'Items (atomic + 金額)'), el('th', null, 'Total'),
+    el('th', { class: 'col-narrow' }, '')
   ));
-  for (const p of state.data.settings.presets) {
+  const arr = state.data.settings.presets;
+  const atoms = state.data.settings.atomicItems;
+  for (const [i, p] of arr.entries()) {
+    if (!Array.isArray(p.items)) p.items = [];
     const total = p.items.reduce((s,it)=>s+Number(it.amount||0),0);
-    const itemsText = p.items.map(it => {
-      const atom = state.data.settings.atomicItems.find(a => a.id === it.atomicId);
-      return `${atom?.name || it.atomicId}:${fmtMoney(it.amount)}`;
-    }).join(' + ') || '(空)';
-    t.appendChild(el('tr', null,
+
+    // items 編輯區
+    const itemsBox = el('div', { class: 'preset-items-edit' });
+    for (const [j, it] of p.items.entries()) {
+      const atomSel = el('select', { onchange: (e) => {
+        it.atomicId = e.target.value;
+        const a = atoms.find(x => x.id === it.atomicId);
+        if (a && (it.amount == null || it.amount === 0)) it.amount = a.amount;
+        storage.save(state.data); renderSettingsPresets(); renderProceduresPanel();
+      } });
+      for (const a of atoms) {
+        const opt = el('option', { value: a.id }, a.name);
+        if (a.id === it.atomicId) opt.selected = true;
+        atomSel.appendChild(opt);
+      }
+      itemsBox.appendChild(el('div', { class: 'preset-item-row' },
+        atomSel,
+        el('input', { class: 'amount', type: 'number', value: String(it.amount||0),
+          oninput: (e) => { it.amount = Number(e.target.value)||0; storage.save(state.data); renderProceduresPanel(); },
+          onblur: () => renderSettingsPresets() }),
+        el('button', { class: 'btn-del', title: '刪除此項', onclick: () => { p.items.splice(j,1); storage.save(state.data); renderSettingsPresets(); renderProceduresPanel(); } }, '×')
+      ));
+    }
+    itemsBox.appendChild(el('button', { class: 'btn-step', style: 'margin-top:4px', onclick: () => {
+      const first = atoms[0];
+      p.items.push({ atomicId: first ? first.id : '', amount: first ? first.amount : 0 });
+      storage.save(state.data); renderSettingsPresets(); renderProceduresPanel();
+    } }, '+ 加項目'));
+
+    const { handle, attach } = dragReorder(arr, i, renderSettingsPresets);
+    const tr = el('tr', null,
+      handle,
       el('td', null, el('input', { type: 'text', value: p.name, oninput: (e) => { p.name = e.target.value; storage.save(state.data); renderProceduresPanel(); } })),
-      el('td', null, itemsText),
-      el('td', null, fmtMoney(total))
-    ));
+      el('td', null, itemsBox),
+      el('td', null, fmtMoney(total)),
+      el('td', { class: 'col-narrow' },
+        el('button', { class: 'btn-del', title: '刪除 preset', onclick: () => { arr.splice(i,1); storage.save(state.data); renderSettingsPresets(); renderProceduresPanel(); } }, '×'))
+    );
+    attach(tr);
+    t.appendChild(tr);
   }
 }
 
 function renderSettingsMeetings() {
   const t = $('settings-meetings');
   t.innerHTML = '';
-  t.appendChild(el('tr', null, el('th', null, '角色'), el('th', null, '名稱'), el('th', null, '出席費')));
-  for (const m of state.data.settings.meetingCatalog) {
+  t.appendChild(el('tr', null,
+    el('th', { class: 'col-drag' }, ''),
+    el('th', null, '角色'), el('th', null, '名稱'), el('th', null, '出席費'),
+    el('th', { class: 'col-narrow' }, '')
+  ));
+  const arr = state.data.settings.meetingCatalog;
+  for (const [i, m] of arr.entries()) {
     const sel = el('select', { onchange: (e) => { m.role = e.target.value; storage.save(state.data); } },
       el('option', { value: '主講', ...(m.role==='主講'?{selected:''}:{}) }, '主講'),
       el('option', { value: '參與', ...(m.role==='參與'?{selected:''}:{}) }, '參與')
     );
-    t.appendChild(el('tr', null,
+    const { handle, attach } = dragReorder(arr, i, renderSettingsMeetings);
+    const tr = el('tr', null,
+      handle,
       el('td', { style: 'width:80px' }, sel),
       el('td', null, el('input', { type: 'text', value: m.name, oninput: (e) => { m.name = e.target.value; storage.save(state.data); renderProceduresPanel(); } })),
-      el('td', null, el('input', { class: 'amount', type: 'number', value: String(m.amount), oninput: (e) => { m.amount = Number(e.target.value)||0; storage.save(state.data); renderProceduresPanel(); } }))
-    ));
+      el('td', null, el('input', { class: 'amount', type: 'number', value: String(m.amount), oninput: (e) => { m.amount = Number(e.target.value)||0; storage.save(state.data); renderProceduresPanel(); } })),
+      el('td', { class: 'col-narrow' },
+        el('button', { class: 'btn-del', title: '刪除會議', onclick: () => { arr.splice(i,1); storage.save(state.data); renderSettingsMeetings(); renderProceduresPanel(); } }, '×'))
+    );
+    attach(tr);
+    t.appendChild(tr);
   }
 }
 
@@ -4478,6 +4564,20 @@ async function init() {
     state.data.settings.atomicItems.push({ id, name: '新原子項', amount: 0, includeInStats: true });
     storage.save(state.data);
     renderSettingsAtomics();
+  };
+
+  $('preset-catalog-add').onclick = () => {
+    state.data.settings.presets.push({ id: 'preset_' + Date.now(), name: '新 Preset', items: [] });
+    storage.save(state.data);
+    renderSettingsPresets();
+    renderProceduresPanel();
+  };
+
+  $('meeting-add').onclick = () => {
+    state.data.settings.meetingCatalog.push({ id: 'mtg_' + Date.now(), role: '參與', name: '新會議', amount: 500 });
+    storage.save(state.data);
+    renderSettingsMeetings();
+    renderProceduresPanel();
   };
 
   $('export-json').onclick = () => {
