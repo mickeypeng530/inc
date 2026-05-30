@@ -1320,6 +1320,19 @@ select.btn-secondary option {
 }
 .pivot-table.edit-mode .pivot-edit-cell input:focus { outline: 1px solid var(--accent); }
 #month-edit-toggle.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+/* 編輯模式:日期 header 可點貼上 */
+.pivot-table .pivot-day-paste { cursor: pointer; }
+.pivot-table.edit-mode .pivot-day-paste:hover { background: var(--accent); color: #fff; }
+/* 貼上 modal */
+.paste-modal { max-width: 480px; width: 92vw; }
+.paste-body { display: grid; grid-template-columns: 1fr 1.2fr; gap: 12px; align-items: start; }
+@media (max-width: 600px) { .paste-body { grid-template-columns: 1fr; } }
+.paste-textarea { width: 100%; box-sizing: border-box; font-family: var(--font-mono); font-size: 13px;
+  background: var(--bg-page); color: var(--ink-1); border: 1px solid var(--border); border-radius: 4px; padding: 8px; resize: vertical; }
+.paste-textarea:focus { outline: 1px solid var(--accent); }
+.paste-preview { max-height: 340px; overflow-y: auto; }
+.paste-preview .settings-table { font-size: 11px; }
+.paste-count-hint { font-size: 11px; color: var(--ink-muted); margin-bottom: 6px; }
 
 /* === Settings 3-col layout (collapsible details) === */
 #view-settings.active {
@@ -1616,6 +1629,7 @@ body:not(.mini-mode) #view-mini { display: none; }
   <button class="icon-btn" id="open-mini" title="開啟迷你快輸視窗">🪟 迷你</button>
   <button class="icon-btn" id="theme-toggle" title="切換主題">🌓</button>
   <button class="icon-btn" id="export-day" title="複製當日計數為 sheet 一欄">📋 當日</button>
+  <button class="icon-btn" id="paste-day" title="從 sheet 貼一整欄計數到當天">📥 貼上</button>
 </header>
 
 <div class="day-nav">
@@ -3455,7 +3469,12 @@ function renderMonth() {
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${month}-${String(d).padStart(2,'0')}`;
     const dow = new Date(dateStr + 'T00:00:00').getDay();
-    headRow.appendChild(el('th', { class: weekCls(dateStr).trim() },
+    const editable = state.monthEditMode;
+    headRow.appendChild(el('th', {
+      class: weekCls(dateStr).trim() + (editable ? ' pivot-day-paste' : ''),
+      title: editable ? `貼上 ${dateStr} 一整欄計數` : '',
+      onclick: editable ? () => showPasteModal(dateStr) : null
+    },
       el('div', null, String(d)),
       el('div', { class: 'pivot-wd' + (dow === 0 || dow === 6 ? ' wd-end' : '') }, WD_CHAR[dow])
     ));
@@ -4191,6 +4210,82 @@ function renderStats() {
   root.innerHTML = html;
 }
 
+// --- 貼上計數(從 sheet 複製一整欄)---
+// 按 sheetOrder(enabled)順序對應;空行=該項不覆蓋
+function parsePastedCounts(text) {
+  const order = state.data.settings.sheetOrder.filter(o => o.enabled);
+  const lines = String(text || '').replace(/\r/g, '').split('\n');
+  return order.map((item, i) => {
+    const raw = (lines[i] != null ? lines[i] : '').trim();
+    const cleaned = raw.replace(/[^\d.\-]/g, '');
+    return { key: item.key, label: item.label, value: cleaned === '' ? null : (Number(cleaned) || 0) };
+  });
+}
+function applyPastedCounts(date, parsed) {
+  const day = getDay(date);
+  for (const p of parsed) {
+    if (p.value == null) continue;  // 空行不覆蓋
+    if (p.key === 'special.total') {
+      const others = ensureSpecialOthers(day);
+      others.length = 0;
+      if (p.value > 0) {
+        const price = state.data.settings.unitPrices.special?.eso_tbe || 231;
+        others.push({ id: 'paste_' + Date.now(), catalogId: 'legacy_other', amount: price, count: p.value });
+      }
+    } else {
+      setCount(day, p.key, p.value);
+    }
+  }
+  day.updatedAt = new Date().toISOString();
+  storage.save(state.data);
+}
+function showPasteModal(date) {
+  const mount = $('modal-mount');
+  const ta = el('textarea', { class: 'paste-textarea', rows: '14',
+    placeholder: '從 sheet 複製一整欄,貼這裡\n(每行一個數字,空行=該項留空)' });
+  const preview = el('div', { class: 'paste-preview' });
+  const renderPrev = () => {
+    const parsed = parsePastedCounts(ta.value);
+    const filled = parsed.filter(p => p.value != null).length;
+    preview.innerHTML = '';
+    const tbl = el('table', { class: 'settings-table' });
+    tbl.appendChild(el('tr', null, el('th', null, '#'), el('th', null, '項目'), el('th', null, '值')));
+    parsed.forEach((p, i) => {
+      tbl.appendChild(el('tr', null,
+        el('td', { style: 'color:var(--ink-muted)' }, String(i + 1)),
+        el('td', null, p.label),
+        el('td', { style: p.value != null ? 'color:var(--accent);font-weight:600' : 'color:var(--ink-muted)' },
+          p.value != null ? String(p.value) : '—')
+      ));
+    });
+    preview.appendChild(el('div', { class: 'paste-count-hint' }, `已對應 ${filled} / ${parsed.length} 項`));
+    preview.appendChild(tbl);
+  };
+  ta.addEventListener('input', renderPrev);
+  renderPrev();
+  const overlay = el('div', { class: 'modal-overlay' });
+  const close = () => overlay.remove();
+  const modal = el('div', { class: 'modal paste-modal' },
+    el('h3', null, `📥 貼上計數 → ${date}`),
+    el('p', { class: 'settings-hint', style: 'margin:4px 0 10px' }, '順序依「設定 → Sheet 列順序」。空行不覆蓋原值,有值的項會覆蓋當天。'),
+    el('div', { class: 'paste-body' }, ta, preview),
+    el('div', { class: 'modal-actions' },
+      el('button', { class: 'btn-secondary', onclick: close }, '取消'),
+      el('button', { class: 'btn-primary', onclick: () => {
+        applyPastedCounts(date, parsePastedCounts(ta.value));
+        close();
+        if ($('view-month').classList.contains('active')) renderMonth();
+        else renderAll();
+        toast(`✓ 已貼上計數到 ${date}`, 'success');
+      } }, '套用')
+    )
+  );
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  mount.appendChild(overlay);
+  setTimeout(() => ta.focus(), 50);
+}
+
 // --- TSV export ---
 function exportDayTSV() {
   const day = getDay(state.currentDate);
@@ -4756,6 +4851,7 @@ async function init() {
   $('day-notes').oninput = (e) => { getDay(state.currentDate).notes = e.target.value; persist(); };
 
   $('export-day').onclick = exportDayTSV;
+  $('paste-day').onclick = () => showPasteModal(state.currentDate);
 
   $('theme-toggle').onclick = () => applyTheme(state.data.settings.theme === 'light' ? 'dark' : 'light');
 
