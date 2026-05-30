@@ -2238,6 +2238,7 @@ function _normalizeData(data) {
     const d = data.days[date];
     if (!Array.isArray(d.procedures)) d.procedures = [];
     if (!Array.isArray(d.meetings)) d.meetings = [];
+    if (!Array.isArray(d.addons)) d.addons = [];
     // 每筆 procedure 內的 items 也要保
     d.procedures.forEach(p => { if (!Array.isArray(p.items)) p.items = []; });
   }
@@ -2451,6 +2452,9 @@ function calcProcRevenue(day) {
   return (day.procedures || []).reduce((s, p) =>
     s + (p.items || []).reduce((ss, it) => ss + Number(it.amount||0), 0), 0);
 }
+function calcAddonRevenue(day) {
+  return (day.addons || []).reduce((s, a) => s + Number(a.count || 1) * Number(a.amount || 0), 0);
+}
 function calcMeetingRevenue(day) {
   return (day.meetings || []).reduce((s, m) => s + Number(m.amount||0), 0);
 }
@@ -2460,7 +2464,7 @@ function calcOvertimeRevenue(day, settings) {
 // 當日總收入:歷史匯入日優先用 sheet 原始值(importedRevenue),否則用計數×單價重算
 function getDayRevenue(day, settings) {
   if (day && typeof day.importedRevenue === 'number') return day.importedRevenue;
-  return calcBaseRevenue(day, settings) + calcProcRevenue(day);
+  return calcBaseRevenue(day, settings) + calcProcRevenue(day) + calcAddonRevenue(day);
 }
 function isImportedDay(day) {
   return !!(day && typeof day.importedRevenue === 'number');
@@ -3537,6 +3541,37 @@ function renderMonth() {
     noteTr.appendChild(cell);
   }
   t.appendChild(noteTr);
+
+  // 額外計費 row(3D / Source)— 非 procedure 的 add-ons
+  let addonTotal = 0;
+  let addonMonthCount = 0;
+  const addonAgg = {};  // 月計 by type
+  const addonCells = days.map(date => {
+    const day = state.data.days[date];
+    const addons = day?.addons || [];
+    if (!addons.length) return null;
+    const agg = {};
+    for (const a of addons) {
+      agg[a.type] = (agg[a.type] || 0) + (a.count || 1);
+      addonAgg[a.type] = (addonAgg[a.type] || 0) + (a.count || 1);
+      addonTotal += (a.count || 1) * (a.amount || 0);
+      addonMonthCount += (a.count || 1);
+    }
+    return agg;
+  });
+  // 整月有 addons 才顯示這 row
+  if (addonMonthCount > 0) {
+    const addonTr = el('tr', { class: 'pivot-bottom-row' },
+      el('td', { class: 'row-label' }, '額外計費'),
+      el('td', { class: 'col-total', title: `本月 +$${fmtMoney(addonTotal)}` },
+        Object.entries(addonAgg).map(([t,n]) => `${t==='d3'?'3D':'Src'}×${n}`).join(' '))
+    );
+    for (const agg of addonCells) {
+      const txt = agg ? Object.entries(agg).map(([t,n]) => `${t==='d3'?'3D':'S'}${n>1?`×${n}`:''}`).join(' ') : '';
+      addonTr.appendChild(el('td', { class: 'pivot-cell pivot-note-cell' }, txt));
+    }
+    t.appendChild(addonTr);
+  }
 
   // Total 收入 (read-only) — 歷史匯入日優先用 importedRevenue
   let revMonth = 0;
