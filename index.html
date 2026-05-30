@@ -3699,7 +3699,7 @@ function renderMonth() {
     mkIncomeField('我的 Total', '自己算', revMonth, false, null),
   ];
   // 澎湖兼職月份(2025-06~10)→ 多顯示「含澎湖」(本院 + PH)
-  if (mm.phRevenue != null) {
+  if (mm.phRevenue > 0) {
     incomeFields.push(mkIncomeField('含澎湖 Total', `本院 + PH ${fmtMoney(mm.phRevenue)}`, (mm.totalWithPH != null ? mm.totalWithPH : revMonth + mm.phRevenue), false, null));
   }
   incomeFields.push(mkIncomeField('績效總額', '科上(含值班費)', mm.perfTotal, true, 'perfTotal'));
