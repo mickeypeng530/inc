@@ -1081,6 +1081,19 @@ select.btn-secondary option {
 .pivot-table .pivot-bottom-row:first-of-type { border-top: 2px solid var(--border); }
 /* Total 列上方加粗線 — 分隔計數/procedure 區 與 收入總額區 */
 .pivot-table .pivot-total-divider td { border-top: 3px solid var(--accent); }
+
+/* === 統計 Dashboard === */
+.stats-dash { display: flex; flex-direction: column; gap: 14px; }
+.kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+@media (max-width: 700px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+.kpi-card { background: var(--bg-panel); border: 1px solid var(--border); padding: 12px 14px; }
+.kpi-label { font-family: var(--font-mono); font-size: 10px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.kpi-val { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 4px; color: var(--ink-1); }
+.kpi-sub { font-size: 11px; color: var(--ink-muted); margin-top: 2px; }
+.stats-panel { background: var(--bg-panel); border: 1px solid var(--border); padding: 12px 14px; }
+.stats-panel h3 { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 12px; }
+.stats-panel h3 .legend { font-weight: 400; color: var(--ink-muted); text-transform: none; letter-spacing: 0; font-size: 10px; margin-left: 8px; }
+.stats-panel h3 .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 3px 0 6px; vertical-align: middle; }
 .pivot-table .pivot-bottom-row .row-label { color: var(--accent); font-weight: 600; }
 .pivot-table .pivot-note-row { background: var(--bg-page); }
 .pivot-table .pivot-note-cell {
@@ -1595,6 +1608,7 @@ body:not(.mini-mode) #view-mini { display: none; }
   <nav class="tabs">
     <button class="tab active" data-view="today">今日</button>
     <button class="tab" data-view="month">月表</button>
+    <button class="tab" data-view="stats">統計</button>
     <button class="tab" data-view="settings">設定</button>
   </nav>
   <span class="day-mini-label" id="day-mini-label" style="display:none"></span>
@@ -1787,6 +1801,11 @@ body:not(.mini-mode) #view-mini { display: none; }
     </div>
   </details>
 
+</section>
+
+<!-- STATS / DASHBOARD VIEW -->
+<section id="view-stats" class="view">
+  <div class="stats-dash" id="stats-dash"></div>
 </section>
 
 </main>
@@ -4045,6 +4064,133 @@ function getGroupSum(day, groupName) {
   return s;
 }
 
+// ===== 統計 Dashboard =====
+// 各月聚合(收入不含會議 — importedRevenue/計算值本就不含會議費)
+function getMonthlyStats() {
+  const months = Array.from(new Set(Object.keys(state.data.days).map(d => d.slice(0,7)))).sort();
+  const settings = state.data.settings;
+  return months.map(m => {
+    let total = 0, ir = 0, ot = 0, ctN = 0, mrN = 0, xrN = 0, bmdN = 0, daysActive = 0;
+    for (const date of Object.keys(state.data.days)) {
+      if (!date.startsWith(m + '-')) continue;
+      const day = state.data.days[date];
+      const dRev = getDayRevenue(day, settings);
+      total += dRev;
+      ir += getDayProcRevenue(day);
+      ot += Number(day.overtimeHours || 0);
+      ctN += getGroupSum(day, 'CT'); mrN += getGroupSum(day, 'MR');
+      xrN += getGroupSum(day, 'X-ray'); bmdN += getCount(day, 'bmd');
+      if (dRev > 0 || (day.procedures||[]).length) daysActive++;
+    }
+    const mm = state.data.monthlyMeta?.[m] || {};
+    return {
+      month: m, total, ir, reading: Math.max(0, total - ir), ot,
+      ctN, mrN, xrN, bmdN, daysActive,
+      perfTotal: mm.perfTotal, pretax: mm.pretaxSalary,
+      procCount: mm.procCount, mskCount: mm.procMSKCount,
+      irPct: total > 0 ? ir / total * 100 : 0,
+    };
+  });
+}
+
+// 簡易 SVG 折線圖(多 series),回傳 SVG 字串
+function svgLineChart(labels, series, w, h) {
+  const pad = { t: 12, r: 12, b: 22, l: 52 };
+  const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b;
+  const n = labels.length;
+  const allv = series.flatMap(s => s.values).filter(v => v != null && !isNaN(v));
+  const max = Math.max(...allv, 1);
+  const X = i => pad.l + (n <= 1 ? iw / 2 : i / (n - 1) * iw);
+  const Y = v => pad.t + ih - (v / max) * ih;
+  let svg = `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="xMidYMid meet" style="overflow:visible">`;
+  // y 軸格線 + 標籤(4 段)
+  for (let g = 0; g <= 4; g++) {
+    const v = max * g / 4, y = Y(v);
+    svg += `<line x1="${pad.l}" y1="${y}" x2="${w-pad.r}" y2="${y}" stroke="var(--grid)" stroke-width="0.5"/>`;
+    svg += `<text x="${pad.l-5}" y="${y+3}" text-anchor="end" font-size="8" fill="var(--ink-muted)">${v>=1000?Math.round(v/1000)+'k':Math.round(v)}</text>`;
+  }
+  // x 軸標籤(疏化:最多 ~8 個)
+  const step = Math.ceil(n / 8);
+  for (let i = 0; i < n; i++) {
+    if (i % step !== 0 && i !== n-1) continue;
+    svg += `<text x="${X(i)}" y="${h-6}" text-anchor="middle" font-size="8" fill="var(--ink-muted)">${labels[i].slice(2)}</text>`;
+  }
+  // 各 series 折線 + 點
+  for (const s of series) {
+    const pts = s.values.map((v, i) => v == null ? null : `${X(i)},${Y(v)}`).filter(Boolean);
+    svg += `<polyline points="${pts.join(' ')}" fill="none" stroke="${s.color}" stroke-width="1.8"/>`;
+    s.values.forEach((v, i) => { if (v != null) svg += `<circle cx="${X(i)}" cy="${Y(v)}" r="2" fill="${s.color}"/>`; });
+  }
+  svg += `</svg>`;
+  return svg;
+}
+
+function renderStats() {
+  const root = $('stats-dash');
+  if (!root) return;
+  const rows = getMonthlyStats();
+  if (!rows.length) { root.innerHTML = '<p style="text-align:center;color:var(--ink-muted);padding:40px">尚無資料</p>'; return; }
+
+  const fmt = (v) => '$' + fmtMoney(Math.round(v || 0));
+  const last = rows[rows.length - 1];
+  const labels = rows.map(r => r.month);
+
+  // 月底預估:若最新月 = 今天的月 且未過完 → 用日均推估
+  const todayMonth = isoToMonth(todayISO());
+  let estimate = null;
+  if (last.month === todayMonth && last.daysActive > 0) {
+    const [y, mo] = last.month.split('-').map(Number);
+    const daysInMonth = new Date(y, mo, 0).getDate();
+    const todayDay = Number(todayISO().slice(8, 10));
+    if (todayDay < daysInMonth) {
+      estimate = Math.round(last.total / todayDay * daysInMonth);
+    }
+  }
+
+  // 趨勢平均(供 KPI 對比)
+  const avgTotal = Math.round(rows.reduce((s, r) => s + r.total, 0) / rows.length);
+
+  let html = '';
+
+  // === KPI 卡列 ===
+  html += `<div class="kpi-row">`;
+  html += `<div class="kpi-card"><div class="kpi-label">${last.month} 我的 Total</div><div class="kpi-val">${fmt(last.total)}</div>`
+        + (estimate ? `<div class="kpi-sub">月底預估 ${fmt(estimate)}</div>` : `<div class="kpi-sub">月均 ${fmt(avgTotal)}</div>`) + `</div>`;
+  html += `<div class="kpi-card"><div class="kpi-label">IR Procedure 收入</div><div class="kpi-val" style="color:#58a6ff">${fmt(last.ir)}</div><div class="kpi-sub">占 ${last.irPct.toFixed(0)}% 收入</div></div>`;
+  html += `<div class="kpi-card"><div class="kpi-label">被動閱片收入</div><div class="kpi-val" style="color:var(--ink-2)">${fmt(last.reading)}</div><div class="kpi-sub">占 ${(100-last.irPct).toFixed(0)}%</div></div>`;
+  html += `<div class="kpi-card"><div class="kpi-label">加班時數</div><div class="kpi-val">${last.ot}<span style="font-size:12px"> hr</span></div><div class="kpi-sub">${last.perfTotal?('績效 '+fmt(last.perfTotal)):''}</div></div>`;
+  html += `</div>`;
+
+  // === 月收入趨勢 ===
+  html += `<div class="stats-panel"><h3>月收入趨勢 <span class="legend"><i style="background:var(--accent)"></i>我的Total <i style="background:#58a6ff"></i>IR</span></h3>`;
+  html += svgLineChart(labels, [
+    { values: rows.map(r => r.total), color: 'var(--accent)' },
+    { values: rows.map(r => r.ir), color: '#58a6ff' },
+  ], 700, 200) + `</div>`;
+
+  // === 被動/主動 收入比 ===
+  html += `<div class="stats-panel"><h3>主動 IR 收入占比趨勢 <span class="legend">(IR ÷ 總收入,看專業價值變化)</span></h3>`;
+  html += svgLineChart(labels, [
+    { values: rows.map(r => r.irPct), color: '#3fb950' },
+  ], 700, 160) + `</div>`;
+
+  // === 三數對帳表 ===
+  html += `<div class="stats-panel"><h3>收入對帳(我的Total → 科上績效 → 稅前)<span class="legend">會議費未納入</span></h3>`;
+  html += `<table class="settings-table"><tr><th>月份</th><th>我的Total</th><th>績效總額</th><th>差額(值班等)</th><th>稅前薪水</th><th>扣繳比</th></tr>`;
+  for (const r of rows.slice().reverse()) {
+    const diff = (r.perfTotal != null) ? r.perfTotal - r.total : null;
+    const wht = (r.perfTotal && r.pretax) ? (1 - r.pretax / r.perfTotal) * 100 : null;
+    html += `<tr><td>${r.month}</td><td>${fmt(r.total)}</td>`
+      + `<td>${r.perfTotal!=null?fmt(r.perfTotal):'—'}</td>`
+      + `<td style="color:${diff>0?'#3fb950':'var(--ink-muted)'}">${diff!=null?'+'+fmtMoney(Math.round(diff)):'—'}</td>`
+      + `<td>${r.pretax!=null?fmt(r.pretax):'—'}</td>`
+      + `<td>${wht!=null?wht.toFixed(0)+'%':'—'}</td></tr>`;
+  }
+  html += `</table></div>`;
+
+  root.innerHTML = html;
+}
+
 // --- TSV export ---
 function exportDayTSV() {
   const day = getDay(state.currentDate);
@@ -4489,6 +4635,7 @@ function setView(name) {
   if (dn) dn.style.display = (name === 'today' ? '' : 'none');
   if (name === 'month') renderMonth();
   if (name === 'settings') renderSettings();
+  if (name === 'stats') renderStats();
 }
 
 // 靜態 login-screen show/hide(playbook: iOS Safari popup 需 user-gesture
