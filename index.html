@@ -1079,6 +1079,8 @@ select.btn-secondary option {
 .pivot-table .group-cell { color: var(--ink-1); font-weight: 600; }
 .pivot-table .pivot-bottom-row { background: var(--bg-head); }
 .pivot-table .pivot-bottom-row:first-of-type { border-top: 2px solid var(--border); }
+/* Total 列上方加粗線 — 分隔計數/procedure 區 與 收入總額區 */
+.pivot-table .pivot-total-divider td { border-top: 3px solid var(--accent); }
 .pivot-table .pivot-bottom-row .row-label { color: var(--accent); font-weight: 600; }
 .pivot-table .pivot-note-row { background: var(--bg-page); }
 .pivot-table .pivot-note-cell {
@@ -3600,7 +3602,7 @@ function renderMonth() {
     revMonth += v;
     return { v, imported: isImportedDay(day) };
   });
-  const totalTr = el('tr', { class: 'pivot-bottom-row' },
+  const totalTr = el('tr', { class: 'pivot-bottom-row pivot-total-divider' },
     el('td', { class: 'row-label' }, 'Total'),
     el('td', { class: 'col-total' }, fmtMoney(revMonth))
   );
