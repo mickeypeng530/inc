@@ -3526,15 +3526,17 @@ function renderMonth() {
   // === 底部:病歷號 row + Total 收入 + Procedure 金額 + 加班刷卡 ===
 
   // Procedure row:cell 顯示「名稱*次數」聚合;點 cell 跳 popover 列各筆病歷號
-  // 月計欄 = 本月 procedure 總筆數
+  // 月計欄 = 本月 procedure 總筆數(2512+ 有醫師手算 procCount 則優先)
   let procMonthCount = 0;
   for (const date of days) {
     const day = state.data.days[date];
     procMonthCount += (day?.procedures || []).length;
   }
+  const mmProc = state.data.monthlyMeta?.[month] || {};
+  const procCountShow = (typeof mmProc.procCount === 'number') ? mmProc.procCount : procMonthCount;
   const noteTr = el('tr', { class: 'pivot-note-row' },
     el('td', { class: 'row-label' }, 'Procedure'),
-    el('td', { class: 'col-total' }, procMonthCount ? String(procMonthCount) : '')
+    el('td', { class: 'col-total', title: (typeof mmProc.procCount === 'number') ? `手算 ${mmProc.procCount} 筆(解析 ${procMonthCount})` : '' }, procCountShow ? String(procCountShow) : '')
   );
   for (const date of days) {
     const day = state.data.days[date];
@@ -3830,17 +3832,21 @@ function renderMonthProcBreakdown() {
     monthTotalRevenue += getDayRevenue(state.data.days[date], state.data.settings);
   }
   const procTotalPct = monthTotalRevenue > 0 ? Math.round(totalAmount / monthTotalRevenue * 100) : 0;
-  const cntRatio = totalCount > 0 ? Math.round(mskCount / totalCount * 100) : 0;
+  // 2512+ 有醫師手算筆數(procCount/procMSKCount)則優先用於「次數」顯示
+  const mmB = state.data.monthlyMeta?.[month] || {};
+  const showTotalCnt = (typeof mmB.procCount === 'number') ? mmB.procCount : totalCount;
+  const showMskCnt = (typeof mmB.procMSKCount === 'number') ? mmB.procMSKCount : mskCount;
+  const cntRatio = showTotalCnt > 0 ? Math.round(showMskCnt / showTotalCnt * 100) : 0;
   const amtRatio = totalAmount > 0 ? Math.round(mskAmount / totalAmount * 100) : 0;
   t.appendChild(el('tr', { class: 'procbreakdown-summary' },
     el('td', { colspan: '4' },
       el('div', { class: 'procbreakdown-summary-inner' },
         el('span', { class: 'pb-label' }, '總計'),
-        el('span', { class: 'pb-val' }, `${totalCount} 次 · $${fmtMoney(totalAmount)}`),
+        el('span', { class: 'pb-val', title: (typeof mmB.procCount==='number') ? `手算 ${mmB.procCount}(解析 ${totalCount})` : '' }, `${showTotalCnt} 次 · $${fmtMoney(totalAmount)}`),
         el('span', { class: 'pb-val pb-pct-total' }, `(總收入占比 ${procTotalPct}%)`),
         el('span', { class: 'pb-divider' }),
         el('span', { class: 'pb-label' }, 'MSK 相關'),
-        el('span', { class: 'pb-val' }, `${mskCount} 次 · $${fmtMoney(mskAmount)}`),
+        el('span', { class: 'pb-val', title: (typeof mmB.procMSKCount==='number') ? `手算 ${mmB.procMSKCount}(解析 ${mskCount})` : '' }, `${showMskCnt} 次 · $${fmtMoney(mskAmount)}`),
         el('span', { class: 'pb-sep' }, '·'),
         el('span', { class: 'pb-label' }, '占比'),
         el('span', { class: 'pb-val' }, `${cntRatio}% 次 / ${amtRatio}% 金額`)
