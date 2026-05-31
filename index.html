@@ -3913,6 +3913,11 @@ function renderMonthProcBreakdown() {
             bucketName = 'TAE';
             bucketIsMSK = false;
           }
+          // DR 引流家族(dr_pcn / dr_ptcd / DR(xxx) / Drain subphernic/intraabdominal)→ 合併 'DR'
+          else if (/^dr[_(]/i.test(it.atomicId || '') || /^(DR\(|Drain )/i.test(bucketName)) {
+            bucketName = 'DR';
+            bucketIsMSK = false;
+          }
         }
         if (!buckets[bucketName]) buckets[bucketName] = { count: 0, amount: 0, isMSK: bucketIsMSK };
         buckets[bucketName].count += 1;
