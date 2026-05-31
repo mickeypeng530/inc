@@ -3652,8 +3652,8 @@ function renderMonth() {
         agg[nm] = (agg[nm] || 0) + 1;
       }
       for (const [nm, cnt] of Object.entries(agg)) {
-        const short = nm.replace(/\s+/g, '').slice(0, 6);
-        cell.appendChild(el('div', { class: 'pivot-note-tag' }, `${short}*${cnt}`));
+        const short = nm.replace(/\s+/g, '').slice(0, 7);
+        cell.appendChild(el('div', { class: 'pivot-note-tag' }, cnt > 1 ? `${short}*${cnt}` : short));
       }
       cell.classList.add('pivot-note-clickable');
       cell.addEventListener('click', (e) => showProcPopover(e.currentTarget, date, procs));
