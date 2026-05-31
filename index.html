@@ -3024,11 +3024,12 @@ function renderMeetingPanel() {
 
   container.innerHTML = '';
 
-  function makeRow(catalogId) {
+  function makeRow(catalogId, forceShow) {
     const info = getMeetingInfo(month, catalogId);
     if (!info) return null;
     const datesStr = getMeetingDatesStr(month, catalogId);
     const count = datesStr.trim() ? datesStr.trim().split(/\s+/).length : 0;
+    if (count === 0 && !forceShow) return null;  // 當月沒發生 → 不顯示(只留有日期的)
     const total = count * info.amount;
     const input = el('input', {
       class: 'meeting-dates', type: 'text',
@@ -3065,16 +3066,19 @@ function renderMeetingPanel() {
     participantRows.forEach(r => container.appendChild(r));
   }
 
-  const extraRows = [...activeExtraIds].map(makeRow).filter(Boolean);
+  // 其他 + 新增的(強制顯示空 row 可填日期)
+  const extraRows = [...activeExtraIds].map(id => makeRow(id, true)).filter(Boolean);
   if (extraRows.length) {
     container.appendChild(el('div', { class: 'meeting-role-head' }, '其他'));
     extraRows.forEach(r => container.appendChild(r));
   }
 
   const addSel = el('select', { style: 'flex:1;min-width:0;background:var(--bg-page);color:var(--ink-1);border:1px solid var(--border);border-radius:var(--r);padding:3px 6px;font-size:12px' });
-  addSel.appendChild(el('option', { value: '' }, '— 新增其他會議 —'));
+  addSel.appendChild(el('option', { value: '' }, '— 新增會議 —'));
   for (const cat of catalog) {
-    if (mainIds.has(cat.id) || activeExtraIds.has(cat.id)) continue;
+    if (activeExtraIds.has(cat.id)) continue;
+    // 當月已有日期的(已顯示在主講/參與)不重複列入
+    if (getMeetingDatesStr(month, cat.id).trim()) continue;
     addSel.appendChild(el('option', { value: cat.id }, `[${cat.role}] ${cat.name} (${fmtMoney(cat.amount)})`));
   }
   container.appendChild(el('div', { style: 'display:flex;gap:6px;margin-top:6px;align-items:center' },
