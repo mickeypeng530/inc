@@ -4216,7 +4216,10 @@ function svgLineChart(labels, series, w, h, opts = {}) {
   }
   const step = Math.ceil(n / 8);
   for (let i = 0; i < n; i++) {
-    if (i % step !== 0 && i !== n - 1) continue;
+    const isStep = i % step === 0, isLast = i === n - 1;
+    if (!isStep && !isLast) continue;
+    // step 點若太靠近最後一個 → 跳過,留給最後一個(避免重疊)
+    if (isStep && !isLast && (n - 1 - i) < step * 0.7) continue;
     svg += `<text x="${X(i).toFixed(1)}" y="${h - 6}" text-anchor="middle" font-size="8" fill="var(--ink-muted)">${labels[i].slice(2)}</text>`;
   }
   series.forEach((s, si) => {
@@ -4425,15 +4428,13 @@ function renderStats() {
 
   // === 收入對帳表 ===
   html += `<div class="stats-panel"><h3>收入對帳(我的Total → 科上績效 → 稅前)<span class="legend">會議費未納入</span></h3>`;
-  html += `<table class="settings-table"><tr><th>月份</th><th>我的Total</th><th>績效總額</th><th>差額(值班等)</th><th>稅前薪水</th><th>扣繳比</th></tr>`;
+  html += `<table class="settings-table"><tr><th>月份</th><th>我的Total</th><th>績效總額</th><th>差額(值班等)</th><th>稅前薪水</th></tr>`;
   for (const r of rows.slice().reverse().slice(0, 14)) {
     const diff = (r.perfTotal != null) ? r.perfTotal - r.total : null;
-    const wht = (r.perfTotal && r.pretax) ? (1 - r.pretax / r.perfTotal) * 100 : null;
     html += `<tr><td>${r.month}</td><td>${fmt(r.total)}</td>`
       + `<td>${r.perfTotal != null ? fmt(r.perfTotal) : '—'}</td>`
       + `<td style="color:${diff > 0 ? '#3fb950' : 'var(--ink-muted)'}">${diff != null ? '+' + fmtMoney(Math.round(diff)) : '—'}</td>`
-      + `<td>${r.pretax != null ? fmt(r.pretax) : '—'}</td>`
-      + `<td>${wht != null ? wht.toFixed(0) + '%' : '—'}</td></tr>`;
+      + `<td>${r.pretax != null ? fmt(r.pretax) : '—'}</td></tr>`;
   }
   html += `</table></div>`;
 
