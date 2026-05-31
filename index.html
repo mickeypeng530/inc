@@ -1098,6 +1098,8 @@ select.btn-secondary option {
 .kpi-row-6 { grid-template-columns: repeat(6, 1fr); }
 @media (max-width: 900px) { .kpi-row-6 { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 600px) { .kpi-row-6 { grid-template-columns: repeat(2, 1fr); } }
+.kpi-row-auto { grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); }
+@media (max-width: 600px) { .kpi-row-auto { grid-template-columns: repeat(2, 1fr); } }
 .stats-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 700px) { .stats-2col { grid-template-columns: 1fr; } }
 .hbars { display: flex; flex-direction: column; gap: 5px; }
@@ -4118,12 +4120,28 @@ function getGroupSum(day, groupName) {
 }
 
 // ===== 統計 Dashboard =====
+// MSK 判斷(atomicItems.isMSK 優先,fallback 關鍵字)
+const STATS_MSK_KW = ['nb', 'caudal', 'arthro', 'bone', 'biopsy', 'rf', 'myelo', 'joint', 'tp', 'inj', 'msk', 'muscle', 'retromass', 'lung'];
+function statsNameIsMSK(s) {
+  const l = String(s || '').toLowerCase();
+  return STATS_MSK_KW.some(k => l.includes(k));
+}
+function procIsMSK(p) {
+  const atoms = state.data.settings.atomicItems;
+  for (const it of (p.items || [])) {
+    const a = atoms.find(x => x.id === it.atomicId);
+    if (a) { if (a.isMSK) return true; }
+    else if (statsNameIsMSK(it.name) || statsNameIsMSK(it.atomicId)) return true;
+  }
+  return statsNameIsMSK(p.presetName);
+}
 // 各月聚合(收入不含會議 — importedRevenue/計算值本就不含會議費)
 function getMonthlyStats() {
   const months = Array.from(new Set(Object.keys(state.data.days).map(d => d.slice(0,7)))).sort();
   const settings = state.data.settings;
   return months.map(m => {
     let total = 0, ir = 0, ot = 0, ctN = 0, mrN = 0, xrN = 0, bmdN = 0, daysActive = 0;
+    let procIRraw = 0, mskIR = 0;  // 逐筆 procedure 金額(算 MSK 占比用)
     for (const date of Object.keys(state.data.days)) {
       if (!date.startsWith(m + '-')) continue;
       const day = state.data.days[date];
@@ -4133,15 +4151,22 @@ function getMonthlyStats() {
       ot += Number(day.overtimeHours || 0);
       ctN += getGroupSum(day, 'CT'); mrN += getGroupSum(day, 'MR');
       xrN += getGroupSum(day, 'X-ray'); bmdN += getCount(day, 'bmd');
+      for (const p of (day.procedures || [])) {
+        const amt = (p.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
+        procIRraw += amt;
+        if (procIsMSK(p)) mskIR += amt;
+      }
       if (dRev > 0 || (day.procedures||[]).length) daysActive++;
     }
     const mm = state.data.monthlyMeta?.[m] || {};
     return {
       month: m, total, ir, reading: Math.max(0, total - ir), ot,
-      ctN, mrN, xrN, bmdN, daysActive,
+      ctN, mrN, xrN, bmdN, daysActive, procIRraw, mskIR,
       perfTotal: mm.perfTotal, pretax: mm.pretaxSalary,
       procCount: mm.procCount, mskCount: mm.procMSKCount,
       irPct: total > 0 ? ir / total * 100 : 0,
+      mskOfIRpct: procIRraw > 0 ? mskIR / procIRraw * 100 : 0,
+      mskOfTotalPct: total > 0 ? mskIR / total * 100 : 0,
     };
   });
 }
@@ -4247,14 +4272,15 @@ function renderStats() {
   if (proc.sorted.length) ins.push(`累積最多 procedure:<b>${proc.sorted[0].name}</b> ${proc.sorted[0].n} 次`);
   html += `<div class="stats-insight">💡 ${ins.join('　·　')}</div>`;
 
-  // === KPI 卡列(6 張) ===
-  html += `<div class="kpi-row kpi-row-6">`;
+  // === KPI 卡列 ===
+  html += `<div class="kpi-row kpi-row-auto">`;
   html += kpi(`${last.month} 我的Total`, fmt(last.total), estimate ? `月底預估 ${fmt(estimate)}(${estPct}%)` : `月均 ${fmt(avgTotal)}`);
   html += kpi(`IR Procedure 收入`, fmt(last.ir), `占 ${last.irPct.toFixed(0)}% 收入`, '#58a6ff');
+  html += kpi(`MSK IR 收入`, fmt(last.mskIR), `占 IR ${last.mskOfIRpct.toFixed(0)}% · 占總 ${last.mskOfTotalPct.toFixed(0)}%`, '#3fb950');
   html += kpi(`被動閱片收入`, fmt(last.reading), `占 ${(100 - last.irPct).toFixed(0)}%`, 'var(--ink-2)');
   html += kpi(`本月 Procedure`, (last.procCount != null ? last.procCount : '—'), last.mskCount != null ? `MSK ${last.mskCount} 次` : '');
   html += kpi(`加班時數`, `${last.ot}<span style="font-size:11px"> hr</span>`, last.perfTotal ? `績效 ${fmt(last.perfTotal)}` : '');
-  html += kpi(`${curYear} 年累計`, fmt(ytdTotal), `IR ${fmt(ytdIR)} · ${ytd.length} 個月`, '#3fb950');
+  html += kpi(`${curYear} 年累計`, fmt(ytdTotal), `IR ${fmt(ytdIR)} · ${ytd.length} 個月`);
   html += `</div>`;
 
   // === 月收入趨勢(三線)===
@@ -4274,9 +4300,16 @@ function renderStats() {
     { values: rows.map(r => r.xrN), color: '#3fb950' },
     { values: rows.map(r => r.bmdN), color: '#a371f7' },
   ], 360, 190) + `</div>`;
-  html += `<div class="stats-panel"><h3>主動 IR 占比趨勢 <span class="legend">IR ÷ 總收入 %</span></h3>`;
-  html += svgLineChart(labels, [{ values: rows.map(r => r.irPct), color: '#3fb950' }], 360, 190) + `</div>`;
+  html += `<div class="stats-panel"><h3>IR / MSK 占總收入趨勢 <span class="legend"><i style="background:#58a6ff"></i>IR占總 <i style="background:#3fb950"></i>MSK占總</span></h3>`;
+  html += svgLineChart(labels, [
+    { values: rows.map(r => r.irPct), color: '#58a6ff' },
+    { values: rows.map(r => r.mskOfTotalPct), color: '#3fb950' },
+  ], 360, 190) + `</div>`;
   html += `</div>`;
+
+  // === MSK 占 IR 比例趨勢(核心介入價值)===
+  html += `<div class="stats-panel"><h3>MSK 占 IR 收入比例 <span class="legend">MSK procedure ÷ 全部 IR procedure(看你介入工作的 MSK 專精度)</span></h3>`;
+  html += svgLineChart(labels, [{ values: rows.map(r => r.mskOfIRpct), color: '#3fb950' }], 720, 170) + `</div>`;
 
   // === IR Procedure 累積排行 ===
   html += `<div class="stats-panel"><h3>IR Procedure 累積排行 <span class="legend">全期共 ${proc.totalProc} 筆</span></h3>`;
