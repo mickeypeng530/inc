@@ -1976,7 +1976,7 @@ const SEED = {
     { id: 'mtg_gigs',        role: '參與', name: '月 GI-GS',          amount: 500 },
     { id: 'mtg_case_disc',   role: '參與', name: '案例討論會',         amount: 500 },
     { id: 'mtg_journal',     role: '參與', name: 'Journal reading',    amount: 500 },
-    { id: 'mtg_dept',        role: '參與', name: '部務會議',           amount: 1000 },
+    { id: 'mtg_dept',        role: '參與', name: '部務會議',           amount: 500 },
     { id: 'mtg_attending',   role: '參與', name: '主治醫師會議',       amount: 500 },
     { id: 'mtg_cancer',      role: '參與', name: '癌非癌',             amount: 500 },
     { id: 'mtg_mm',          role: '參與', name: 'MM',                 amount: 500 },
@@ -3030,7 +3030,13 @@ function renderMeetingPanel() {
     const datesStr = getMeetingDatesStr(month, catalogId);
     const count = datesStr.trim() ? datesStr.trim().split(/\s+/).length : 0;
     if (count === 0 && !forceShow) return null;  // 當月沒發生 → 不顯示(只留有日期的)
-    const total = count * info.amount;
+    // total 用當月 day.meetings 實際 amount 加總(import 權威),不用 count×catalog
+    let total = 0;
+    for (let dd = 1; dd <= daysInMonth; dd++) {
+      const rec = state.data.days[`${month}-${String(dd).padStart(2, '0')}`];
+      if (!rec) continue;
+      for (const mt of (rec.meetings || [])) if (mt.catalogId === catalogId) total += Number(mt.amount || 0);
+    }
     const input = el('input', {
       class: 'meeting-dates', type: 'text',
       value: datesStr, placeholder: '日期',
