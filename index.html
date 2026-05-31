@@ -4366,8 +4366,8 @@ function renderStats() {
     const chg = prev.total > 0 ? (last.total - prev.total) / prev.total * 100 : 0;
     ins.push(`${last.month} 收入 ${fmt(last.total)},較上月 <b style="color:${chg>=0?'#3fb950':'#f0883e'}">${chg>=0?'↑':'↓'}${Math.abs(chg).toFixed(0)}%</b>`);
   }
-  if (last.irPct > histIRpct * 1.08) ins.push(`主動 IR 占比 <b style="color:#58a6ff">${last.irPct.toFixed(0)}%</b> 高於歷史均值 ${histIRpct.toFixed(0)}%`);
-  else if (last.irPct < histIRpct * 0.92) ins.push(`主動 IR 占比 ${last.irPct.toFixed(0)}% 低於歷史均值 ${histIRpct.toFixed(0)}%`);
+  if (last.irPct > histIRpct * 1.08) ins.push(`IR 占比 <b style="color:#58a6ff">${last.irPct.toFixed(0)}%</b> 高於歷史均值 ${histIRpct.toFixed(0)}%`);
+  else if (last.irPct < histIRpct * 0.92) ins.push(`IR 占比 ${last.irPct.toFixed(0)}% 低於歷史均值 ${histIRpct.toFixed(0)}%`);
   if (proc.sorted.length) ins.push(`累積最多 procedure:<b>${proc.sorted[0].name}</b> ${proc.sorted[0].n} 次`);
   html += `<div class="stats-insight">💡 ${ins.join('　·　')}</div>`;
 
@@ -4377,7 +4377,7 @@ function renderStats() {
   html += kpi(`${last.month} 我的Total`, fmt(last.total), estimate ? `月底預估 ${fmt(estimate)}(${estPct}%)` : `月均 ${fmt(avgTotal)}`, 'var(--accent)', spk('total', 'var(--accent)'));
   html += kpi(`IR Procedure 收入`, fmt(last.ir), `占 ${last.irPct.toFixed(0)}% 收入`, '#58a6ff', spk('ir', '#58a6ff'));
   html += kpi(`MSK IR 收入`, fmt(last.mskIR), `占 IR ${last.mskOfIRpct.toFixed(0)}% · 占總 ${last.mskOfTotalPct.toFixed(0)}%`, '#3fb950', spk('mskIR', '#3fb950'));
-  html += kpi(`被動閱片收入`, fmt(last.reading), `占 ${(100 - last.irPct).toFixed(0)}%`, 'var(--ink-2)', spk('reading', 'var(--ink-2)'));
+  html += kpi(`閱片收入`, fmt(last.reading), `占 ${(100 - last.irPct).toFixed(0)}%`, 'var(--ink-2)', spk('reading', 'var(--ink-2)'));
   html += kpi(`本月 Procedure`, (last.procCount != null ? last.procCount : '—'), last.mskCount != null ? `MSK ${last.mskCount} 次` : '', '#a371f7');
   html += kpi(`加班時數`, `${last.ot}<span style="font-size:11px"> hr</span>`, last.perfTotal ? `績效 ${fmt(last.perfTotal)}` : '', '#e3a23b', spk('ot', '#e3a23b'));
   html += kpi(`${curYear} 年累計`, fmt(ytdTotal), `IR ${fmt(ytdIR)} · ${ytd.length} 個月`, '#3fb950');
