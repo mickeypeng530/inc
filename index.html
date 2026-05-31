@@ -1104,6 +1104,14 @@ select.btn-secondary option {
 @media (max-width: 600px) { .kpi-row-auto { grid-template-columns: repeat(2, 1fr); } }
 .stats-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 700px) { .stats-2col { grid-template-columns: 1fr; } }
+/* 圖表 hover tooltip */
+.chart-box { position: relative; cursor: crosshair; touch-action: pan-y; }
+.chart-tooltip { position: absolute; top: 6px; pointer-events: none; background: var(--bg-page); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 11px; box-shadow: 0 4px 14px rgba(0,0,0,0.35); z-index: 5; min-width: 92px; }
+.chart-tooltip .ctt-month { font-family: var(--font-mono); font-size: 10px; color: var(--ink-muted); margin-bottom: 5px; letter-spacing: 0.04em; }
+.chart-tooltip .ctt-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; font-variant-numeric: tabular-nums; }
+.chart-tooltip .ctt-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.chart-tooltip .ctt-name { color: var(--ink-2); flex: 1; }
+.chart-tooltip b { color: var(--ink-1); }
 .hbars { display: flex; flex-direction: column; gap: 5px; }
 .hbar-row { display: grid; grid-template-columns: 110px 1fr 42px; align-items: center; gap: 8px; font-size: 11px; }
 .hbar-label { font-family: var(--font-mono); color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4173,8 +4181,9 @@ function getMonthlyStats() {
   });
 }
 
-// SVG 面積/折線圖:平滑曲線 + 第一條漸層填充 + 末點數值標籤
+// SVG 面積/折線圖:平滑曲線 + 第一條漸層填充 + 末點數值標籤 + hover 互動
 let _svgGrad = 0;
+const _statsCharts = {};
 function svgLineChart(labels, series, w, h, opts = {}) {
   const pad = { t: 16, r: 16, b: 22, l: 46 };
   const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b;
@@ -4225,8 +4234,59 @@ function svgLineChart(labels, series, w, h, opts = {}) {
       svg += `<text x="${(last[0] - 4).toFixed(1)}" y="${(last[1] - 7).toFixed(1)}" text-anchor="end" font-size="9.5" font-weight="700" fill="${s.color}">${fmtY(lv)}</text>`;
     }
   });
+  // 預埋 hover crosshair + 各 series hover dot(隱藏,由 bindChartHover 控制)
+  svg += `<line class="xhair" y1="${pad.t}" y2="${(pad.t + ih).toFixed(1)}" stroke="var(--ink-1)" stroke-width="0.8" stroke-dasharray="3 3" opacity="0.5" style="display:none"/>`;
+  series.forEach((s) => { svg += `<circle class="hdot" r="3.5" fill="${s.color}" stroke="var(--bg-panel)" stroke-width="1.5" style="display:none"/>`; });
   svg += `</svg>`;
+  if (opts.id) _statsCharts[opts.id] = { labels, series, w, padL: pad.l, padR: pad.r, padT: pad.t, ih, max, n, pct: !!opts.pct };
   return svg;
+}
+// 綁定所有 chart-box 的 hover/tap 互動(crosshair + tooltip 顯示該月所有指標)
+function bindChartHover() {
+  document.querySelectorAll('.chart-box').forEach(box => {
+    const d = _statsCharts[box.dataset.chart];
+    if (!d) return;
+    const svg = box.querySelector('svg');
+    const tip = box.querySelector('.chart-tooltip');
+    const xhair = svg.querySelector('.xhair');
+    const dots = svg.querySelectorAll('.hdot');
+    const iw = d.w - d.padL - d.padR;
+    const X = i => d.padL + (d.n <= 1 ? iw / 2 : i / (d.n - 1) * iw);
+    const Y = v => d.padT + d.ih - (v / d.max) * d.ih;
+    const fmtV = (v, s) => s.fmt === 'pct' ? Math.round(v) + '%' : (s.fmt === 'num' ? String(Math.round(v)) : '$' + fmtMoney(Math.round(v)));
+    const show = (clientX) => {
+      const r = svg.getBoundingClientRect();
+      if (!r.width) return;
+      let idx = Math.round(((clientX - r.left) / r.width * d.w - d.padL) / iw * (d.n - 1));
+      idx = Math.max(0, Math.min(d.n - 1, idx));
+      const xpos = X(idx);
+      xhair.setAttribute('x1', xpos); xhair.setAttribute('x2', xpos); xhair.style.display = '';
+      let rows = `<div class="ctt-month">${d.labels[idx]}</div>`;
+      dots.forEach((dot, si) => {
+        const s = d.series[si], v = s.values[idx];
+        if (v == null) { dot.style.display = 'none'; return; }
+        dot.setAttribute('cx', xpos); dot.setAttribute('cy', Y(v).toFixed(1)); dot.style.display = '';
+        rows += `<div class="ctt-row"><span class="ctt-dot" style="background:${s.color}"></span><span class="ctt-name">${s.name || ''}</span><b>${fmtV(v, s)}</b></div>`;
+      });
+      tip.innerHTML = rows;
+      tip.style.display = '';
+      const bx = box.getBoundingClientRect();
+      let left = clientX - bx.left + 14;
+      if (left + tip.offsetWidth > bx.width - 4) left = clientX - bx.left - tip.offsetWidth - 14;
+      tip.style.left = Math.max(4, left) + 'px';
+    };
+    const hide = () => { tip.style.display = 'none'; xhair.style.display = 'none'; dots.forEach(dt => dt.style.display = 'none'); };
+    box.addEventListener('mousemove', e => show(e.clientX));
+    box.addEventListener('mouseleave', hide);
+    box.addEventListener('touchstart', e => show(e.touches[0].clientX), { passive: true });
+    box.addEventListener('touchmove', e => show(e.touches[0].clientX), { passive: true });
+  });
+}
+// 包裝圖表成可 hover 的 chart-box panel
+function chartPanel(title, legend, id, labels, series, w, h, opts) {
+  const svg = svgLineChart(labels, series, w, h, Object.assign({ id }, opts || {}));
+  return `<div class="stats-panel"><h3>${title}${legend ? ' <span class="legend">' + legend + '</span>' : ''}</h3>`
+    + `<div class="chart-box" data-chart="${id}">${svg}<div class="chart-tooltip" style="display:none"></div></div></div>`;
 }
 // KPI 卡用的迷你 sparkline
 function svgSparkline(values, color, w = 130, h = 26) {
@@ -4324,32 +4384,38 @@ function renderStats() {
   html += `</div>`;
 
   // === 月收入趨勢(三線)===
-  html += `<div class="stats-panel"><h3>月收入趨勢 <span class="legend"><i style="background:var(--accent)"></i>Total <i style="background:#58a6ff"></i>IR <i style="background:var(--ink-2)"></i>閱片</span></h3>`;
-  html += svgLineChart(labels, [
-    { values: rows.map(r => r.total), color: 'var(--accent)' },
-    { values: rows.map(r => r.reading), color: 'var(--ink-2)' },
-    { values: rows.map(r => r.ir), color: '#58a6ff' },
-  ], 720, 210) + `</div>`;
+  html += chartPanel('月收入趨勢',
+    '<i style="background:var(--accent)"></i>Total <i style="background:#58a6ff"></i>IR <i style="background:var(--ink-2)"></i>閱片',
+    'rev', labels, [
+      { name: 'Total', values: rows.map(r => r.total), color: 'var(--accent)' },
+      { name: '閱片', values: rows.map(r => r.reading), color: 'var(--ink-2)' },
+      { name: 'IR', values: rows.map(r => r.ir), color: '#58a6ff' },
+    ], 720, 210);
 
   // === 兩欄:檢查量趨勢 + IR占比 ===
   html += `<div class="stats-2col">`;
-  html += `<div class="stats-panel"><h3>檢查量趨勢 <span class="legend"><i style="background:#e3a23b"></i>CT <i style="background:#58a6ff"></i>MR <i style="background:#3fb950"></i>X-ray <i style="background:#a371f7"></i>BMD</span></h3>`;
-  html += svgLineChart(labels, [
-    { values: rows.map(r => r.ctN), color: '#e3a23b' },
-    { values: rows.map(r => r.mrN), color: '#58a6ff' },
-    { values: rows.map(r => r.xrN), color: '#3fb950' },
-    { values: rows.map(r => r.bmdN), color: '#a371f7' },
-  ], 360, 190) + `</div>`;
-  html += `<div class="stats-panel"><h3>IR / MSK 占總收入趨勢 <span class="legend"><i style="background:#58a6ff"></i>IR占總 <i style="background:#3fb950"></i>MSK占總</span></h3>`;
-  html += svgLineChart(labels, [
-    { values: rows.map(r => r.irPct), color: '#58a6ff' },
-    { values: rows.map(r => r.mskOfTotalPct), color: '#3fb950' },
-  ], 360, 190, { pct: true }) + `</div>`;
+  html += chartPanel('檢查量趨勢',
+    '<i style="background:#e3a23b"></i>CT <i style="background:#58a6ff"></i>MR <i style="background:#3fb950"></i>X-ray <i style="background:#a371f7"></i>BMD',
+    'count', labels, [
+      { name: 'CT', values: rows.map(r => r.ctN), color: '#e3a23b', fmt: 'num' },
+      { name: 'MR', values: rows.map(r => r.mrN), color: '#58a6ff', fmt: 'num' },
+      { name: 'X-ray', values: rows.map(r => r.xrN), color: '#3fb950', fmt: 'num' },
+      { name: 'BMD', values: rows.map(r => r.bmdN), color: '#a371f7', fmt: 'num' },
+    ], 360, 190);
+  html += chartPanel('IR / MSK 占總收入趨勢',
+    '<i style="background:#58a6ff"></i>IR占總 <i style="background:#3fb950"></i>MSK占總',
+    'irmsk', labels, [
+      { name: 'IR占總', values: rows.map(r => r.irPct), color: '#58a6ff', fmt: 'pct' },
+      { name: 'MSK占總', values: rows.map(r => r.mskOfTotalPct), color: '#3fb950', fmt: 'pct' },
+    ], 360, 190, { pct: true });
   html += `</div>`;
 
   // === MSK 占 IR 比例趨勢(核心介入價值)===
-  html += `<div class="stats-panel"><h3>MSK 占 IR 收入比例 <span class="legend">MSK procedure ÷ 全部 IR procedure(看你介入工作的 MSK 專精度)</span></h3>`;
-  html += svgLineChart(labels, [{ values: rows.map(r => r.mskOfIRpct), color: '#3fb950' }], 720, 170, { pct: true }) + `</div>`;
+  html += chartPanel('MSK 占 IR 收入比例',
+    'MSK procedure ÷ 全部 IR procedure(看你介入工作的 MSK 專精度)',
+    'mskir', labels, [
+      { name: 'MSK占IR', values: rows.map(r => r.mskOfIRpct), color: '#3fb950', fmt: 'pct' },
+    ], 720, 170, { pct: true });
 
   // === IR Procedure 累積排行 ===
   html += `<div class="stats-panel"><h3>IR Procedure 累積排行 <span class="legend">全期共 ${proc.totalProc} 筆</span></h3>`;
@@ -4389,6 +4455,7 @@ function renderStats() {
   html += `</table></div>`;
 
   root.innerHTML = html;
+  bindChartHover();
 }
 function kpi(label, val, sub, color, spark) {
   const ac = color || 'var(--accent)';
