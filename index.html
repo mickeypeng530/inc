@@ -2044,12 +2044,12 @@ const COUNTS_SCHEMA = [
     { key: 'ct.opd',            label: 'OPD' },
     { key: 'ct.er_adm_self',    label: 'ER+ADM+自' },
     { key: 'ct.ldct_health',    label: 'LDCT' },
-    { key: 'ct.ph',             label: 'PH 澎湖' },
+    { key: 'ct.ph',             label: 'PH 澎湖', monthOnly: true },
   ]},
   { group: 'MR', children: [
     { key: 'mr.opd',            label: 'OPD' },
     { key: 'mr.er_adm_health',  label: 'ER+ADM+H' },
-    { key: 'mr.ph',             label: 'PH 澎湖' },
+    { key: 'mr.ph',             label: 'PH 澎湖', monthOnly: true },
   ]},
   { group: 'BMD', children: [
     { key: 'bmd',               label: '' },
@@ -2077,7 +2077,7 @@ const COUNTS_SCHEMA = [
     { key: 'xray.opd',          label: 'OPD' },
     { key: 'xray.portable',     label: 'Portable' },
     { key: 'xray.er',           label: 'ER' },
-    { key: 'xray.ph',           label: 'PH 澎湖' },
+    { key: 'xray.ph',           label: 'PH 澎湖', monthOnly: true },
   ]},
   { group: 'Other', children: [
     { key: 'consult',           label: '會診' },
@@ -2631,6 +2631,7 @@ function renderCountsPanel() {
     let renderedFirst = false;
 
     for (const child of grp.children) {
+      if (child.monthOnly) continue;  // PH 澎湖只在月表顯示(2509 後已無)
       const isFirst = !renderedFirst;
       renderedFirst = true;
       const groupCell = el('span', { class: 'count-groupcell' }, isFirst ? grp.group : '');
