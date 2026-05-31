@@ -1094,6 +1094,18 @@ select.btn-secondary option {
 .stats-panel h3 { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 12px; }
 .stats-panel h3 .legend { font-weight: 400; color: var(--ink-muted); text-transform: none; letter-spacing: 0; font-size: 10px; margin-left: 8px; }
 .stats-panel h3 .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 3px 0 6px; vertical-align: middle; }
+.stats-insight { background: var(--bg-panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); padding: 10px 14px; font-size: 13px; color: var(--ink-1); line-height: 1.6; }
+.kpi-row-6 { grid-template-columns: repeat(6, 1fr); }
+@media (max-width: 900px) { .kpi-row-6 { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 600px) { .kpi-row-6 { grid-template-columns: repeat(2, 1fr); } }
+.stats-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 700px) { .stats-2col { grid-template-columns: 1fr; } }
+.hbars { display: flex; flex-direction: column; gap: 5px; }
+.hbar-row { display: grid; grid-template-columns: 110px 1fr 42px; align-items: center; gap: 8px; font-size: 11px; }
+.hbar-label { font-family: var(--font-mono); color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar-track { background: var(--bg-page); border-radius: 3px; height: 14px; overflow: hidden; }
+.hbar-fill { display: block; height: 100%; border-radius: 3px; min-width: 2px; }
+.hbar-val { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .pivot-table .pivot-bottom-row .row-label { color: var(--accent); font-weight: 600; }
 .pivot-table .pivot-note-row { background: var(--bg-page); }
 .pivot-table .pivot-note-cell {
@@ -4145,6 +4157,31 @@ function svgLineChart(labels, series, w, h) {
   return svg;
 }
 
+// 各 procedure 累積次數 + MSK 月趨勢
+function getProcStats() {
+  const cum = {};
+  let totalProc = 0;
+  for (const date in state.data.days) {
+    for (const p of (state.data.days[date].procedures || [])) {
+      const nm = p.presetName || '?';
+      cum[nm] = (cum[nm] || 0) + 1;
+      totalProc++;
+    }
+  }
+  const sorted = Object.entries(cum).map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n);
+  return { sorted, totalProc };
+}
+// 橫條圖(div-based)
+function hBars(items, opts = {}) {
+  const max = Math.max(...items.map(i => i.value), 1);
+  return `<div class="hbars">` + items.map(it => {
+    const pct = it.value / max * 100;
+    return `<div class="hbar-row"><span class="hbar-label" title="${it.label}">${it.label}</span>`
+      + `<span class="hbar-track"><span class="hbar-fill" style="width:${pct}%;background:${it.color || 'var(--accent)'}"></span></span>`
+      + `<span class="hbar-val">${opts.money ? '$' + fmtMoney(it.value) : it.value}</span></div>`;
+  }).join('') + `</div>`;
+}
+
 function renderStats() {
   const root = $('stats-dash');
   if (!root) return;
@@ -4153,62 +4190,114 @@ function renderStats() {
 
   const fmt = (v) => '$' + fmtMoney(Math.round(v || 0));
   const last = rows[rows.length - 1];
+  const prev = rows.length >= 2 ? rows[rows.length - 2] : null;
   const labels = rows.map(r => r.month);
 
-  // 月底預估:若最新月 = 今天的月 且未過完 → 用日均推估
+  // 月底預估
   const todayMonth = isoToMonth(todayISO());
-  let estimate = null;
+  let estimate = null, estPct = null;
   if (last.month === todayMonth && last.daysActive > 0) {
     const [y, mo] = last.month.split('-').map(Number);
-    const daysInMonth = new Date(y, mo, 0).getDate();
-    const todayDay = Number(todayISO().slice(8, 10));
-    if (todayDay < daysInMonth) {
-      estimate = Math.round(last.total / todayDay * daysInMonth);
-    }
+    const dim = new Date(y, mo, 0).getDate();
+    const td = Number(todayISO().slice(8, 10));
+    if (td < dim) { estimate = Math.round(last.total / td * dim); estPct = Math.round(td / dim * 100); }
   }
-
-  // 趨勢平均(供 KPI 對比)
   const avgTotal = Math.round(rows.reduce((s, r) => s + r.total, 0) / rows.length);
+  const histIRpct = rows.length > 1 ? rows.slice(0, -1).reduce((s, r) => s + r.irPct, 0) / (rows.length - 1) : last.irPct;
+
+  // 年累計(最新月所在年)
+  const curYear = last.month.slice(0, 4);
+  const ytd = rows.filter(r => r.month.startsWith(curYear));
+  const ytdTotal = ytd.reduce((s, r) => s + r.total, 0);
+  const ytdIR = ytd.reduce((s, r) => s + r.ir, 0);
+
+  const proc = getProcStats();
 
   let html = '';
 
-  // === KPI 卡列 ===
-  html += `<div class="kpi-row">`;
-  html += `<div class="kpi-card"><div class="kpi-label">${last.month} 我的 Total</div><div class="kpi-val">${fmt(last.total)}</div>`
-        + (estimate ? `<div class="kpi-sub">月底預估 ${fmt(estimate)}</div>` : `<div class="kpi-sub">月均 ${fmt(avgTotal)}</div>`) + `</div>`;
-  html += `<div class="kpi-card"><div class="kpi-label">IR Procedure 收入</div><div class="kpi-val" style="color:#58a6ff">${fmt(last.ir)}</div><div class="kpi-sub">占 ${last.irPct.toFixed(0)}% 收入</div></div>`;
-  html += `<div class="kpi-card"><div class="kpi-label">被動閱片收入</div><div class="kpi-val" style="color:var(--ink-2)">${fmt(last.reading)}</div><div class="kpi-sub">占 ${(100-last.irPct).toFixed(0)}%</div></div>`;
-  html += `<div class="kpi-card"><div class="kpi-label">加班時數</div><div class="kpi-val">${last.ot}<span style="font-size:12px"> hr</span></div><div class="kpi-sub">${last.perfTotal?('績效 '+fmt(last.perfTotal)):''}</div></div>`;
+  // === 自動洞察橫幅 ===
+  const ins = [];
+  if (prev) {
+    const chg = prev.total > 0 ? (last.total - prev.total) / prev.total * 100 : 0;
+    ins.push(`${last.month} 收入 ${fmt(last.total)},較上月 <b style="color:${chg>=0?'#3fb950':'#f0883e'}">${chg>=0?'↑':'↓'}${Math.abs(chg).toFixed(0)}%</b>`);
+  }
+  if (last.irPct > histIRpct * 1.08) ins.push(`主動 IR 占比 <b style="color:#58a6ff">${last.irPct.toFixed(0)}%</b> 高於歷史均值 ${histIRpct.toFixed(0)}%`);
+  else if (last.irPct < histIRpct * 0.92) ins.push(`主動 IR 占比 ${last.irPct.toFixed(0)}% 低於歷史均值 ${histIRpct.toFixed(0)}%`);
+  if (proc.sorted.length) ins.push(`累積最多 procedure:<b>${proc.sorted[0].name}</b> ${proc.sorted[0].n} 次`);
+  html += `<div class="stats-insight">💡 ${ins.join('　·　')}</div>`;
+
+  // === KPI 卡列(6 張) ===
+  html += `<div class="kpi-row kpi-row-6">`;
+  html += kpi(`${last.month} 我的Total`, fmt(last.total), estimate ? `月底預估 ${fmt(estimate)}(${estPct}%)` : `月均 ${fmt(avgTotal)}`);
+  html += kpi(`IR Procedure 收入`, fmt(last.ir), `占 ${last.irPct.toFixed(0)}% 收入`, '#58a6ff');
+  html += kpi(`被動閱片收入`, fmt(last.reading), `占 ${(100 - last.irPct).toFixed(0)}%`, 'var(--ink-2)');
+  html += kpi(`本月 Procedure`, (last.procCount != null ? last.procCount : '—'), last.mskCount != null ? `MSK ${last.mskCount} 次` : '');
+  html += kpi(`加班時數`, `${last.ot}<span style="font-size:11px"> hr</span>`, last.perfTotal ? `績效 ${fmt(last.perfTotal)}` : '');
+  html += kpi(`${curYear} 年累計`, fmt(ytdTotal), `IR ${fmt(ytdIR)} · ${ytd.length} 個月`, '#3fb950');
   html += `</div>`;
 
-  // === 月收入趨勢 ===
-  html += `<div class="stats-panel"><h3>月收入趨勢 <span class="legend"><i style="background:var(--accent)"></i>我的Total <i style="background:#58a6ff"></i>IR</span></h3>`;
+  // === 月收入趨勢(三線)===
+  html += `<div class="stats-panel"><h3>月收入趨勢 <span class="legend"><i style="background:var(--accent)"></i>Total <i style="background:#58a6ff"></i>IR <i style="background:var(--ink-2)"></i>閱片</span></h3>`;
   html += svgLineChart(labels, [
     { values: rows.map(r => r.total), color: 'var(--accent)' },
+    { values: rows.map(r => r.reading), color: 'var(--ink-2)' },
     { values: rows.map(r => r.ir), color: '#58a6ff' },
-  ], 700, 200) + `</div>`;
+  ], 720, 210) + `</div>`;
 
-  // === 被動/主動 收入比 ===
-  html += `<div class="stats-panel"><h3>主動 IR 收入占比趨勢 <span class="legend">(IR ÷ 總收入,看專業價值變化)</span></h3>`;
+  // === 兩欄:檢查量趨勢 + IR占比 ===
+  html += `<div class="stats-2col">`;
+  html += `<div class="stats-panel"><h3>檢查量趨勢 <span class="legend"><i style="background:#e3a23b"></i>CT <i style="background:#58a6ff"></i>MR <i style="background:#3fb950"></i>X-ray <i style="background:#a371f7"></i>BMD</span></h3>`;
   html += svgLineChart(labels, [
-    { values: rows.map(r => r.irPct), color: '#3fb950' },
-  ], 700, 160) + `</div>`;
+    { values: rows.map(r => r.ctN), color: '#e3a23b' },
+    { values: rows.map(r => r.mrN), color: '#58a6ff' },
+    { values: rows.map(r => r.xrN), color: '#3fb950' },
+    { values: rows.map(r => r.bmdN), color: '#a371f7' },
+  ], 360, 190) + `</div>`;
+  html += `<div class="stats-panel"><h3>主動 IR 占比趨勢 <span class="legend">IR ÷ 總收入 %</span></h3>`;
+  html += svgLineChart(labels, [{ values: rows.map(r => r.irPct), color: '#3fb950' }], 360, 190) + `</div>`;
+  html += `</div>`;
 
-  // === 三數對帳表 ===
+  // === IR Procedure 累積排行 ===
+  html += `<div class="stats-panel"><h3>IR Procedure 累積排行 <span class="legend">全期共 ${proc.totalProc} 筆</span></h3>`;
+  html += hBars(proc.sorted.slice(0, 14).map(p => ({ label: p.name, value: p.n,
+    color: /nb|arthro|bone|rf|biopsy|muscle|caudal|tame|lung|retro/i.test(p.name) ? '#3fb950' : 'var(--accent)' })));
+  html += `<div class="settings-hint" style="margin-top:6px">綠=MSK 相關</div></div>`;
+
+  // === 收入對帳表 ===
   html += `<div class="stats-panel"><h3>收入對帳(我的Total → 科上績效 → 稅前)<span class="legend">會議費未納入</span></h3>`;
   html += `<table class="settings-table"><tr><th>月份</th><th>我的Total</th><th>績效總額</th><th>差額(值班等)</th><th>稅前薪水</th><th>扣繳比</th></tr>`;
-  for (const r of rows.slice().reverse()) {
+  for (const r of rows.slice().reverse().slice(0, 14)) {
     const diff = (r.perfTotal != null) ? r.perfTotal - r.total : null;
     const wht = (r.perfTotal && r.pretax) ? (1 - r.pretax / r.perfTotal) * 100 : null;
     html += `<tr><td>${r.month}</td><td>${fmt(r.total)}</td>`
-      + `<td>${r.perfTotal!=null?fmt(r.perfTotal):'—'}</td>`
-      + `<td style="color:${diff>0?'#3fb950':'var(--ink-muted)'}">${diff!=null?'+'+fmtMoney(Math.round(diff)):'—'}</td>`
-      + `<td>${r.pretax!=null?fmt(r.pretax):'—'}</td>`
-      + `<td>${wht!=null?wht.toFixed(0)+'%':'—'}</td></tr>`;
+      + `<td>${r.perfTotal != null ? fmt(r.perfTotal) : '—'}</td>`
+      + `<td style="color:${diff > 0 ? '#3fb950' : 'var(--ink-muted)'}">${diff != null ? '+' + fmtMoney(Math.round(diff)) : '—'}</td>`
+      + `<td>${r.pretax != null ? fmt(r.pretax) : '—'}</td>`
+      + `<td>${wht != null ? wht.toFixed(0) + '%' : '—'}</td></tr>`;
+  }
+  html += `</table></div>`;
+
+  // === 年度彙總 ===
+  const byYear = {};
+  for (const r of rows) {
+    const y = r.month.slice(0, 4);
+    if (!byYear[y]) byYear[y] = { total: 0, ir: 0, ot: 0, months: 0 };
+    byYear[y].total += r.total; byYear[y].ir += r.ir; byYear[y].ot += r.ot; byYear[y].months++;
+  }
+  html += `<div class="stats-panel"><h3>年度彙總</h3>`;
+  html += `<table class="settings-table"><tr><th>年</th><th>月數</th><th>總收入</th><th>IR 收入</th><th>IR 占比</th><th>月均收入</th><th>加班時數</th></tr>`;
+  for (const y of Object.keys(byYear).sort().reverse()) {
+    const b = byYear[y];
+    html += `<tr><td>${y}</td><td>${b.months}</td><td>${fmt(b.total)}</td><td>${fmt(b.ir)}</td>`
+      + `<td>${b.total > 0 ? (b.ir / b.total * 100).toFixed(0) + '%' : '—'}</td>`
+      + `<td>${fmt(b.total / b.months)}</td><td>${Math.round(b.ot)} hr</td></tr>`;
   }
   html += `</table></div>`;
 
   root.innerHTML = html;
+}
+function kpi(label, val, sub, color) {
+  return `<div class="kpi-card"><div class="kpi-label">${label}</div><div class="kpi-val"${color ? ` style="color:${color}"` : ''}>${val}</div><div class="kpi-sub">${sub || ''}</div></div>`;
 }
 
 // --- 貼上計數(從 sheet 複製一整欄)---
