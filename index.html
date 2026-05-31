@@ -1432,11 +1432,16 @@ select.btn-secondary option {
 .settings-table tr.dragging { opacity: 0.4; }
 .settings-table tr.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
 
-/* Preset items 編輯區 */
-.preset-items-edit { display: flex; flex-direction: column; gap: 4px; }
-.preset-item-row { display: flex; align-items: center; gap: 4px; }
+/* Preset 設定:緊湊摘要 + 點展開編輯 */
+.preset-name-input { width: 100%; }
+.preset-summary-cell { font-size: 11px; color: var(--ink-2); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-total-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.preset-row-open > td { background: rgba(233,162,59,0.06); }
+.preset-edit-row > td { background: rgba(233,162,59,0.04); padding: 10px 14px; }
+.preset-items-edit { display: flex; flex-direction: column; gap: 6px; max-width: 420px; }
+.preset-item-row { display: flex; align-items: center; gap: 6px; }
 .preset-item-row select { flex: 1; min-width: 0; }
-.preset-item-row .amount { width: 72px; flex: none; }
+.preset-item-row .amount { width: 80px; flex: none; }
 
 /* === Modal === */
 .modal-overlay {
@@ -2368,6 +2373,7 @@ const state = {
   specialOtherDraft: null,     // 新增 row 草稿:{ catalogId, amount, count }
   scheduleBlocks: {},          // { 'YYYY-MM': open?:bool }
   monthEditMode: false,        // 月表編輯模式:解鎖所有格子(不存)
+  presetOpenId: null,          // 設定頁:目前展開編輯的 preset id(不存)
 };
 
 const bcChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('worknum') : null;
@@ -4706,54 +4712,66 @@ function renderSettingsPresets() {
   t.innerHTML = '';
   t.appendChild(el('tr', null,
     el('th', { class: 'col-drag' }, ''),
-    el('th', null, '名稱'), el('th', null, 'Items (atomic + 金額)'), el('th', null, 'Total'),
-    el('th', { class: 'col-narrow' }, '')
+    el('th', null, '名稱'), el('th', null, '組成'), el('th', null, 'Total'),
+    el('th', { class: 'col-narrow' }, ''), el('th', { class: 'col-narrow' }, '')
   ));
   const arr = state.data.settings.presets;
   const atoms = state.data.settings.atomicItems;
+  const atomName = (id) => { const a = atoms.find(x => x.id === id); return a ? a.name : id; };
   for (const [i, p] of arr.entries()) {
     if (!Array.isArray(p.items)) p.items = [];
-    const total = p.items.reduce((s,it)=>s+Number(it.amount||0),0);
-
-    // items 編輯區
-    const itemsBox = el('div', { class: 'preset-items-edit' });
-    for (const [j, it] of p.items.entries()) {
-      const atomSel = el('select', { onchange: (e) => {
-        it.atomicId = e.target.value;
-        const a = atoms.find(x => x.id === it.atomicId);
-        if (a && (it.amount == null || it.amount === 0)) it.amount = a.amount;
-        storage.save(state.data); renderSettingsPresets(); renderProceduresPanel();
-      } });
-      for (const a of atoms) {
-        const opt = el('option', { value: a.id }, a.name);
-        if (a.id === it.atomicId) opt.selected = true;
-        atomSel.appendChild(opt);
-      }
-      itemsBox.appendChild(el('div', { class: 'preset-item-row' },
-        atomSel,
-        el('input', { class: 'amount', type: 'number', value: String(it.amount||0),
-          oninput: (e) => { it.amount = Number(e.target.value)||0; storage.save(state.data); renderProceduresPanel(); },
-          onblur: () => renderSettingsPresets() }),
-        el('button', { class: 'btn-del', title: '刪除此項', onclick: () => { p.items.splice(j,1); storage.save(state.data); renderSettingsPresets(); renderProceduresPanel(); } }, '×')
-      ));
-    }
-    itemsBox.appendChild(el('button', { class: 'btn-step', style: 'margin-top:4px', onclick: () => {
-      const first = atoms[0];
-      p.items.push({ atomicId: first ? first.id : '', amount: first ? first.amount : 0 });
-      storage.save(state.data); renderSettingsPresets(); renderProceduresPanel();
-    } }, '+ 加項目'));
+    const total = p.items.reduce((s, it) => s + Number(it.amount || 0), 0);
+    const isOpen = state.presetOpenId === p.id;
+    const summary = p.items.length
+      ? p.items.map(it => `${atomName(it.atomicId)} ${fmtMoney(it.amount)}`).join(' + ')
+      : '(空)';
 
     const { handle, attach } = dragReorder(arr, i, renderSettingsPresets);
-    const tr = el('tr', null,
+    const tr = el('tr', { class: isOpen ? 'preset-row-open' : null },
       handle,
-      el('td', null, el('input', { type: 'text', value: p.name, oninput: (e) => { p.name = e.target.value; storage.save(state.data); renderProceduresPanel(); } })),
-      el('td', null, itemsBox),
-      el('td', null, fmtMoney(total)),
+      el('td', null, el('input', { class: 'preset-name-input', type: 'text', value: p.name,
+        oninput: (e) => { p.name = e.target.value; storage.save(state.data); renderProceduresPanel(); } })),
+      el('td', { class: 'preset-summary-cell', title: summary }, summary),
+      el('td', { class: 'preset-total-cell' }, fmtMoney(total)),
       el('td', { class: 'col-narrow' },
-        el('button', { class: 'btn-del', title: '刪除 preset', onclick: () => { arr.splice(i,1); storage.save(state.data); renderSettingsPresets(); renderProceduresPanel(); } }, '×'))
+        el('button', { class: 'btn-step', title: '編輯組成', onclick: () => { state.presetOpenId = isOpen ? null : p.id; renderSettingsPresets(); } }, isOpen ? '▲' : '✎')),
+      el('td', { class: 'col-narrow' },
+        el('button', { class: 'btn-del', title: '刪除 preset', onclick: () => { if (!confirm(`刪除 preset「${p.name}」?`)) return; arr.splice(i, 1); if (state.presetOpenId === p.id) state.presetOpenId = null; storage.save(state.data); renderSettingsPresets(); renderProceduresPanel(); } }, '×'))
     );
     attach(tr);
     t.appendChild(tr);
+
+    // 展開的 items 編輯區(全寬,不擠)
+    if (isOpen) {
+      const itemsBox = el('div', { class: 'preset-items-edit' });
+      for (const [j, it] of p.items.entries()) {
+        const atomSel = el('select', { onchange: (e) => {
+          it.atomicId = e.target.value;
+          const a = atoms.find(x => x.id === it.atomicId);
+          if (a && (it.amount == null || it.amount === 0)) it.amount = a.amount;
+          storage.save(state.data); renderSettingsPresets(); renderProceduresPanel();
+        } });
+        for (const a of atoms) {
+          const opt = el('option', { value: a.id }, a.name);
+          if (a.id === it.atomicId) opt.selected = true;
+          atomSel.appendChild(opt);
+        }
+        itemsBox.appendChild(el('div', { class: 'preset-item-row' },
+          atomSel,
+          el('input', { class: 'amount', type: 'number', value: String(it.amount || 0),
+            oninput: (e) => { it.amount = Number(e.target.value) || 0; storage.save(state.data); renderProceduresPanel(); },
+            onblur: () => renderSettingsPresets() }),
+          el('button', { class: 'btn-del', title: '刪除此項', onclick: () => { p.items.splice(j, 1); storage.save(state.data); renderSettingsPresets(); renderProceduresPanel(); } }, '×')
+        ));
+      }
+      itemsBox.appendChild(el('button', { class: 'btn-step', style: 'margin-top:6px', onclick: () => {
+        const first = atoms[0];
+        p.items.push({ atomicId: first ? first.id : '', amount: first ? first.amount : 0 });
+        storage.save(state.data); renderSettingsPresets(); renderProceduresPanel();
+      } }, '+ 加項目'));
+      t.appendChild(el('tr', { class: 'preset-edit-row' },
+        el('td', { colspan: '6' }, itemsBox)));
+    }
   }
 }
 
