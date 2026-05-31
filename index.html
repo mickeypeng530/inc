@@ -4151,7 +4151,7 @@ function getMonthlyStats() {
   const settings = state.data.settings;
   return months.map(m => {
     let total = 0, ir = 0, ot = 0, ctN = 0, mrN = 0, xrN = 0, bmdN = 0, daysActive = 0;
-    let procIRraw = 0, mskIR = 0;  // 逐筆 procedure 金額(算 MSK 占比用)
+    let procIRraw = 0, mskIR = 0, procNraw = 0, mskNraw = 0;  // 逐筆金額/筆數
     for (const date of Object.keys(state.data.days)) {
       if (!date.startsWith(m + '-')) continue;
       const day = state.data.days[date];
@@ -4163,20 +4163,25 @@ function getMonthlyStats() {
       xrN += getGroupSum(day, 'X-ray'); bmdN += getCount(day, 'bmd');
       for (const p of (day.procedures || [])) {
         const amt = (p.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
-        procIRraw += amt;
-        if (procIsMSK(p)) mskIR += amt;
+        procIRraw += amt; procNraw++;
+        if (procIsMSK(p)) { mskIR += amt; mskNraw++; }
       }
       if (dRev > 0 || (day.procedures||[]).length) daysActive++;
     }
     const mm = state.data.monthlyMeta?.[m] || {};
+    // 筆數:2512+ 用手算 procCount/procMSKCount 權威,否則逐筆
+    const procCntEff = mm.procCount != null ? mm.procCount : procNraw;
+    const mskCntEff = mm.procMSKCount != null ? mm.procMSKCount : mskNraw;
     return {
       month: m, total, ir, reading: Math.max(0, total - ir), ot,
       ctN, mrN, xrN, bmdN, daysActive, procIRraw, mskIR,
+      procCntEff, mskCntEff,
       perfTotal: mm.perfTotal, pretax: mm.pretaxSalary,
       procCount: mm.procCount, mskCount: mm.procMSKCount,
       irPct: total > 0 ? ir / total * 100 : 0,
       mskOfIRpct: procIRraw > 0 ? mskIR / procIRraw * 100 : 0,
       mskOfTotalPct: total > 0 ? mskIR / total * 100 : 0,
+      mskOfCntPct: procCntEff > 0 ? mskCntEff / procCntEff * 100 : 0,
     };
   });
 }
@@ -4381,7 +4386,7 @@ function renderStats() {
   html += kpi(`IR Procedure 收入`, fmt(last.ir), `占 ${last.irPct.toFixed(0)}% 收入`, '#58a6ff', spk('ir', '#58a6ff'));
   html += kpi(`MSK IR 收入`, fmt(last.mskIR), `占 IR ${last.mskOfIRpct.toFixed(0)}% · 占總 ${last.mskOfTotalPct.toFixed(0)}%`, '#3fb950', spk('mskIR', '#3fb950'));
   html += kpi(`閱片收入`, fmt(last.reading), `占 ${(100 - last.irPct).toFixed(0)}%`, 'var(--ink-2)', spk('reading', 'var(--ink-2)'));
-  html += kpi(`本月 Procedure`, (last.procCount != null ? last.procCount : '—'), last.mskCount != null ? `MSK ${last.mskCount} 次` : '', '#a371f7');
+  html += kpi(`本月 Procedure`, last.procCntEff, `MSK ${last.mskCntEff} 筆 · ${Math.round(last.mskOfCntPct)}%`, '#a371f7', spk('procCntEff', '#a371f7'));
   html += kpi(`加班時數`, `${last.ot}<span style="font-size:11px"> hr</span>`, last.perfTotal ? `績效 ${fmt(last.perfTotal)}` : '', '#e3a23b', spk('ot', '#e3a23b'));
   html += kpi(`${curYear} 年累計`, fmt(ytdTotal), `IR ${fmt(ytdIR)} · ${ytd.length} 個月`, '#3fb950');
   html += `</div>`;
@@ -4413,15 +4418,26 @@ function renderStats() {
     ], 360, 190, { pct: true });
   html += `</div>`;
 
-  // === MSK 占 IR 比例趨勢(核心介入價值)===
-  html += chartPanel('MSK 占 IR 收入比例',
-    'MSK procedure ÷ 全部 IR procedure(看你介入工作的 MSK 專精度)',
+  // === 兩欄:Procedure 筆數趨勢 + MSK 占 IR ===
+  html += `<div class="stats-2col">`;
+  html += chartPanel('Procedure 筆數趨勢',
+    '<i style="background:#58a6ff"></i>IR 筆數 <i style="background:#3fb950"></i>MSK 筆數',
+    'proccnt', labels, [
+      { name: 'IR 筆數', values: rows.map(r => r.procCntEff), color: '#58a6ff', fmt: 'num' },
+      { name: 'MSK 筆數', values: rows.map(r => r.mskCntEff), color: '#3fb950', fmt: 'num' },
+    ], 360, 190);
+  html += chartPanel('MSK 占 IR 比例',
+    '<i style="background:#58a6ff"></i>收入% <i style="background:#3fb950"></i>筆數%',
     'mskir', labels, [
-      { name: 'MSK占IR', values: rows.map(r => r.mskOfIRpct), color: '#3fb950', fmt: 'pct' },
-    ], 720, 170, { pct: true });
+      { name: 'MSK占IR(收入)', values: rows.map(r => r.mskOfIRpct), color: '#58a6ff', fmt: 'pct' },
+      { name: 'MSK占IR(筆數)', values: rows.map(r => r.mskOfCntPct), color: '#3fb950', fmt: 'pct' },
+    ], 360, 190, { pct: true });
+  html += `</div>`;
 
   // === IR Procedure 累積排行 ===
-  html += `<div class="stats-panel"><h3>IR Procedure 累積排行 <span class="legend">全期共 ${proc.totalProc} 筆</span></h3>`;
+  const totIR = rows.reduce((s, r) => s + r.procCntEff, 0);
+  const totMSK = rows.reduce((s, r) => s + r.mskCntEff, 0);
+  html += `<div class="stats-panel"><h3>IR Procedure 累積排行 <span class="legend">全期 IR <b style="color:#58a6ff">${totIR}</b> 筆 · MSK <b style="color:#3fb950">${totMSK}</b> 筆 (${totIR ? Math.round(totMSK / totIR * 100) : 0}%)</span></h3>`;
   html += hBars(proc.sorted.slice(0, 14).map(p => ({ label: p.name, value: p.n,
     color: /nb|arthro|bone|rf|biopsy|muscle|caudal|tame|lung|retro/i.test(p.name) ? '#3fb950' : 'var(--accent)' })));
   html += `<div class="settings-hint" style="margin-top:6px">綠=MSK 相關</div></div>`;
