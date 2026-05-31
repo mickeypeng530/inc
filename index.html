@@ -1086,15 +1086,17 @@ select.btn-secondary option {
 .stats-dash { display: flex; flex-direction: column; gap: 14px; }
 .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 @media (max-width: 700px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
-.kpi-card { background: var(--bg-panel); border: 1px solid var(--border); padding: 12px 14px; }
-.kpi-label { font-family: var(--font-mono); font-size: 10px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.08em; }
-.kpi-val { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 4px; color: var(--ink-1); }
-.kpi-sub { font-size: 11px; color: var(--ink-muted); margin-top: 2px; }
-.stats-panel { background: var(--bg-panel); border: 1px solid var(--border); padding: 12px 14px; }
-.stats-panel h3 { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 12px; }
+.kpi-card { position: relative; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px 10px; overflow: hidden; }
+.kpi-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--kc, var(--accent)); opacity: 0.85; }
+.kpi-label { font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.07em; }
+.kpi-val { font-size: 23px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 3px; color: var(--ink-1); line-height: 1.1; }
+.kpi-sub { font-size: 10.5px; color: var(--ink-muted); margin-top: 3px; }
+.kpi-spark { margin-top: 6px; height: 26px; opacity: 0.9; }
+.stats-panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+.stats-panel h3 { font-size: 12px; font-weight: 600; color: var(--ink-1); letter-spacing: 0.02em; margin: 0 0 12px; display: flex; align-items: center; flex-wrap: wrap; }
 .stats-panel h3 .legend { font-weight: 400; color: var(--ink-muted); text-transform: none; letter-spacing: 0; font-size: 10px; margin-left: 8px; }
 .stats-panel h3 .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 3px 0 6px; vertical-align: middle; }
-.stats-insight { background: var(--bg-panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); padding: 10px 14px; font-size: 13px; color: var(--ink-1); line-height: 1.6; }
+.stats-insight { background: linear-gradient(90deg, rgba(233,162,59,0.08), transparent); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--ink-1); line-height: 1.7; }
 .kpi-row-6 { grid-template-columns: repeat(6, 1fr); }
 @media (max-width: 900px) { .kpi-row-6 { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 600px) { .kpi-row-6 { grid-template-columns: repeat(2, 1fr); } }
@@ -4171,36 +4173,73 @@ function getMonthlyStats() {
   });
 }
 
-// 簡易 SVG 折線圖(多 series),回傳 SVG 字串
-function svgLineChart(labels, series, w, h) {
-  const pad = { t: 12, r: 12, b: 22, l: 52 };
+// SVG 面積/折線圖:平滑曲線 + 第一條漸層填充 + 末點數值標籤
+let _svgGrad = 0;
+function svgLineChart(labels, series, w, h, opts = {}) {
+  const pad = { t: 16, r: 16, b: 22, l: 46 };
   const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b;
   const n = labels.length;
   const allv = series.flatMap(s => s.values).filter(v => v != null && !isNaN(v));
-  const max = Math.max(...allv, 1);
+  const max = opts.pct ? 100 : (Math.max(...allv, 1) * 1.12);
   const X = i => pad.l + (n <= 1 ? iw / 2 : i / (n - 1) * iw);
   const Y = v => pad.t + ih - (v / max) * ih;
+  const fmtY = v => opts.pct ? Math.round(v) + '%' : (v >= 1000 ? Math.round(v / 1000) + 'k' : Math.round(v));
+  const smooth = (vals) => {
+    const pts = vals.map((v, i) => v == null ? null : [X(i), Y(v)]).filter(Boolean);
+    if (!pts.length) return { line: '', pts: [] };
+    if (pts.length === 1) return { line: `M${pts[0][0]},${pts[0][1]}`, pts };
+    let d = `M${pts[0][0]},${pts[0][1]}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      d += ` C${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(1)},${(p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)} ${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(1)},${(p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+    }
+    return { line: d, pts };
+  };
+  const gid = 'sg' + (_svgGrad++);
   let svg = `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="xMidYMid meet" style="overflow:visible">`;
-  // y 軸格線 + 標籤(4 段)
+  svg += `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">`
+    + `<stop offset="0%" stop-color="${series[0].color}" stop-opacity="0.26"/>`
+    + `<stop offset="100%" stop-color="${series[0].color}" stop-opacity="0.01"/></linearGradient></defs>`;
   for (let g = 0; g <= 4; g++) {
     const v = max * g / 4, y = Y(v);
-    svg += `<line x1="${pad.l}" y1="${y}" x2="${w-pad.r}" y2="${y}" stroke="var(--grid)" stroke-width="0.5"/>`;
-    svg += `<text x="${pad.l-5}" y="${y+3}" text-anchor="end" font-size="8" fill="var(--ink-muted)">${v>=1000?Math.round(v/1000)+'k':Math.round(v)}</text>`;
+    svg += `<line x1="${pad.l}" y1="${y.toFixed(1)}" x2="${w - pad.r}" y2="${y.toFixed(1)}" stroke="var(--grid)" stroke-width="0.5" opacity="0.45"/>`;
+    svg += `<text x="${pad.l - 6}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="8" fill="var(--ink-muted)">${fmtY(v)}</text>`;
   }
-  // x 軸標籤(疏化:最多 ~8 個)
   const step = Math.ceil(n / 8);
   for (let i = 0; i < n; i++) {
-    if (i % step !== 0 && i !== n-1) continue;
-    svg += `<text x="${X(i)}" y="${h-6}" text-anchor="middle" font-size="8" fill="var(--ink-muted)">${labels[i].slice(2)}</text>`;
+    if (i % step !== 0 && i !== n - 1) continue;
+    svg += `<text x="${X(i).toFixed(1)}" y="${h - 6}" text-anchor="middle" font-size="8" fill="var(--ink-muted)">${labels[i].slice(2)}</text>`;
   }
-  // 各 series 折線 + 點
-  for (const s of series) {
-    const pts = s.values.map((v, i) => v == null ? null : `${X(i)},${Y(v)}`).filter(Boolean);
-    svg += `<polyline points="${pts.join(' ')}" fill="none" stroke="${s.color}" stroke-width="1.8"/>`;
-    s.values.forEach((v, i) => { if (v != null) svg += `<circle cx="${X(i)}" cy="${Y(v)}" r="2" fill="${s.color}"/>`; });
-  }
+  series.forEach((s, si) => {
+    const { line, pts } = smooth(s.values);
+    if (!pts.length) return;
+    if (si === 0 && pts.length > 1) {
+      const area = line + ` L${pts[pts.length - 1][0].toFixed(1)},${(pad.t + ih).toFixed(1)} L${pts[0][0].toFixed(1)},${(pad.t + ih).toFixed(1)} Z`;
+      svg += `<path d="${area}" fill="url(#${gid})"/>`;
+    }
+    svg += `<path d="${line}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+    const last = pts[pts.length - 1];
+    svg += `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3" fill="${s.color}"/>`;
+    if (si === 0) {
+      const lv = s.values.filter(v => v != null).pop();
+      svg += `<text x="${(last[0] - 4).toFixed(1)}" y="${(last[1] - 7).toFixed(1)}" text-anchor="end" font-size="9.5" font-weight="700" fill="${s.color}">${fmtY(lv)}</text>`;
+    }
+  });
   svg += `</svg>`;
   return svg;
+}
+// KPI 卡用的迷你 sparkline
+function svgSparkline(values, color, w = 130, h = 26) {
+  const vals = values.filter(v => v != null && !isNaN(v));
+  if (vals.length < 2) return '';
+  const max = Math.max(...vals), min = Math.min(...vals), rng = (max - min) || 1;
+  const X = i => (i / (values.length - 1)) * w;
+  const Y = v => h - 2 - ((v - min) / rng) * (h - 4);
+  const pts = values.map((v, i) => v == null ? null : `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).filter(Boolean);
+  const li = values.length - 1, lv = vals[vals.length - 1];
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none">`
+    + `<polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.65"/>`
+    + `<circle cx="${X(li).toFixed(1)}" cy="${Y(lv).toFixed(1)}" r="2" fill="${color}"/></svg>`;
 }
 
 // 各 procedure 累積次數 + MSK 月趨勢
@@ -4272,15 +4311,16 @@ function renderStats() {
   if (proc.sorted.length) ins.push(`累積最多 procedure:<b>${proc.sorted[0].name}</b> ${proc.sorted[0].n} 次`);
   html += `<div class="stats-insight">💡 ${ins.join('　·　')}</div>`;
 
-  // === KPI 卡列 ===
+  // === KPI 卡列(附 sparkline)===
+  const spk = (key, color) => svgSparkline(rows.map(r => r[key]), color);
   html += `<div class="kpi-row kpi-row-auto">`;
-  html += kpi(`${last.month} 我的Total`, fmt(last.total), estimate ? `月底預估 ${fmt(estimate)}(${estPct}%)` : `月均 ${fmt(avgTotal)}`);
-  html += kpi(`IR Procedure 收入`, fmt(last.ir), `占 ${last.irPct.toFixed(0)}% 收入`, '#58a6ff');
-  html += kpi(`MSK IR 收入`, fmt(last.mskIR), `占 IR ${last.mskOfIRpct.toFixed(0)}% · 占總 ${last.mskOfTotalPct.toFixed(0)}%`, '#3fb950');
-  html += kpi(`被動閱片收入`, fmt(last.reading), `占 ${(100 - last.irPct).toFixed(0)}%`, 'var(--ink-2)');
-  html += kpi(`本月 Procedure`, (last.procCount != null ? last.procCount : '—'), last.mskCount != null ? `MSK ${last.mskCount} 次` : '');
-  html += kpi(`加班時數`, `${last.ot}<span style="font-size:11px"> hr</span>`, last.perfTotal ? `績效 ${fmt(last.perfTotal)}` : '');
-  html += kpi(`${curYear} 年累計`, fmt(ytdTotal), `IR ${fmt(ytdIR)} · ${ytd.length} 個月`);
+  html += kpi(`${last.month} 我的Total`, fmt(last.total), estimate ? `月底預估 ${fmt(estimate)}(${estPct}%)` : `月均 ${fmt(avgTotal)}`, 'var(--accent)', spk('total', 'var(--accent)'));
+  html += kpi(`IR Procedure 收入`, fmt(last.ir), `占 ${last.irPct.toFixed(0)}% 收入`, '#58a6ff', spk('ir', '#58a6ff'));
+  html += kpi(`MSK IR 收入`, fmt(last.mskIR), `占 IR ${last.mskOfIRpct.toFixed(0)}% · 占總 ${last.mskOfTotalPct.toFixed(0)}%`, '#3fb950', spk('mskIR', '#3fb950'));
+  html += kpi(`被動閱片收入`, fmt(last.reading), `占 ${(100 - last.irPct).toFixed(0)}%`, 'var(--ink-2)', spk('reading', 'var(--ink-2)'));
+  html += kpi(`本月 Procedure`, (last.procCount != null ? last.procCount : '—'), last.mskCount != null ? `MSK ${last.mskCount} 次` : '', '#a371f7');
+  html += kpi(`加班時數`, `${last.ot}<span style="font-size:11px"> hr</span>`, last.perfTotal ? `績效 ${fmt(last.perfTotal)}` : '', '#e3a23b', spk('ot', '#e3a23b'));
+  html += kpi(`${curYear} 年累計`, fmt(ytdTotal), `IR ${fmt(ytdIR)} · ${ytd.length} 個月`, '#3fb950');
   html += `</div>`;
 
   // === 月收入趨勢(三線)===
@@ -4304,12 +4344,12 @@ function renderStats() {
   html += svgLineChart(labels, [
     { values: rows.map(r => r.irPct), color: '#58a6ff' },
     { values: rows.map(r => r.mskOfTotalPct), color: '#3fb950' },
-  ], 360, 190) + `</div>`;
+  ], 360, 190, { pct: true }) + `</div>`;
   html += `</div>`;
 
   // === MSK 占 IR 比例趨勢(核心介入價值)===
   html += `<div class="stats-panel"><h3>MSK 占 IR 收入比例 <span class="legend">MSK procedure ÷ 全部 IR procedure(看你介入工作的 MSK 專精度)</span></h3>`;
-  html += svgLineChart(labels, [{ values: rows.map(r => r.mskOfIRpct), color: '#3fb950' }], 720, 170) + `</div>`;
+  html += svgLineChart(labels, [{ values: rows.map(r => r.mskOfIRpct), color: '#3fb950' }], 720, 170, { pct: true }) + `</div>`;
 
   // === IR Procedure 累積排行 ===
   html += `<div class="stats-panel"><h3>IR Procedure 累積排行 <span class="legend">全期共 ${proc.totalProc} 筆</span></h3>`;
@@ -4350,8 +4390,14 @@ function renderStats() {
 
   root.innerHTML = html;
 }
-function kpi(label, val, sub, color) {
-  return `<div class="kpi-card"><div class="kpi-label">${label}</div><div class="kpi-val"${color ? ` style="color:${color}"` : ''}>${val}</div><div class="kpi-sub">${sub || ''}</div></div>`;
+function kpi(label, val, sub, color, spark) {
+  const ac = color || 'var(--accent)';
+  return `<div class="kpi-card" style="--kc:${ac}">`
+    + `<div class="kpi-label">${label}</div>`
+    + `<div class="kpi-val"${color ? ` style="color:${color}"` : ''}>${val}</div>`
+    + `<div class="kpi-sub">${sub || ''}</div>`
+    + (spark ? `<div class="kpi-spark">${spark}</div>` : '')
+    + `</div>`;
 }
 
 // --- 貼上計數(從 sheet 複製一整欄)---
