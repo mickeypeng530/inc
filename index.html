@@ -1863,7 +1863,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 
 // ===== Firebase Setup =====
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged }
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import { getDatabase, ref, set, get, onValue }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-database.js";
@@ -5034,30 +5034,20 @@ function _loginErr(msg) {
   const errEl = document.getElementById('login-err');
   if (errEl) { errEl.textContent = msg; errEl.style.display = ''; }
 }
-// login button:先 popup;被擋(醫院常見)→ 自動改用 redirect。成功不 reload(靠 onAuthStateChanged)
+// login button:純 popup(playbook 定案:永遠 popup,不 fallback redirect)。
+// 成功不 reload — 靠 onAuthStateChanged 觸發 enterApp(原本 reload 在醫院封儲存環境會卡死)
 document.getElementById('login-btn').addEventListener('click', async () => {
-  const provider = new GoogleAuthProvider();
-  const POPUP_FAIL = ['auth/popup-blocked', 'auth/popup-closed-by-user', 'auth/cancelled-popup-request', 'auth/operation-not-supported-in-environment'];
   try {
+    const provider = new GoogleAuthProvider();
     await signInWithPopup(fbAuth, provider);
-    // 成功 → onAuthStateChanged 觸發 → enterApp(不 reload,避免醫院封儲存後卡死)
   } catch (e) {
-    if (POPUP_FAIL.includes(e.code)) {
-      _loginErr('改用跳轉登入中…');
-      try { await signInWithRedirect(fbAuth, provider); }
-      catch (e2) { _loginErr('登入失敗:' + (e2.code || e2.message)); }
-    } else {
-      _loginErr('登入失敗:' + (e.code || e.message));
-    }
+    _loginErr('登入失敗:' + (e.code || e.message));
   }
 });
 
 let _appEntered = false;
-async function init() {
-  // 處理 redirect 登入回來的結果(醫院 popup 被擋時走這條)
-  try { await getRedirectResult(fbAuth); }
-  catch (e) { _loginErr('登入失敗:' + (e.code || e.message)); }
-  // 持續監聽 auth 狀態(popup/redirect 成功都會觸發,不靠 reload)
+function init() {
+  // 持續監聽 auth 狀態(popup 成功會觸發 → enterApp,不靠 reload)
   onAuthStateChanged(fbAuth, async (user) => {
     if (!user) { if (!_appEntered) showLoginUI(); return; }
     if (user.email !== ALLOWED_EMAIL) { await signOut(fbAuth); showLoginUI(`此帳號(${user.email})無權限`); return; }
@@ -5257,10 +5247,11 @@ async function enterApp(user) {
   };
 }
 
-init().catch(e => {
+try { init(); }
+catch (e) {
   console.error('Init failed', e);
   document.body.innerHTML = `<pre style="color:red;padding:20px">初始化失敗:${e.message}\n${e.stack}</pre>`;
-});
+}
 </script>
 
 </div><!-- /app-root -->
