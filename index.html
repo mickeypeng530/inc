@@ -4172,22 +4172,41 @@ function getMonthlyStats() {
     // 筆數:2512+ 用手算 procCount/procMSKCount 權威,否則逐筆
     const procCntEff = mm.procCount != null ? mm.procCount : procNraw;
     const mskCntEff = mm.procMSKCount != null ? mm.procMSKCount : mskNraw;
+    // 衍生欄位(集中計算)
+    const nonMskIr = Math.max(0, ir - mskIR);
+    const nonMskN = Math.max(0, procCntEff - mskCntEff);
+    const isOpen = mm.perfTotal == null;  // 績效未出 = 未結帳(進行中月)
     return {
       month: m, total, ir, reading: Math.max(0, total - ir), ot,
       ctN, mrN, xrN, bmdN, daysActive, procIRraw, mskIR,
-      procCntEff, mskCntEff,
+      procCntEff, mskCntEff, nonMskIr, nonMskN, isOpen,
       perfTotal: mm.perfTotal, pretax: mm.pretaxSalary,
       procCount: mm.procCount, mskCount: mm.procMSKCount,
       irPct: total > 0 ? ir / total * 100 : 0,
-      mskOfIRpct: procIRraw > 0 ? mskIR / procIRraw * 100 : 0,
+      mskOfIRpct: ir > 0 ? mskIR / ir * 100 : 0,
       mskOfTotalPct: total > 0 ? mskIR / total * 100 : 0,
       mskOfCntPct: procCntEff > 0 ? mskCntEff / procCntEff * 100 : 0,
+      // 產值/筆(分母 0 → null,不畫點)
+      irPer: procCntEff > 0 ? ir / procCntEff : null,
+      mskPer: mskCntEff > 0 ? mskIR / mskCntEff : null,
+      nonMskPer: nonMskN > 0 ? nonMskIr / nonMskN : null,
+      // 產能效率(加班 0 / 未結帳 → null)
+      effTotal: (ot > 0 && !isOpen) ? total / ot : null,
+      effIR: (ot > 0 && !isOpen) ? ir / ot : null,
     };
+  });
+}
+// 2-3 月移動平均(降噪),null 值跳過
+function movAvg(vals, win = 3) {
+  return vals.map((_, i) => {
+    const slice = vals.slice(Math.max(0, i - win + 1), i + 1).filter(v => v != null);
+    return slice.length ? slice.reduce((s, v) => s + v, 0) / slice.length : null;
   });
 }
 
 // SVG 面積/折線圖:平滑曲線 + 第一條漸層填充 + 末點數值標籤 + hover 互動
 let _svgGrad = 0;
+let _lastMonthOpen = false;  // 最新月未結帳 → 圖末點空心標示
 const _statsCharts = {};
 function svgLineChart(labels, series, w, h, opts = {}) {
   const pad = { t: 16, r: 16, b: 22, l: 46 };
@@ -4236,7 +4255,10 @@ function svgLineChart(labels, series, w, h, opts = {}) {
     }
     svg += `<path d="${line}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
     const last = pts[pts.length - 1];
-    svg += `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3" fill="${s.color}"/>`;
+    // 最新月未結帳 + 該線最後一點對應最新月 → 末點空心(進行中)
+    const openMark = _lastMonthOpen && s.values.length === n && s.values[n - 1] != null;
+    if (openMark) svg += `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3.2" fill="var(--bg-panel)" stroke="${s.color}" stroke-width="1.5" opacity="0.85"/>`;
+    else svg += `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3" fill="${s.color}"/>`;
     if (si === 0) {
       const lv = s.values.filter(v => v != null).pop();
       svg += `<text x="${(last[0] - 4).toFixed(1)}" y="${(last[1] - 7).toFixed(1)}" text-anchor="end" font-size="9.5" font-weight="700" fill="${s.color}">${fmtY(lv)}</text>`;
@@ -4312,17 +4334,20 @@ function svgSparkline(values, color, w = 130, h = 26) {
 
 // 各 procedure 累積次數 + MSK 月趨勢
 function getProcStats() {
-  const cum = {};
-  let totalProc = 0;
+  const cum = {};   // name → { n, amt, msk }
+  let totalProc = 0, totalAmt = 0;
   for (const date in state.data.days) {
     for (const p of (state.data.days[date].procedures || [])) {
       const nm = p.presetName || '?';
-      cum[nm] = (cum[nm] || 0) + 1;
-      totalProc++;
+      const amt = (p.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
+      if (!cum[nm]) cum[nm] = { n: 0, amt: 0, msk: procIsMSK(p) };
+      cum[nm].n += 1; cum[nm].amt += amt;
+      totalProc++; totalAmt += amt;
     }
   }
-  const sorted = Object.entries(cum).map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n);
-  return { sorted, totalProc };
+  const byCount = Object.entries(cum).map(([name, v]) => ({ name, n: v.n, amt: v.amt, msk: v.msk })).sort((a, b) => b.n - a.n);
+  const byAmt = byCount.slice().sort((a, b) => b.amt - a.amt);
+  return { sorted: byCount, byAmt, totalProc, totalAmt };
 }
 // 橫條圖(div-based)
 function hBars(items, opts = {}) {
@@ -4355,8 +4380,12 @@ function renderStats() {
     const td = Number(todayISO().slice(8, 10));
     if (td < dim) { estimate = Math.round(last.total / td * dim); estPct = Math.round(td / dim * 100); }
   }
-  const avgTotal = Math.round(rows.reduce((s, r) => s + r.total, 0) / rows.length);
-  const histIRpct = rows.length > 1 ? rows.slice(0, -1).reduce((s, r) => s + r.irPct, 0) / (rows.length - 1) : last.irPct;
+  _lastMonthOpen = last.isOpen;  // 給 svgLineChart 末點標示用
+  // 已結帳月(歷史統計/平均/洞察一律排除未結帳,避免假谷底汙染)
+  const closed = rows.filter(r => !r.isOpen);
+  const avgTotal = closed.length ? Math.round(closed.reduce((s, r) => s + r.total, 0) / closed.length) : 0;
+  const histClosed = closed.filter(r => r.month !== last.month);
+  const histIRpct = histClosed.length ? histClosed.reduce((s, r) => s + r.irPct, 0) / histClosed.length : last.irPct;
 
   // 年累計(最新月所在年)
   const curYear = last.month.slice(0, 4);
@@ -4377,6 +4406,7 @@ function renderStats() {
   if (last.irPct > histIRpct * 1.08) ins.push(`IR 占比 <b style="color:#58a6ff">${last.irPct.toFixed(0)}%</b> 高於歷史均值 ${histIRpct.toFixed(0)}%`);
   else if (last.irPct < histIRpct * 0.92) ins.push(`IR 占比 ${last.irPct.toFixed(0)}% 低於歷史均值 ${histIRpct.toFixed(0)}%`);
   if (proc.sorted.length) ins.push(`累積最多 procedure:<b>${proc.sorted[0].name}</b> ${proc.sorted[0].n} 次`);
+  if (last.isOpen) ins.unshift(`<b style="color:#f0883e">⚠ ${last.month} 進行中(未結帳)</b> — 趨勢圖虛線標示,歷史統計已排除`);
   html += `<div class="stats-insight">💡 ${ins.join('　·　')}</div>`;
 
   // === KPI 卡列(附 sparkline)===
@@ -4434,13 +4464,27 @@ function renderStats() {
     ], 360, 190, { pct: true });
   html += `</div>`;
 
-  // === IR Procedure 累積排行 ===
+  // === P1-1 產值/筆趨勢(2-3 月移動平均降噪)===
+  html += chartPanel('每筆產值趨勢(3月移動平均)',
+    '<i style="background:#58a6ff"></i>IR/筆 <i style="background:#3fb950"></i>MSK/筆 <i style="background:#e3a23b"></i>非MSK-IR/筆 　看「成長是否集中在低單價工作」',
+    'perproc', labels, [
+      { name: 'IR/筆', values: movAvg(rows.map(r => r.irPer)), color: '#58a6ff' },
+      { name: 'MSK/筆', values: movAvg(rows.map(r => r.mskPer)), color: '#3fb950' },
+      { name: '非MSK-IR/筆', values: movAvg(rows.map(r => r.nonMskPer)), color: '#e3a23b' },
+    ], 720, 200);
+
+  // === IR Procedure 排行:筆數 + 收入貢獻(兩欄並列)===
   const totIR = rows.reduce((s, r) => s + r.procCntEff, 0);
   const totMSK = rows.reduce((s, r) => s + r.mskCntEff, 0);
-  html += `<div class="stats-panel"><h3>IR Procedure 累積排行 <span class="legend">全期 IR <b style="color:#58a6ff">${totIR}</b> 筆 · MSK <b style="color:#3fb950">${totMSK}</b> 筆 (${totIR ? Math.round(totMSK / totIR * 100) : 0}%)</span></h3>`;
-  html += hBars(proc.sorted.slice(0, 14).map(p => ({ label: p.name, value: p.n,
-    color: /nb|arthro|bone|rf|biopsy|muscle|caudal|tame|lung|retro/i.test(p.name) ? '#3fb950' : 'var(--accent)' })));
-  html += `<div class="settings-hint" style="margin-top:6px">綠=MSK 相關</div></div>`;
+  html += `<div class="stats-2col">`;
+  html += `<div class="stats-panel"><h3>Procedure 累積排行(筆數) <span class="legend">IR <b style="color:#58a6ff">${totIR}</b> · MSK <b style="color:#3fb950">${totMSK}</b> 筆 (${totIR ? Math.round(totMSK / totIR * 100) : 0}%)</span></h3>`;
+  html += hBars(proc.sorted.slice(0, 12).map(p => ({ label: p.name, value: p.n, color: p.msk ? '#3fb950' : 'var(--accent)' })));
+  html += `<div class="settings-hint" style="margin-top:6px">綠=MSK</div></div>`;
+  // 收入貢獻排行(逐筆金額 groupby type;金額加總對帳一致)
+  html += `<div class="stats-panel"><h3>Procedure 收入貢獻排行 <span class="legend">全期 $${fmtMoney(Math.round(proc.totalAmt))}</span></h3>`;
+  html += hBars(proc.byAmt.slice(0, 12).map(p => ({ label: p.name, value: Math.round(p.amt), color: p.msk ? '#3fb950' : 'var(--accent)' })), { money: true });
+  html += `<div class="settings-hint" style="margin-top:6px">綠=MSK · 看金流集中在哪</div></div>`;
+  html += `</div>`;
 
   // === 收入對帳表 ===
   html += `<div class="stats-panel"><h3>收入對帳(我的Total → 科上績效 → 稅前)<span class="legend">會議費未納入</span></h3>`;
