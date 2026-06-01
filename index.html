@@ -1863,7 +1863,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 
 // ===== Firebase Setup =====
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import { getDatabase, ref, set, get, onValue }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-database.js";
@@ -5030,31 +5030,43 @@ function showLoginUI(errMsg) {
   if (errMsg) { errEl.textContent = errMsg; errEl.style.display = ''; }
   else errEl.style.display = 'none';
 }
-// 一次性綁 login button click(靜態 HTML 元素)
+function _loginErr(msg) {
+  const errEl = document.getElementById('login-err');
+  if (errEl) { errEl.textContent = msg; errEl.style.display = ''; }
+}
+// login button:先 popup;被擋(醫院常見)→ 自動改用 redirect。成功不 reload(靠 onAuthStateChanged)
 document.getElementById('login-btn').addEventListener('click', async () => {
+  const provider = new GoogleAuthProvider();
+  const POPUP_FAIL = ['auth/popup-blocked', 'auth/popup-closed-by-user', 'auth/cancelled-popup-request', 'auth/operation-not-supported-in-environment'];
   try {
-    const provider = new GoogleAuthProvider();
     await signInWithPopup(fbAuth, provider);
-    // onAuthStateChanged 不會自動 re-trigger init,需 reload
-    location.reload();
+    // 成功 → onAuthStateChanged 觸發 → enterApp(不 reload,避免醫院封儲存後卡死)
   } catch (e) {
-    const errEl = document.getElementById('login-err');
-    errEl.textContent = 'Auth failed: ' + (e.code || e.message);
-    errEl.style.display = '';
+    if (POPUP_FAIL.includes(e.code)) {
+      _loginErr('改用跳轉登入中…');
+      try { await signInWithRedirect(fbAuth, provider); }
+      catch (e2) { _loginErr('登入失敗:' + (e2.code || e2.message)); }
+    } else {
+      _loginErr('登入失敗:' + (e.code || e.message));
+    }
   }
 });
 
+let _appEntered = false;
 async function init() {
-  // === Auth gate ===
-  const user = await new Promise(resolve => {
-    const unsub = onAuthStateChanged(fbAuth, (u) => { unsub(); resolve(u); });
+  // 處理 redirect 登入回來的結果(醫院 popup 被擋時走這條)
+  try { await getRedirectResult(fbAuth); }
+  catch (e) { _loginErr('登入失敗:' + (e.code || e.message)); }
+  // 持續監聽 auth 狀態(popup/redirect 成功都會觸發,不靠 reload)
+  onAuthStateChanged(fbAuth, async (user) => {
+    if (!user) { if (!_appEntered) showLoginUI(); return; }
+    if (user.email !== ALLOWED_EMAIL) { await signOut(fbAuth); showLoginUI(`此帳號(${user.email})無權限`); return; }
+    if (_appEntered) return;  // 已進 app,不重複初始化
+    _appEntered = true;
+    await enterApp(user);
   });
-  if (!user) { showLoginUI(); return; }
-  if (user.email !== ALLOWED_EMAIL) {
-    await signOut(fbAuth);
-    showLoginUI(`Account not allowed`);
-    return;
-  }
+}
+async function enterApp(user) {
   currentUser = user;
   userDataRef = ref(fbDB, `users/${user.uid}/worknum`);
   // 通過 auth → 顯示 app
