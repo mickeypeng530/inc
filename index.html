@@ -4154,6 +4154,7 @@ function getMonthlyStats() {
   return months.map(m => {
     let total = 0, ir = 0, ot = 0, ctN = 0, mrN = 0, xrN = 0, bmdN = 0, daysActive = 0;
     let procIRraw = 0, mskIR = 0, procNraw = 0, mskNraw = 0;  // 逐筆金額/筆數
+    const nonMskTypeSet = new Set();  // 非MSK-IR 的不同 procedure 類型(能力廣度)
     for (const date of Object.keys(state.data.days)) {
       if (!date.startsWith(m + '-')) continue;
       const day = state.data.days[date];
@@ -4167,6 +4168,7 @@ function getMonthlyStats() {
         const amt = (p.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
         procIRraw += amt; procNraw++;
         if (procIsMSK(p)) { mskIR += amt; mskNraw++; }
+        else nonMskTypeSet.add(p.presetName);
       }
       if (dRev > 0 || (day.procedures||[]).length) daysActive++;
     }
@@ -4195,6 +4197,11 @@ function getMonthlyStats() {
       // 產能效率(加班 0 / 未結帳 → null)
       effTotal: (ot > 0 && !isOpen) ? total / ot : null,
       effIR: (ot > 0 && !isOpen) ? ir / ot : null,
+      // P3-1 值班差額(稅前−績效,= 值班等被動收入);需兩者都有
+      gap: (mm.perfTotal != null && mm.pretaxSalary != null) ? mm.pretaxSalary - mm.perfTotal : null,
+      gapPct: (mm.perfTotal != null && mm.pretaxSalary != null && mm.pretaxSalary > 0) ? (mm.pretaxSalary - mm.perfTotal) / mm.pretaxSalary * 100 : null,
+      // P3-2 能力廣度:非MSK-IR 類型數
+      nonMskTypes: nonMskTypeSet.size,
     };
   });
 }
@@ -4492,6 +4499,19 @@ function renderStats() {
   html += `</div>`;
   // X-ray 驟降原因註記(存 Firebase,不寫死)
   html += `<div class="stats-panel" style="padding:8px 14px"><input id="xray-note" type="text" class="xray-note-input" placeholder="X-ray 驟降原因註記(例:業務調整/計數方式變更)…" value="${(state.data.settings.statsXrayNote || '').replace(/"/g, '&quot;')}"></div>`;
+
+  // === 兩欄:值班差額占比(P3-1) + 技能維持(P3-2)===
+  html += `<div class="stats-2col">`;
+  html += chartPanel('值班/其他收入占比',
+    '(稅前−績效)÷稅前 — 被動收入(值班等)在收入中的份量',
+    'gap', labels, [{ name: '值班占比', values: rows.map(r => r.gapPct), color: '#a371f7', fmt: 'pct' }], 360, 190, { pct: true });
+  html += chartPanel('能力廣度(防同質化)',
+    '<i style="background:#58a6ff"></i>MR判讀量 <i style="background:#e3a23b"></i>非MSK-IR類型數 — 純衝高量低價會侵蝕診斷競爭力',
+    'breadth', labels, [
+      { name: 'MR量', values: rows.map(r => r.mrN), color: '#58a6ff', fmt: 'num' },
+      { name: '非MSK類型', values: rows.map(r => r.nonMskTypes), color: '#e3a23b', fmt: 'num' },
+    ], 360, 190);
+  html += `</div>`;
 
   // === P1-1 產值/筆趨勢(2-3 月移動平均降噪)===
   html += chartPanel('每筆產值趨勢(3月移動平均)',
