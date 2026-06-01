@@ -1112,6 +1112,8 @@ select.btn-secondary option {
 .chart-tooltip .ctt-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
 .chart-tooltip .ctt-name { color: var(--ink-2); flex: 1; }
 .chart-tooltip b { color: var(--ink-1); }
+.xray-note-input { width: 100%; box-sizing: border-box; background: var(--bg-page); color: var(--ink-1); border: 1px solid var(--border); border-radius: 5px; padding: 6px 10px; font-size: 12px; }
+.xray-note-input:focus { outline: 1px solid var(--accent); }
 .hbars { display: flex; flex-direction: column; gap: 5px; }
 .hbar-row { display: grid; grid-template-columns: 110px 1fr 42px; align-items: center; gap: 8px; font-size: 11px; }
 .hbar-label { font-family: var(--font-mono); color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4430,14 +4432,26 @@ function renderStats() {
       { name: 'IR', values: rows.map(r => r.ir), color: '#58a6ff' },
     ], 720, 210);
 
-  // === 兩欄:檢查量趨勢 + IR占比 ===
+  // === P2-1 指數化(基期=第一個已結帳月=100)===
+  const baseRow = closed[0] || rows[0];
+  const idxOf = (key) => rows.map(r => (baseRow[key] > 0 && r[key] != null) ? r[key] / baseRow[key] * 100 : null);
+  const growth = (key) => { const b = baseRow[key], l = last[key]; return (b > 0 && l != null) ? Math.round((l / b - 1) * 100) : 0; };
+  html += chartPanel(`收入指數化(${baseRow.month}=100)`,
+    `Total <b>+${growth('total')}%</b> · 閱片 <b>+${growth('reading')}%</b> · IR <b style="color:#58a6ff">+${growth('ir')}%</b> · MSK <b style="color:#3fb950">+${growth('mskIR')}%</b> 　看成長率差異`,
+    'idx', labels, [
+      { name: 'Total', values: idxOf('total'), color: 'var(--accent)', fmt: 'num' },
+      { name: '閱片', values: idxOf('reading'), color: 'var(--ink-2)', fmt: 'num' },
+      { name: 'IR', values: idxOf('ir'), color: '#58a6ff', fmt: 'num' },
+      { name: 'MSK', values: idxOf('mskIR'), color: '#3fb950', fmt: 'num' },
+    ], 720, 210);
+
+  // === 兩欄:檢查量(CT/MR/BMD,X-ray 拆出) + IR占比 ===
   html += `<div class="stats-2col">`;
-  html += chartPanel('檢查量趨勢',
-    '<i style="background:#e3a23b"></i>CT <i style="background:#58a6ff"></i>MR <i style="background:#3fb950"></i>X-ray <i style="background:#a371f7"></i>BMD',
+  html += chartPanel('檢查量趨勢(CT/MR/BMD)',
+    '<i style="background:#e3a23b"></i>CT <i style="background:#58a6ff"></i>MR <i style="background:#a371f7"></i>BMD',
     'count', labels, [
       { name: 'CT', values: rows.map(r => r.ctN), color: '#e3a23b', fmt: 'num' },
       { name: 'MR', values: rows.map(r => r.mrN), color: '#58a6ff', fmt: 'num' },
-      { name: 'X-ray', values: rows.map(r => r.xrN), color: '#3fb950', fmt: 'num' },
       { name: 'BMD', values: rows.map(r => r.bmdN), color: '#a371f7', fmt: 'num' },
     ], 360, 190);
   html += chartPanel('IR / MSK 占總收入趨勢',
@@ -4463,6 +4477,21 @@ function renderStats() {
       { name: 'MSK占IR(筆數)', values: rows.map(r => r.mskOfCntPct), color: '#3fb950', fmt: 'pct' },
     ], 360, 190, { pct: true });
   html += `</div>`;
+
+  // === 兩欄:X-ray 獨立(P2-2) + 產能效率(P2-3)===
+  html += `<div class="stats-2col">`;
+  html += chartPanel('X-ray 量(獨立)',
+    'X-ray 量級大、結構性下降,拆出避免壓平 CT/MR/BMD',
+    'xray', labels, [{ name: 'X-ray', values: rows.map(r => r.xrN), color: '#3fb950', fmt: 'num' }], 360, 190);
+  html += chartPanel('產能效率(收入÷加班時數)',
+    '<i style="background:var(--accent)"></i>總/時 <i style="background:#58a6ff"></i>IR/時 　每加班小時產值',
+    'eff', labels, [
+      { name: '總/時', values: rows.map(r => r.effTotal), color: 'var(--accent)' },
+      { name: 'IR/時', values: rows.map(r => r.effIR), color: '#58a6ff' },
+    ], 360, 190);
+  html += `</div>`;
+  // X-ray 驟降原因註記(存 Firebase,不寫死)
+  html += `<div class="stats-panel" style="padding:8px 14px"><input id="xray-note" type="text" class="xray-note-input" placeholder="X-ray 驟降原因註記(例:業務調整/計數方式變更)…" value="${(state.data.settings.statsXrayNote || '').replace(/"/g, '&quot;')}"></div>`;
 
   // === P1-1 產值/筆趨勢(2-3 月移動平均降噪)===
   html += chartPanel('每筆產值趨勢(3月移動平均)',
@@ -4517,6 +4546,11 @@ function renderStats() {
 
   root.innerHTML = html;
   bindChartHover();
+  const xn = document.getElementById('xray-note');
+  if (xn) xn.addEventListener('change', (e) => {
+    state.data.settings.statsXrayNote = e.target.value;
+    storage.save(state.data);
+  });
 }
 function kpi(label, val, sub, color, spark) {
   const ac = color || 'var(--accent)';
