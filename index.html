@@ -1557,6 +1557,15 @@ body.mini-mode .day-nav { display: none; }
 body.mini-mode main > .view:not(#view-mini) { display: none !important; }
 body.mini-mode #view-mini { display: block; padding: 8px 10px; }
 body:not(.mini-mode) #view-mini { display: none; }
+.mini-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+.mini-zoom { display: flex; gap: 4px; }
+.mini-zoom .btn-step { padding: 2px 8px; font-size: 11px; }
+.mini-proc { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.mini-proc-sel { width: 100%; background: var(--bg-page); color: var(--ink-1); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-size: 12px; }
+.mini-proc-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.mini-proc-tag { display: inline-flex; align-items: center; gap: 3px; background: var(--bg-page); border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px 2px 7px; font-size: 11px; font-family: var(--font-mono); }
+.mini-proc-del { border: none; background: none; color: var(--ink-muted); cursor: pointer; font-size: 13px; padding: 0 2px; line-height: 1; }
+.mini-proc-del:hover { color: var(--danger); }
 
 #view-mini .mini-rows { display: flex; flex-direction: column; gap: 0; }
 #view-mini .mini-row {
@@ -1680,10 +1689,19 @@ body:not(.mini-mode) #view-mini { display: none; }
 
 <!-- MINI QUICK VIEW (only shown when ?mode=quick) -->
 <section id="view-mini">
-  <div class="mini-rows" id="mini-rows"></div>
-  <div class="mini-summary">
-    <span>件數 <strong id="mini-count">0</strong></span>
-    <span>金額 <span id="mini-money" class="money-blur stat-money stat-num">0</span></span>
+  <div class="mini-toolbar">
+    <span class="mini-zoom">
+      <button id="mini-zoom-out" class="btn-step" title="縮小">A−</button>
+      <button id="mini-zoom-in" class="btn-step" title="放大">A＋</button>
+    </span>
+  </div>
+  <div class="mini-scale-wrap" id="mini-scale-wrap">
+    <div class="mini-rows" id="mini-rows"></div>
+    <div class="mini-proc" id="mini-proc"></div>
+    <div class="mini-summary">
+      <span>件數 <strong id="mini-count">0</strong></span>
+      <span>金額 <span id="mini-money" class="money-blur stat-money stat-num">0</span></span>
+    </div>
   </div>
 </section>
 
@@ -2636,6 +2654,32 @@ function renderMini() {
     }
   }
 
+  // === Procedure 快速區(下拉選 preset + ＋;省略病歷號,回主畫面補)===
+  const mp = $('mini-proc');
+  if (mp) {
+    mp.innerHTML = '';
+    const presets = state.data.settings.presets || [];
+    const sel = el('select', { class: 'mini-proc-sel' });
+    sel.appendChild(el('option', { value: '' }, '＋ 加 Procedure…'));
+    for (const p of presets) sel.appendChild(el('option', { value: p.id }, p.name));
+    sel.onchange = () => { if (sel.value) { addPresetMini(sel.value); sel.value = ''; } };
+    mp.appendChild(sel);
+    // 當日 procedure 聚合(可點刪)
+    const procs = day.procedures || [];
+    if (procs.length) {
+      const agg = {};
+      procs.forEach((p, i) => { const nm = p.presetName || '?'; (agg[nm] = agg[nm] || []).push(i); });
+      const tags = el('div', { class: 'mini-proc-tags' });
+      for (const [nm, idxs] of Object.entries(agg)) {
+        tags.appendChild(el('span', { class: 'mini-proc-tag', title: '點 × 刪一筆' },
+          `${nm}${idxs.length > 1 ? '×' + idxs.length : ''}`,
+          el('button', { class: 'mini-proc-del', onclick: () => removeProcMini(idxs[idxs.length - 1]) }, '×')
+        ));
+      }
+      mp.appendChild(tags);
+    }
+  }
+
   $('mini-count').textContent = String(calcCountTotal(day));
 
   const baseR = calcBaseRevenue(day, state.data.settings);
@@ -2648,6 +2692,36 @@ function renderMini() {
   // header 小字日期/週次
   const lbl = $('day-mini-label');
   if (lbl) lbl.textContent = `${state.currentDate} ${weekdayCh(state.currentDate)}`;
+}
+// 迷你:加一筆 preset procedure(無病歷號)
+function addPresetMini(presetId) {
+  const preset = state.data.settings.presets.find(p => p.id === presetId);
+  if (!preset) return;
+  const day = getDay(state.currentDate);
+  if (!day.procedures) day.procedures = [];
+  day.procedures.push({
+    presetId: preset.id, presetName: preset.name, medRecord: '',
+    items: (preset.items || []).map(it => {
+      const atom = state.data.settings.atomicItems.find(a => a.id === it.atomicId);
+      return { atomicId: it.atomicId, name: atom?.name || it.atomicId, amount: Number(it.amount || 0) };
+    }),
+    time: new Date().toISOString(),
+  });
+  day.updatedAt = new Date().toISOString();
+  storage.save(state.data);
+  renderMini();
+}
+function removeProcMini(i) {
+  const day = getDay(state.currentDate);
+  if (day.procedures) day.procedures.splice(i, 1);
+  day.updatedAt = new Date().toISOString();
+  storage.save(state.data);
+  renderMini();
+}
+function applyMiniScale() {
+  const s = Number(state.data.settings.miniScale) || 1;
+  const wrap = $('mini-scale-wrap');
+  if (wrap) wrap.style.zoom = s;
 }
 
 function renderDayLabel() {
@@ -5215,6 +5289,16 @@ async function enterApp(user) {
     document.body.classList.add('mini-mode');
     $('export-day').style.display = 'none';
     $('day-mini-label').style.display = '';
+    applyMiniScale();
+    const setScale = (delta) => {
+      const cur = Number(state.data.settings.miniScale) || 1;
+      const next = Math.min(1.4, Math.max(0.65, Math.round((cur + delta) * 100) / 100));
+      state.data.settings.miniScale = next;
+      storage.save(state.data);
+      applyMiniScale();
+    };
+    $('mini-zoom-out')?.addEventListener('click', () => setScale(-0.1));
+    $('mini-zoom-in')?.addEventListener('click', () => setScale(+0.1));
   }
 
   renderAll();
