@@ -744,6 +744,11 @@ select.btn-secondary option {
   letter-spacing: -0.02em;
   line-height: 1.05;
 }
+/* 當日收入目標進度條 */
+.day-target { margin-top: 10px; }
+.day-target-bar { height: 9px; background: var(--bg-page); border-radius: 5px; overflow: hidden; border: 1px solid var(--border); }
+.day-target-fill { height: 100%; border-radius: 5px; transition: width 0.35s ease; min-width: 2px; }
+.day-target-label { font-size: 11px; color: var(--ink-muted); margin-top: 4px; text-align: center; font-variant-numeric: tabular-nums; }
 .stats-mini-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3134,10 +3139,24 @@ function renderStatsPanel() {
   if (hero) {
     const moneyVisible = $('money-summary')?.classList.contains('unblur') ?? true;
     hero.innerHTML = '';
-    hero.appendChild(el('div', { class: 'stats-hero' },
+    const heroEl = el('div', { class: 'stats-hero' },
       el('div', { class: 'stats-hero-label' }, imported ? '當日收入(歷史匯入原始值)' : '當日收入(報告+Procedure)'),
       el('div', { class: `stats-hero-num money-blur${moneyVisible ? ' unblur' : ''}` }, fmtMoney(dayTotal))
-    ));
+    );
+    // 平日目標進度條(假日不顯示;目標可在 settings.dailyTargetWeekday 調)
+    const dayType = getDayType(state.currentDate, day);
+    if (dayType !== '假日') {
+      const target = Number(settings.dailyTargetWeekday) || 18000;
+      const pct = target > 0 ? dayTotal / target * 100 : 0;
+      const full = pct >= 100;
+      heroEl.appendChild(el('div', { class: 'day-target' },
+        el('div', { class: 'day-target-bar' },
+          el('div', { class: 'day-target-fill', style: `width:${Math.min(100, pct).toFixed(1)}%;background:${full ? '#3fb950' : 'var(--accent)'}` })),
+        el('div', { class: `day-target-label money-blur${moneyVisible ? ' unblur' : ''}` },
+          `${Math.round(pct)}% · ${fmtMoney(Math.round(dayTotal))} / ${fmtMoney(target)}${full ? ' ✓ 達標' : ''}`)
+      ));
+    }
+    hero.appendChild(heroEl);
   }
 
   // Count summary — always 顯示每群組合計(即使 0)
@@ -5252,6 +5271,8 @@ async function enterApp(user) {
     ms.classList.toggle('unblur', show);
     const heroNum = document.querySelector('.stats-hero-num');
     if (heroNum) heroNum.classList.toggle('unblur', show);
+    const dtLabel = document.querySelector('.day-target-label');
+    if (dtLabel) dtLabel.classList.toggle('unblur', show);
     state.data.settings.miniShowMoney = show;
     storage.save(state.data);
   };
