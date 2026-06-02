@@ -246,6 +246,9 @@ header h1 {
   font-weight: 600;
   transition: border-color 0.12s, color 0.12s;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .btn-step:hover { border-color: var(--accent); color: var(--accent); }
 .count-input {
@@ -1559,7 +1562,7 @@ body.mini-mode #view-mini { display: block; padding: 8px 10px; }
 body:not(.mini-mode) #view-mini { display: none; }
 .mini-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .mini-zoom { display: flex; gap: 8px; }
-.mini-toolbar .btn-step { padding: 3px 10px; font-size: 11px; }
+.mini-toolbar .btn-step { width: auto; min-width: 28px; height: 26px; padding: 0 10px; font-size: 12px; border-radius: 6px; }
 .mini-proc { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .mini-proc-sel { width: 100%; background: var(--bg-page); color: var(--ink-1); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-size: 12px; }
 .mini-proc-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
