@@ -1557,9 +1557,9 @@ body.mini-mode .day-nav { display: none; }
 body.mini-mode main > .view:not(#view-mini) { display: none !important; }
 body.mini-mode #view-mini { display: block; padding: 8px 10px; }
 body:not(.mini-mode) #view-mini { display: none; }
-.mini-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
-.mini-zoom { display: flex; gap: 4px; }
-.mini-zoom .btn-step { padding: 2px 8px; font-size: 11px; }
+.mini-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.mini-zoom { display: flex; gap: 8px; }
+.mini-toolbar .btn-step { padding: 3px 10px; font-size: 11px; }
 .mini-proc { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .mini-proc-sel { width: 100%; background: var(--bg-page); color: var(--ink-1); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-size: 12px; }
 .mini-proc-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
@@ -1690,6 +1690,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 <!-- MINI QUICK VIEW (only shown when ?mode=quick) -->
 <section id="view-mini">
   <div class="mini-toolbar">
+    <button id="mini-money-toggle" class="btn-step" title="顯示/隱藏金額">👁</button>
     <span class="mini-zoom">
       <button id="mini-zoom-out" class="btn-step" title="縮小">A−</button>
       <button id="mini-zoom-in" class="btn-step" title="放大">A＋</button>
@@ -5299,6 +5300,11 @@ async function enterApp(user) {
     };
     $('mini-zoom-out')?.addEventListener('click', () => setScale(-0.1));
     $('mini-zoom-in')?.addEventListener('click', () => setScale(+0.1));
+    $('mini-money-toggle')?.addEventListener('click', () => {
+      state.data.settings.miniShowMoney = !state.data.settings.miniShowMoney;
+      storage.save(state.data);
+      $('mini-money').classList.toggle('unblur', !!state.data.settings.miniShowMoney);
+    });
   }
 
   renderAll();
