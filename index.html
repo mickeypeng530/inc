@@ -1128,6 +1128,8 @@ select.btn-secondary option {
 .hbar-track { background: var(--bg-page); border-radius: 3px; height: 14px; overflow: hidden; }
 .hbar-fill { display: block; height: 100%; border-radius: 3px; min-width: 2px; }
 .hbar-val { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.hbar-cnt { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-muted); font-size: 10px; }
+.hbars.with-count .hbar-row { grid-template-columns: 92px 1fr 38px 52px; }
 .pivot-table .pivot-bottom-row .row-label { color: var(--accent); font-weight: 600; }
 .pivot-table .pivot-note-row { background: var(--bg-page); }
 .pivot-table .pivot-note-cell {
@@ -4317,11 +4319,12 @@ function weekdaysInMonth(ym) {
   for (let d = 1; d <= last; d++) { const wd = new Date(y, m - 1, d).getDay(); if (wd >= 1 && wd <= 5) n++; }
   return n;
 }
-// 2-3 月移動平均(降噪),null 值跳過
+// 2-3 月移動平均(降噪);當月本身無值 → 不畫點(不用前月平均填補)
 function movAvg(vals, win = 3) {
-  return vals.map((_, i) => {
-    const slice = vals.slice(Math.max(0, i - win + 1), i + 1).filter(v => v != null);
-    return slice.length ? slice.reduce((s, v) => s + v, 0) / slice.length : null;
+  return vals.map((v, i) => {
+    if (v == null) return null;
+    const slice = vals.slice(Math.max(0, i - win + 1), i + 1).filter(x => x != null);
+    return slice.length ? slice.reduce((s, x) => s + x, 0) / slice.length : null;
   });
 }
 
@@ -4515,10 +4518,12 @@ function getReadingStats() {
 // 橫條圖(div-based)
 function hBars(items, opts = {}) {
   const max = Math.max(...items.map(i => i.value), 1);
-  return `<div class="hbars">` + items.map(it => {
+  const wc = opts.withCount;
+  return `<div class="hbars${wc ? ' with-count' : ''}">` + items.map(it => {
     const pct = it.value / max * 100;
     return `<div class="hbar-row"><span class="hbar-label" title="${it.label}">${it.label}</span>`
       + `<span class="hbar-track"><span class="hbar-fill" style="width:${pct}%;background:${it.color || 'var(--accent)'}"></span></span>`
+      + (wc ? `<span class="hbar-cnt">${it.count != null ? it.count + '筆' : ''}</span>` : '')
       + `<span class="hbar-val">${opts.money ? '$' + fmtMoney(it.value) : it.value}</span></div>`;
   }).join('') + `</div>`;
 }
@@ -4695,8 +4700,8 @@ function renderStats() {
   html += `<div class="settings-hint" style="margin-top:6px">綠=MSK IR</div></div>`;
   // 收入貢獻排行(逐筆金額 groupby type;金額加總對帳一致)
   html += `<div class="stats-panel"><h3>Procedure 收入貢獻排行 <span class="legend">全期 $${fmtMoney(Math.round(proc.totalAmt))}</span></h3>`;
-  html += hBars(proc.byAmt.slice(0, 12).map(p => ({ label: p.name, value: Math.round(p.amt), color: p.msk ? '#3fb950' : 'var(--accent)' })), { money: true });
-  html += `<div class="settings-hint" style="margin-top:6px">綠=MSK IR · 各項金額已按當日精準 IR 總額(手算)等比例校正;少數非常規計價項可能有微小歸屬落差</div></div>`;
+  html += hBars(proc.byAmt.slice(0, 12).map(p => ({ label: p.name, value: Math.round(p.amt), color: p.msk ? '#3fb950' : 'var(--accent)', count: p.n })), { money: true, withCount: true });
+  html += `<div class="settings-hint" style="margin-top:6px">綠=MSK IR · 中間=筆數 · 金額已按當日精準 IR 總額(手算)等比例校正;少數非常規計價項可能有微小歸屬落差</div></div>`;
   html += `</div>`;
 
   // === 報告(閱片)收入貢獻:各類占比(counts×單價 估算)===
