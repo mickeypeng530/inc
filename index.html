@@ -2583,10 +2583,10 @@ function calcMeetingRevenue(day) {
 function calcOvertimeRevenue(day, settings) {
   return (Number(day.overtimeHours)||0) * (Number(settings.overtimeRate)||0);
 }
-// 當日總收入:歷史匯入日優先用 sheet 原始值(importedRevenue),否則用計數×單價重算
+// 當日總收入:歷史匯入日優先用 sheet 原始值(importedRevenue);否則 base + IR(2025-12+ 有手算 irRevenue 則優先,與月 IR 同源)+ addon
 function getDayRevenue(day, settings) {
   if (day && typeof day.importedRevenue === 'number') return day.importedRevenue;
-  return calcBaseRevenue(day, settings) + calcProcRevenue(day) + calcAddonRevenue(day);
+  return calcBaseRevenue(day, settings) + getDayProcRevenue(day) + calcAddonRevenue(day);
 }
 function isImportedDay(day) {
   return !!(day && typeof day.importedRevenue === 'number');
@@ -4011,7 +4011,7 @@ function renderMonthProcBreakdown() {
   let totalCount = 0, totalAmount = 0;
   let mskCount = 0, mskAmount = 0;
   // 已知 MSK 關鍵字(用於 import 來的未登錄 atomic ID 自動判 MSK)
-  const MSK_KEYWORDS = ['nb', 'caudal', 'arthro', 'bone', 'biopsy', 'rf', 'myelo', 'joint', 'tp', 'inj', 'msk', 'muscle', 'retromass'];
+  const MSK_KEYWORDS = ['nb', 'caudal', 'arthro', 'bone', 'rf', 'myelo', 'joint', 'tp', 'inj', 'msk', 'muscle', 'retromass'];
   const isMSKByName = (s) => {
     const l = String(s || '').toLowerCase();
     return MSK_KEYWORDS.some(k => l.includes(k));
@@ -4230,7 +4230,7 @@ function getGroupSum(day, groupName) {
 
 // ===== 統計 Dashboard =====
 // MSK 判斷(atomicItems.isMSK 優先,fallback 關鍵字)
-const STATS_MSK_KW = ['nb', 'caudal', 'arthro', 'bone', 'biopsy', 'rf', 'myelo', 'joint', 'tp', 'inj', 'msk', 'muscle', 'retromass', 'lung'];
+const STATS_MSK_KW = ['nb', 'caudal', 'arthro', 'bone', 'rf', 'myelo', 'joint', 'tp', 'inj', 'msk', 'muscle', 'retromass'];
 function statsNameIsMSK(s) {
   const l = String(s || '').toLowerCase();
   return STATS_MSK_KW.some(k => l.includes(k));
@@ -4251,6 +4251,7 @@ function getMonthlyStats() {
   return months.map(m => {
     let total = 0, ir = 0, ot = 0, ctN = 0, mrN = 0, xrN = 0, bmdN = 0, daysActive = 0;
     let procIRraw = 0, mskIR = 0, procNraw = 0, mskNraw = 0;  // 逐筆金額/筆數
+    let rdCt = 0, rdMr = 0, rdXr = 0, rdBmd = 0, rdSp = 0, rdOther = 0, estTotal = 0;  // 各類報告估算 + 估算總收入
     const nonMskTypeSet = new Set();  // 非MSK-IR 的不同 procedure 類型(能力廣度)
     for (const date of Object.keys(state.data.days)) {
       if (!date.startsWith(m + '-')) continue;
@@ -4259,6 +4260,9 @@ function getMonthlyStats() {
       total += dRev;
       ir += getDayProcRevenue(day);
       ot += Number(day.overtimeHours || 0);
+      const rc = dayReadingByCat(day, settings.unitPrices);
+      rdCt += rc.ct; rdMr += rc.mr; rdXr += rc.xray; rdBmd += rc.bmd; rdSp += rc.special; rdOther += rc.consult + rc.sono + rc.opd;
+      estTotal += calcBaseRevenue(day, settings) + calcProcRevenue(day) + calcAddonRevenue(day);
       ctN += getGroupSum(day, 'CT'); mrN += getGroupSum(day, 'MR');
       xrN += getGroupSum(day, 'X-ray'); bmdN += getCount(day, 'bmd');
       for (const p of (day.procedures || [])) {
@@ -4291,16 +4295,27 @@ function getMonthlyStats() {
       irPer: procCntEff > 0 ? ir / procCntEff : null,
       mskPer: mskCntEff > 0 ? mskIR / mskCntEff : null,
       nonMskPer: nonMskN > 0 ? nonMskIr / nonMskN : null,
-      // 產能效率(加班 0 / 未結帳 → null)
-      effTotal: (ot > 0 && !isOpen) ? total / ot : null,
-      effIR: (ot > 0 && !isOpen) ? ir / ot : null,
       // P3-1 值班差額(稅前−績效,= 值班等被動收入);需兩者都有
       gap: (mm.perfTotal != null && mm.pretaxSalary != null) ? mm.pretaxSalary - mm.perfTotal : null,
       gapPct: (mm.perfTotal != null && mm.pretaxSalary != null && mm.pretaxSalary > 0) ? (mm.pretaxSalary - mm.perfTotal) / mm.pretaxSalary * 100 : null,
       // P3-2 能力廣度:非MSK-IR 類型數
       nonMskTypes: nonMskTypeSet.size,
+      // D2a 各類報告收入(counts×單價 估算)
+      rdCt, rdMr, rdXr, rdBmd, rdSp, rdOther,
+      // D2c 估算 total vs sheet 實收 total
+      estTotal, estDiffPct: total > 0 ? (estTotal - total) / total * 100 : null,
+      // D1b 真效率:收入 ÷ 總工時(平日數×9h + 加班;排除未結帳)
+      effTrue: !isOpen ? total / (weekdaysInMonth(m) * 9 + ot) : null,
     };
   });
+}
+// 該月平日(週一~五)天數 — 真效率正常工時基準用(不扣國定假日/休假,為估算基準)
+function weekdaysInMonth(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  const last = new Date(y, m, 0).getDate();
+  let n = 0;
+  for (let d = 1; d <= last; d++) { const wd = new Date(y, m - 1, d).getDay(); if (wd >= 1 && wd <= 5) n++; }
+  return n;
 }
 // 2-3 月移動平均(降噪),null 值跳過
 function movAvg(vals, win = 3) {
@@ -4443,9 +4458,14 @@ function getProcStats() {
   const cum = {};   // name → { n, amt, msk }
   let totalProc = 0, totalAmt = 0;
   for (const date in state.data.days) {
-    for (const p of (state.data.days[date].procedures || [])) {
+    const day = state.data.days[date];
+    const procs = day.procedures || [];
+    // 2025-12+ 手算當日 IR 總額精準(項目都有記,僅少數非常規計價有小落差)→ 按逐筆比例放大到精準總額
+    const daySum = procs.reduce((s, p) => s + (p.items || []).reduce((ss, it) => ss + Number(it.amount || 0), 0), 0);
+    const factor = (typeof day.irRevenue === 'number' && daySum > 0) ? day.irRevenue / daySum : 1;
+    for (const p of procs) {
       const nm = p.presetName || '?';
-      const amt = (p.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
+      const amt = (p.items || []).reduce((s, it) => s + Number(it.amount || 0), 0) * factor;
       if (!cum[nm]) cum[nm] = { n: 0, amt: 0, msk: procIsMSK(p) };
       cum[nm].n += 1; cum[nm].amt += amt;
       totalProc++; totalAmt += amt;
@@ -4454,6 +4474,43 @@ function getProcStats() {
   const byCount = Object.entries(cum).map(([name, v]) => ({ name, n: v.n, amt: v.amt, msk: v.msk })).sort((a, b) => b.n - a.n);
   const byAmt = byCount.slice().sort((a, b) => b.amt - a.amt);
   return { sorted: byCount, byAmt, totalProc, totalAmt };
+}
+// 單日各類報告(閱片)收入 = counts × 單價
+function dayReadingByCat(d, p) {
+  return {
+    ct:   getCount(d,'ct.opd')*p.ct.opd + getCount(d,'ct.er_adm_self')*p.ct.er_adm_self + getCount(d,'ct.ldct_health')*p.ct.ldct_health + getCount(d,'ct.ph')*(p.ct.ph||0),
+    mr:   getCount(d,'mr.opd')*p.mr.opd + getCount(d,'mr.er_adm_health')*p.mr.er_adm_health + getCount(d,'mr.ph')*(p.mr.ph||0),
+    xray: getCount(d,'xray.opd')*p.xray.opd + getCount(d,'xray.portable')*(p.xray.portable||0) + getCount(d,'xray.er')*p.xray.er + getCount(d,'xray.ph')*(p.xray.ph||0),
+    bmd:  getCount(d,'bmd')*p.bmd,
+    special: getCount(d,'special.swal')*(p.special.swal||0) + getCount(d,'special.hsg')*(p.special.hsg||0) + specialOthersTotalRev(d),
+    consult: getCount(d,'consult')*p.consult,
+    sono: getCount(d,'sono')*p.sono,
+    opd:  getCount(d,'opd')*p.opd,
+  };
+}
+// 各類報告(閱片)收入貢獻 — counts×單價 估算(匯入月可能有小誤差,結構占比可靠)
+function getReadingStats() {
+  const p = state.data.settings.unitPrices;
+  const cats = [
+    { key: 'ct',      name: 'CT',      color: '#e3a23b', amt: 0 },
+    { key: 'mr',      name: 'MR',      color: '#58a6ff', amt: 0 },
+    { key: 'xray',    name: 'X-ray',   color: '#3fb950', amt: 0 },
+    { key: 'bmd',     name: 'BMD',     color: '#a371f7', amt: 0 },
+    { key: 'special', name: 'Special', color: '#e06c9f', amt: 0 },
+    { key: 'consult', name: '會診',    color: '#7d8590', amt: 0 },
+    { key: 'sono',    name: 'Sono',    color: '#56b6c2', amt: 0 },
+    { key: 'opd',     name: 'OPD看診', color: '#d29922', amt: 0 },
+  ];
+  const i = Object.fromEntries(cats.map((c, k) => [c.key, k]));
+  for (const date in state.data.days) {
+    const rc = dayReadingByCat(state.data.days[date], p);
+    cats[i.ct].amt += rc.ct; cats[i.mr].amt += rc.mr; cats[i.xray].amt += rc.xray;
+    cats[i.bmd].amt += rc.bmd; cats[i.special].amt += rc.special;
+    cats[i.consult].amt += rc.consult; cats[i.sono].amt += rc.sono; cats[i.opd].amt += rc.opd;
+  }
+  const total = cats.reduce((s, c) => s + c.amt, 0);
+  cats.sort((a, b) => b.amt - a.amt);
+  return { cats, total };
 }
 // 橫條圖(div-based)
 function hBars(items, opts = {}) {
@@ -4522,7 +4579,7 @@ function renderStats() {
   html += kpi(`IR Procedure 收入`, fmt(last.ir), `占 ${last.irPct.toFixed(0)}% 收入`, '#58a6ff', spk('ir', '#58a6ff'));
   html += kpi(`MSK IR 收入`, fmt(last.mskIR), `占 IR ${last.mskOfIRpct.toFixed(0)}% · 占總 ${last.mskOfTotalPct.toFixed(0)}%`, '#3fb950', spk('mskIR', '#3fb950'));
   html += kpi(`閱片收入`, fmt(last.reading), `占 ${(100 - last.irPct).toFixed(0)}%`, 'var(--ink-2)', spk('reading', 'var(--ink-2)'));
-  html += kpi(`本月 Procedure`, last.procCntEff, `MSK ${last.mskCntEff} 筆 · ${Math.round(last.mskOfCntPct)}%`, '#a371f7', spk('procCntEff', '#a371f7'));
+  html += kpi(`本月 Procedure`, last.procCntEff, `MSK IR ${last.mskCntEff} 筆 · ${Math.round(last.mskOfCntPct)}%`, '#a371f7', spk('procCntEff', '#a371f7'));
   html += kpi(`加班時數`, `${last.ot}<span style="font-size:11px"> hr</span>`, last.perfTotal ? `績效 ${fmt(last.perfTotal)}` : '', '#e3a23b', spk('ot', '#e3a23b'));
   html += kpi(`${curYear} 年累計`, fmt(ytdTotal), `IR ${fmt(ytdIR)} · ${ytd.length} 個月`, '#3fb950');
   html += `</div>`;
@@ -4541,12 +4598,12 @@ function renderStats() {
   const idxOf = (key) => rows.map(r => (baseRow[key] > 0 && r[key] != null) ? r[key] / baseRow[key] * 100 : null);
   const growth = (key) => { const b = baseRow[key], l = last[key]; return (b > 0 && l != null) ? Math.round((l / b - 1) * 100) : 0; };
   html += chartPanel(`收入指數化(${baseRow.month}=100)`,
-    `Total <b>+${growth('total')}%</b> · 閱片 <b>+${growth('reading')}%</b> · IR <b style="color:#58a6ff">+${growth('ir')}%</b> · MSK <b style="color:#3fb950">+${growth('mskIR')}%</b> 　看成長率差異`,
+    `Total <b>+${growth('total')}%</b> · 閱片 <b>+${growth('reading')}%</b> · IR <b style="color:#58a6ff">+${growth('ir')}%</b> · MSK IR <b style="color:#3fb950">+${growth('mskIR')}%</b> 　看成長率差異`,
     'idx', labels, [
       { name: 'Total', values: idxOf('total'), color: 'var(--accent)', fmt: 'num' },
       { name: '閱片', values: idxOf('reading'), color: 'var(--ink-2)', fmt: 'num' },
       { name: 'IR', values: idxOf('ir'), color: '#58a6ff', fmt: 'num' },
-      { name: 'MSK', values: idxOf('mskIR'), color: '#3fb950', fmt: 'num' },
+      { name: 'MSK IR', values: idxOf('mskIR'), color: '#3fb950', fmt: 'num' },
     ], 720, 210);
 
   // === 兩欄:檢查量(CT/MR/BMD,X-ray 拆出) + IR占比 ===
@@ -4558,21 +4615,21 @@ function renderStats() {
       { name: 'MR', values: rows.map(r => r.mrN), color: '#58a6ff', fmt: 'num' },
       { name: 'BMD', values: rows.map(r => r.bmdN), color: '#a371f7', fmt: 'num' },
     ], 360, 190);
-  html += chartPanel('IR / MSK 占總收入趨勢',
-    '<i style="background:#58a6ff"></i>IR占總 <i style="background:#3fb950"></i>MSK占總',
+  html += chartPanel('IR / MSK IR 占總收入趨勢',
+    '<i style="background:#58a6ff"></i>IR占總 <i style="background:#3fb950"></i>MSK IR占總',
     'irmsk', labels, [
       { name: 'IR占總', values: rows.map(r => r.irPct), color: '#58a6ff', fmt: 'pct' },
-      { name: 'MSK占總', values: rows.map(r => r.mskOfTotalPct), color: '#3fb950', fmt: 'pct' },
+      { name: 'MSK IR占總', values: rows.map(r => r.mskOfTotalPct), color: '#3fb950', fmt: 'pct' },
     ], 360, 190, { pct: true });
   html += `</div>`;
 
   // === 兩欄:Procedure 筆數趨勢 + MSK 占 IR ===
   html += `<div class="stats-2col">`;
   html += chartPanel('Procedure 筆數趨勢',
-    '<i style="background:#58a6ff"></i>IR 筆數 <i style="background:#3fb950"></i>MSK 筆數',
+    '<i style="background:#58a6ff"></i>IR 筆數 <i style="background:#3fb950"></i>MSK IR 筆數',
     'proccnt', labels, [
       { name: 'IR 筆數', values: rows.map(r => r.procCntEff), color: '#58a6ff', fmt: 'num' },
-      { name: 'MSK 筆數', values: rows.map(r => r.mskCntEff), color: '#3fb950', fmt: 'num' },
+      { name: 'MSK IR 筆數', values: rows.map(r => r.mskCntEff), color: '#3fb950', fmt: 'num' },
     ], 360, 190);
   html += chartPanel('MSK 占 IR 比例',
     '<i style="background:#58a6ff"></i>收入% <i style="background:#3fb950"></i>筆數%',
@@ -4582,16 +4639,26 @@ function renderStats() {
     ], 360, 190, { pct: true });
   html += `</div>`;
 
-  // === 兩欄:X-ray 獨立(P2-2) + 產能效率(P2-3)===
+  // === D1a 收入 vs 加班 指數化雙線(各自基期=100,剪刀差=效率)===
+  const idxBy = (vals) => { const b = vals.find(v => v != null && v > 0); return b ? vals.map(v => v != null ? v / b * 100 : null) : vals.map(() => null); };
+  const revIdx = idxBy(rows.map(r => r.isOpen ? null : r.total));
+  const otIdx = idxBy(rows.map(r => r.isOpen ? null : r.ot));
+  html += chartPanel('收入 vs 加班(指數化,各自基期=100)',
+    '<i style="background:var(--accent)"></i>收入 <i style="background:#f85149"></i>加班時數 　兩線張開(收入↑/加班↓)＝用更少加班賺更多',
+    'rev_ot_idx', labels, [
+      { name: '收入', values: revIdx, color: 'var(--accent)', fmt: 'num' },
+      { name: '加班', values: otIdx, color: '#f85149', fmt: 'num' },
+    ], 720, 210);
+
+  // === 兩欄:X-ray 獨立(P2-2) + D1b 真效率(收入÷總工時)===
   html += `<div class="stats-2col">`;
   html += chartPanel('X-ray 量(獨立)',
     'X-ray 量級大、結構性下降,拆出避免壓平 CT/MR/BMD',
     'xray', labels, [{ name: 'X-ray', values: rows.map(r => r.xrN), color: '#3fb950', fmt: 'num' }], 360, 190);
-  html += chartPanel('產能效率(收入÷加班時數)',
-    '<i style="background:var(--accent)"></i>總/時 <i style="background:#58a6ff"></i>IR/時 　每加班小時產值',
-    'eff', labels, [
-      { name: '總/時', values: rows.map(r => r.effTotal), color: 'var(--accent)' },
-      { name: 'IR/時', values: rows.map(r => r.effIR), color: '#58a6ff' },
+  html += chartPanel('真效率(收入÷總工時)',
+    '總工時＝平日數×9h＋加班時數;排除未結帳月 — 口徑一致的每小時產值',
+    'efftrue', labels, [
+      { name: '收入/總工時', values: rows.map(r => r.effTrue), color: 'var(--accent)' },
     ], 360, 190);
   html += `</div>`;
   // X-ray 驟降原因註記(存 Firebase,不寫死)
@@ -4612,10 +4679,10 @@ function renderStats() {
 
   // === P1-1 產值/筆趨勢(2-3 月移動平均降噪)===
   html += chartPanel('每筆產值趨勢(3月移動平均)',
-    '<i style="background:#58a6ff"></i>IR/筆 <i style="background:#3fb950"></i>MSK/筆 <i style="background:#e3a23b"></i>非MSK-IR/筆 　看「成長是否集中在低單價工作」',
+    '<i style="background:#58a6ff"></i>IR/筆 <i style="background:#3fb950"></i>MSK IR/筆 <i style="background:#e3a23b"></i>非MSK-IR/筆 　看「成長是否集中在低單價工作」',
     'perproc', labels, [
       { name: 'IR/筆', values: movAvg(rows.map(r => r.irPer)), color: '#58a6ff' },
-      { name: 'MSK/筆', values: movAvg(rows.map(r => r.mskPer)), color: '#3fb950' },
+      { name: 'MSK IR/筆', values: movAvg(rows.map(r => r.mskPer)), color: '#3fb950' },
       { name: '非MSK-IR/筆', values: movAvg(rows.map(r => r.nonMskPer)), color: '#e3a23b' },
     ], 720, 200);
 
@@ -4623,13 +4690,47 @@ function renderStats() {
   const totIR = rows.reduce((s, r) => s + r.procCntEff, 0);
   const totMSK = rows.reduce((s, r) => s + r.mskCntEff, 0);
   html += `<div class="stats-2col">`;
-  html += `<div class="stats-panel"><h3>Procedure 累積排行(筆數) <span class="legend">IR <b style="color:#58a6ff">${totIR}</b> · MSK <b style="color:#3fb950">${totMSK}</b> 筆 (${totIR ? Math.round(totMSK / totIR * 100) : 0}%)</span></h3>`;
+  html += `<div class="stats-panel"><h3>Procedure 累積排行(筆數) <span class="legend">IR <b style="color:#58a6ff">${totIR}</b> · MSK IR <b style="color:#3fb950">${totMSK}</b> 筆 (${totIR ? Math.round(totMSK / totIR * 100) : 0}%)</span></h3>`;
   html += hBars(proc.sorted.slice(0, 12).map(p => ({ label: p.name, value: p.n, color: p.msk ? '#3fb950' : 'var(--accent)' })));
-  html += `<div class="settings-hint" style="margin-top:6px">綠=MSK</div></div>`;
+  html += `<div class="settings-hint" style="margin-top:6px">綠=MSK IR</div></div>`;
   // 收入貢獻排行(逐筆金額 groupby type;金額加總對帳一致)
   html += `<div class="stats-panel"><h3>Procedure 收入貢獻排行 <span class="legend">全期 $${fmtMoney(Math.round(proc.totalAmt))}</span></h3>`;
   html += hBars(proc.byAmt.slice(0, 12).map(p => ({ label: p.name, value: Math.round(p.amt), color: p.msk ? '#3fb950' : 'var(--accent)' })), { money: true });
-  html += `<div class="settings-hint" style="margin-top:6px">綠=MSK · 看金流集中在哪</div></div>`;
+  html += `<div class="settings-hint" style="margin-top:6px">綠=MSK IR · 各項金額已按當日精準 IR 總額(手算)等比例校正;少數非常規計價項可能有微小歸屬落差</div></div>`;
+  html += `</div>`;
+
+  // === 報告(閱片)收入貢獻:各類占比(counts×單價 估算)===
+  const rd = getReadingStats();
+  html += `<div class="stats-panel"><h3>報告(閱片)收入貢獻 <span class="legend">全期估 $${fmtMoney(Math.round(rd.total))} · counts×單價</span></h3>`;
+  html += hBars(rd.cats.filter(c => c.amt > 0).map(c => ({
+    label: `${c.name} ${rd.total ? Math.round(c.amt / rd.total * 100) : 0}%`,
+    value: Math.round(c.amt), color: c.color
+  })), { money: true });
+  html += `<div class="settings-hint" style="margin-top:6px">占比＝該類估算收入 ÷ 報告總收入;匯入月為 counts×單價 估算,結構占比可靠</div></div>`;
+
+  // === D2a 各類報告收入逐月趨勢(看哪類在成長/萎縮)===
+  html += chartPanel('各類報告收入趨勢',
+    '<i style="background:#e3a23b"></i>CT <i style="background:#58a6ff"></i>MR <i style="background:#3fb950"></i>X-ray <i style="background:#a371f7"></i>BMD <i style="background:#e06c9f"></i>Special',
+    'rdtrend', labels, [
+      { name: 'CT', values: rows.map(r => r.rdCt), color: '#e3a23b' },
+      { name: 'MR', values: rows.map(r => r.rdMr), color: '#58a6ff' },
+      { name: 'X-ray', values: rows.map(r => r.rdXr), color: '#3fb950' },
+      { name: 'BMD', values: rows.map(r => r.rdBmd), color: '#a371f7' },
+      { name: 'Special', values: rows.map(r => r.rdSp), color: '#e06c9f' },
+    ], 720, 210);
+
+  // === D2c 估算(counts×單價+逐筆) vs 權威值(匯入月=sheet實收、近月=手算IR)對帳 ===
+  const sumAct = rows.reduce((s, r) => s + r.total, 0), sumEst = rows.reduce((s, r) => s + r.estTotal, 0);
+  const overallDiff = sumAct ? (sumEst - sumAct) / sumAct * 100 : 0;
+  const drift = rows.filter(r => r.estDiffPct != null && Math.abs(r.estDiffPct) >= 2).sort((a, b) => Math.abs(b.estDiffPct) - Math.abs(a.estDiffPct));
+  html += `<div class="stats-panel"><h3>估算 vs 實收/手算 對帳 <span class="legend">全期 權威 $${fmtMoney(Math.round(sumAct))} · 估算 $${fmtMoney(Math.round(sumEst))} · 差 ${overallDiff >= 0 ? '+' : ''}${overallDiff.toFixed(1)}%</span></h3>`;
+  if (!drift.length) {
+    html += `<div class="settings-hint">✅ 所有月份「counts×單價＋逐筆 估算」與權威值(匯入月=sheet實收、近月=手算IR)誤差 &lt;2%</div>`;
+  } else {
+    html += `<table class="settings-table"><tr><th>月份</th><th>實收/手算</th><th>估算</th><th>差%</th></tr>`;
+    html += drift.map(r => `<tr><td>${r.month}</td><td>${fmtMoney(Math.round(r.total))}</td><td>${fmtMoney(Math.round(r.estTotal))}</td><td style="color:${Math.abs(r.estDiffPct) >= 5 ? '#f85149' : 'var(--ink-muted)'}">${r.estDiffPct >= 0 ? '+' : ''}${r.estDiffPct.toFixed(1)}%</td></tr>`).join('');
+    html += `</table><div class="settings-hint" style="margin-top:6px">權威值＝匯入月用 sheet 實收、近月用手算 IR;差大=該月逐筆登錄/單價與權威值有落差(紅=≥5%)</div>`;
+  }
   html += `</div>`;
 
   // === 收入對帳表 ===
