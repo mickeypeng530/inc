@@ -1775,6 +1775,7 @@ body:not(.mini-mode) #view-mini { display: none; }
     <select id="month-month-sel" class="btn-secondary" style="padding:4px 8px"></select>
     <button id="month-next" class="btn-secondary">→</button>
     <span class="header-spacer" style="flex:1"></span>
+    <button id="month-paste" class="btn-secondary" title="貼上某日計數(可指定日期)">📥 貼上某日</button>
     <button id="month-edit-toggle" class="btn-secondary" title="切換編輯模式:解鎖所有格子(計數/加班/收入/IR)">✏️ 編輯</button>
   </div>
   <div style="overflow-x:auto">
@@ -4886,8 +4887,10 @@ function applyPastedCounts(date, parsed) {
   day.updatedAt = new Date().toISOString();
   storage.save(state.data);
 }
-function showPasteModal(date) {
+function showPasteModal(date, opts = {}) {
   const mount = $('modal-mount');
+  const dateInput = opts.pickDate ? el('input', { type: 'date', class: 'paste-date', value: date }) : null;
+  const targetDate = () => (dateInput && dateInput.value) ? dateInput.value : date;
   const ta = el('textarea', { class: 'paste-textarea', rows: '14',
     placeholder: '從 sheet 複製一整欄,貼這裡\n(每行一個數字,空行=該項留空)' });
   const preview = el('div', { class: 'paste-preview' });
@@ -4913,17 +4916,20 @@ function showPasteModal(date) {
   const overlay = el('div', { class: 'modal-overlay' });
   const close = () => overlay.remove();
   const modal = el('div', { class: 'modal paste-modal' },
-    el('h3', null, `📥 貼上計數 → ${date}`),
+    el('h3', null, opts.pickDate ? '📥 貼上計數(指定日期)' : `📥 貼上計數 → ${date}`),
+    dateInput ? el('div', { class: 'paste-date-row', style: 'display:flex;align-items:center;gap:8px;margin:2px 0 8px' },
+      el('span', { class: 'settings-hint' }, '匯入日期'), dateInput) : null,
     el('p', { class: 'settings-hint', style: 'margin:4px 0 10px' }, '順序依「設定 → Sheet 列順序」。空行不覆蓋原值,有值的項會覆蓋當天。'),
     el('div', { class: 'paste-body' }, ta, preview),
     el('div', { class: 'modal-actions' },
       el('button', { class: 'btn-secondary', onclick: close }, '取消'),
       el('button', { class: 'btn-primary', onclick: () => {
-        applyPastedCounts(date, parsePastedCounts(ta.value));
+        const d = targetDate();
+        applyPastedCounts(d, parsePastedCounts(ta.value));
         close();
         if ($('view-month').classList.contains('active')) renderMonth();
         else renderAll();
-        toast(`✓ 已貼上計數到 ${date}`, 'success');
+        toast(`✓ 已貼上計數到 ${d}`, 'success');
       } }, '套用')
     )
   );
@@ -5533,6 +5539,10 @@ async function enterApp(user) {
 
   $('export-day').onclick = exportDayTSV;
   $('paste-day').onclick = () => showPasteModal(state.currentDate);
+  $('month-paste').onclick = () => {
+    const dflt = todayISO().startsWith(state.currentMonth) ? todayISO() : state.currentMonth + '-01';
+    showPasteModal(dflt, { pickDate: true });
+  };
 
   $('theme-toggle').onclick = () => applyTheme(state.data.settings.theme === 'light' ? 'dark' : 'light');
 
