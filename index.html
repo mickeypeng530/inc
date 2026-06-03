@@ -2652,10 +2652,10 @@ function renderMini() {
       rows.appendChild(el('div', { class: 'count-row mini-row' },
         groupCell, subLabel,
         el('div', { class: 'count-controls' },
-          el('button', { class: 'btn-step', onclick: () => bumpCount(child.key, -1) }, '−'),
-          el('input', { class: 'count-input', type: 'number', value: String(v), min: '0',
-            oninput: (e) => setCountAndRender(child.key, e.target.value) }),
-          el('button', { class: 'btn-step', onclick: () => bumpCount(child.key, +1) }, '＋')
+          el('button', { class: 'btn-step', tabindex: '-1', onclick: () => bumpCount(child.key, -1) }, '−'),
+          el('input', { class: 'count-input', type: 'number', inputmode: 'numeric', value: String(v), min: '0',
+            oninput: (e) => setCountAndRender(child.key, e.target.value), onfocus: countSelectFocus, onkeydown: countKeyNav }),
+          el('button', { class: 'btn-step', tabindex: '-1', onclick: () => bumpCount(child.key, +1) }, '＋')
         )
       ));
     }
@@ -2859,10 +2859,10 @@ function renderCountsPanel() {
       groupEl.appendChild(el('div', { class: 'count-row' },
         groupCell, subLabel,
         el('div', { class: 'count-controls' },
-          el('button', { class: 'btn-step', onclick: () => bumpCount(child.key, -1) }, '−'),
-          el('input', { class: 'count-input', type: 'number', value: String(v), min: '0',
-            oninput: (e) => setCountAndRender(child.key, e.target.value) }),
-          el('button', { class: 'btn-step', onclick: () => bumpCount(child.key, +1) }, '＋')
+          el('button', { class: 'btn-step', tabindex: '-1', onclick: () => bumpCount(child.key, -1) }, '−'),
+          el('input', { class: 'count-input', type: 'number', inputmode: 'numeric', value: String(v), min: '0',
+            oninput: (e) => setCountAndRender(child.key, e.target.value), onfocus: countSelectFocus, onkeydown: countKeyNav }),
+          el('button', { class: 'btn-step', tabindex: '-1', onclick: () => bumpCount(child.key, +1) }, '＋')
         )
       ));
     }
@@ -2938,6 +2938,17 @@ function setCountAndRender(key, val) {
   storage.save(state.data);   // 立刻 save → BC 廣播
   if (state.isMini) renderMini();
   else renderStatsPanel();
+}
+// Sheet 式鍵盤流:focus 自動全選 + Enter/↓ 跳下一計數欄、↑ 跳上一欄
+function countSelectFocus(e) { e.target.select(); }
+function countKeyNav(e) {
+  if (e.key !== 'Enter' && e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault();  // 同時擋掉 number input 的 ↑↓ 加減
+  const all = [...document.querySelectorAll('.count-input')].filter(n => n.offsetParent !== null);
+  const i = all.indexOf(e.target);
+  if (i < 0) return;
+  const next = all[e.key === 'ArrowUp' ? i - 1 : i + 1];
+  if (next) next.focus();
 }
 
 // --- Today: procedures panel ---
@@ -5379,6 +5390,11 @@ function setView(name) {
   if (name === 'month') renderMonth();
   if (name === 'settings') renderSettings();
   if (name === 'stats') renderStats();
+  // 切到今日:桌面自動 focus 第一個計數欄(觸控裝置略過,免彈鍵盤)
+  if (name === 'today' && !matchMedia('(pointer: coarse)').matches) {
+    const fi = document.querySelector('#view-today .count-input');
+    if (fi) setTimeout(() => fi.focus(), 0);
+  }
 }
 
 // 靜態 login-screen show/hide(playbook: iOS Safari popup 需 user-gesture
