@@ -1120,6 +1120,7 @@ select.btn-secondary option {
 .chart-tooltip .ctt-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
 .chart-tooltip .ctt-name { color: var(--ink-2); flex: 1; }
 .chart-tooltip b { color: var(--ink-1); }
+.chart-tooltip .ctt-seg { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--border); color: var(--ink-2); font-size: 10px; max-width: 210px; line-height: 1.4; white-space: normal; }
 .xray-note-input { width: 100%; box-sizing: border-box; background: var(--bg-page); color: var(--ink-1); border: 1px solid var(--border); border-radius: 5px; padding: 6px 10px; font-size: 12px; }
 .xray-note-input:focus { outline: 1px solid var(--accent); }
 .hbars { display: flex; flex-direction: column; gap: 5px; }
@@ -4395,7 +4396,7 @@ function svgLineChart(labels, series, w, h, opts = {}) {
   svg += `<line class="xhair" y1="${pad.t}" y2="${(pad.t + ih).toFixed(1)}" stroke="var(--ink-1)" stroke-width="0.8" stroke-dasharray="3 3" opacity="0.5" style="display:none"/>`;
   series.forEach((s) => { svg += `<circle class="hdot" r="3.5" fill="${s.color}" stroke="var(--bg-panel)" stroke-width="1.5" style="display:none"/>`; });
   svg += `</svg>`;
-  if (opts.id) _statsCharts[opts.id] = { labels, series, w, padL: pad.l, padR: pad.r, padT: pad.t, ih, max, n, pct: !!opts.pct };
+  if (opts.id) _statsCharts[opts.id] = { labels, series, w, padL: pad.l, padR: pad.r, padT: pad.t, ih, max, n, pct: !!opts.pct, footer: opts.footer || null };
   return svg;
 }
 // 綁定所有 chart-box 的 hover/tap 互動(crosshair + tooltip 顯示該月所有指標)
@@ -4425,6 +4426,7 @@ function bindChartHover() {
         dot.setAttribute('cx', xpos); dot.setAttribute('cy', Y(v).toFixed(1)); dot.style.display = '';
         rows += `<div class="ctt-row"><span class="ctt-dot" style="background:${s.color}"></span><span class="ctt-name">${s.name || ''}</span><b>${fmtV(v, s)}</b></div>`;
       });
+      if (d.footer && d.footer[idx]) rows += `<div class="ctt-seg">${d.footer[idx]}</div>`;
       tip.innerHTML = rows;
       tip.style.display = '';
       const bx = box.getBoundingClientRect();
@@ -4647,18 +4649,10 @@ function renderStats() {
     ], 360, 190, { pct: true });
   html += `</div>`;
 
-  // === D1a 收入 vs 加班 指數化雙線(各自基期=100,剪刀差=效率)===
+  // === D1a 收入 vs 加班 指數化雙線 + 半年區間判定(tooltip footer 與下方表共用)===
   const idxBy = (vals) => { const b = vals.find(v => v != null && v > 0); return b ? vals.map(v => v != null ? v / b * 100 : null) : vals.map(() => null); };
   const revIdx = idxBy(rows.map(r => r.isOpen ? null : r.total));
   const otIdx = idxBy(rows.map(r => r.isOpen ? null : r.ot));
-  html += chartPanel('收入 vs 加班(指數化,各自基期=100)',
-    '<i style="background:var(--accent)"></i>收入 <i style="background:#f85149"></i>加班時數 　兩線張開(收入↑/加班↓)＝用更少加班賺更多',
-    'rev_ot_idx', labels, [
-      { name: '收入', values: revIdx, color: 'var(--accent)', fmt: 'num' },
-      { name: '加班', values: otIdx, color: '#f85149', fmt: 'num' },
-    ], 720, 210);
-
-  // === 半年區間解析:四象限判定(收入Δ × 加班Δ),排除未結帳月 ===
   const effVerdict = (revD, otD) => {
     const f = 3;  // |Δ|<3% 視為持平
     const rUp = revD > f, rDn = revD < -f, oUp = otD > f, oDn = otD < -f;
@@ -4672,6 +4666,7 @@ function renderStats() {
     if (oUp) return ['⚠️', '加班升、收入持平'];
     return ['〰️', '大致持平'];
   };
+  // 半年 bucket 聚合(排除未結帳)
   const hy = {};
   for (const r of rows) {
     if (r.isOpen) continue;
@@ -4681,6 +4676,32 @@ function renderStats() {
     hy[k].revSum += r.total; hy[k].otSum += r.ot; hy[k].n++;
   }
   const hbuckets = Object.values(hy).sort((a, b) => a.sk - b.sk).map(b => ({ key: b.key, rev: b.revSum / b.n, ot: b.otSum / b.n }));
+  // 每半年「vs 前期」判定(table + tooltip footer 共用);第一個半年為基期(null)
+  const segChg = {};
+  hbuckets.forEach((b, i) => {
+    if (i === 0) { segChg[b.key] = null; return; }
+    const p = hbuckets[i - 1];
+    const rD = p.rev > 0 ? (b.rev / p.rev - 1) * 100 : 0;
+    const oD = p.ot > 0 ? (b.ot / p.ot - 1) * 100 : 0;
+    const [icon, label] = effVerdict(rD, oD);
+    segChg[b.key] = { rD, oD, icon, label };
+  });
+  const fmtSeg = (s) => `收入${s.rD >= 0 ? '+' : ''}${s.rD.toFixed(0)}% 加班${s.oD >= 0 ? '+' : ''}${s.oD.toFixed(0)}% → ${s.icon} ${s.label}`;
+  const hyKey = (m) => { const [y, mo] = m.split('-').map(Number); return `${y} H${mo <= 6 ? 1 : 2}`; };
+  // tooltip footer:滑到某月顯示其所屬半年判定
+  const segFooter = rows.map(r => {
+    if (r.isOpen) return '進行中(未納入半年解析)';
+    const k = hyKey(r.month), s = segChg[k];
+    return s ? `${k}　${fmtSeg(s)}` : `${k}　基期`;
+  });
+  html += chartPanel('收入 vs 加班(指數化,各自基期=100)',
+    '<i style="background:var(--accent)"></i>收入 <i style="background:#f85149"></i>加班時數 　滑到各月看該半年判定;兩線張開(收入↑/加班↓)＝用更少加班賺更多',
+    'rev_ot_idx', labels, [
+      { name: '收入', values: revIdx, color: 'var(--accent)', fmt: 'num' },
+      { name: '加班', values: otIdx, color: '#f85149', fmt: 'num' },
+    ], 720, 210, { footer: segFooter });
+
+  // === 半年區間解析表(總覽,資料同 tooltip)===
   if (hbuckets.length >= 2) {
     const f0 = hbuckets[0], fL = hbuckets[hbuckets.length - 1];
     const oRevD = f0.rev > 0 ? (fL.rev / f0.rev - 1) * 100 : 0;
@@ -4688,18 +4709,11 @@ function renderStats() {
     const [oi, ol] = effVerdict(oRevD, oOtD);
     html += `<div class="stats-panel" style="padding:10px 14px"><h3 style="margin-bottom:6px">半年區間解析 <span class="legend">全期 收入 ${oRevD >= 0 ? '+' : ''}${oRevD.toFixed(0)}% / 加班 ${oOtD >= 0 ? '+' : ''}${oOtD.toFixed(0)}% → ${oi} ${ol}</span></h3>`;
     html += `<table class="settings-table"><tr><th>期間</th><th>月均收入</th><th>月均加班</th><th>vs 前期</th></tr>`;
-    hbuckets.forEach((b, i) => {
-      let chg = '基期';
-      if (i > 0) {
-        const p = hbuckets[i - 1];
-        const rD = p.rev > 0 ? (b.rev / p.rev - 1) * 100 : 0;
-        const oD = p.ot > 0 ? (b.ot / p.ot - 1) * 100 : 0;
-        const [ic, lbl] = effVerdict(rD, oD);
-        chg = `收入${rD >= 0 ? '+' : ''}${rD.toFixed(0)}% 加班${oD >= 0 ? '+' : ''}${oD.toFixed(0)}% → ${ic} ${lbl}`;
-      }
-      html += `<tr><td>${b.key}</td><td>${fmtMoney(Math.round(b.rev))}</td><td>${b.ot.toFixed(0)}h</td><td>${chg}</td></tr>`;
+    hbuckets.forEach((b) => {
+      const s = segChg[b.key];
+      html += `<tr><td>${b.key}</td><td>${fmtMoney(Math.round(b.rev))}</td><td>${b.ot.toFixed(0)}h</td><td>${s ? fmtSeg(s) : '基期'}</td></tr>`;
     });
-    html += `</table><div class="settings-hint" style="margin-top:6px">月均=該半年各月平均(排除未結帳月);|Δ|<3% 視為持平</div></div>`;
+    html += `</table><div class="settings-hint" style="margin-top:6px">月均=該半年各月平均(排除未結帳月);|Δ|<3% 視為持平;滑上方圖看各月所屬半年判定</div></div>`;
   }
 
   // === 兩欄:X-ray 獨立(P2-2) + D1b 真效率(收入÷總工時)===
