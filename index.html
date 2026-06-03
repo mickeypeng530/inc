@@ -4267,10 +4267,13 @@ function getMonthlyStats() {
       estTotal += calcBaseRevenue(day, settings) + calcProcRevenue(day) + calcAddonRevenue(day);
       ctN += getGroupSum(day, 'CT'); mrN += getGroupSum(day, 'MR');
       xrN += getGroupSum(day, 'X-ray'); bmdN += getCount(day, 'bmd');
+      // mskIR 與 ir 同源:2025-12+ 手算日總精準 → 逐筆 MSK 金額按比例校正到精準總額
+      const daySum = calcProcRevenue(day);
+      const factor = (typeof day.irRevenue === 'number' && daySum > 0) ? day.irRevenue / daySum : 1;
       for (const p of (day.procedures || [])) {
         const amt = (p.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
         procIRraw += amt; procNraw++;
-        if (procIsMSK(p)) { mskIR += amt; mskNraw++; }
+        if (procIsMSK(p)) { mskIR += amt * factor; mskNraw++; }
         else nonMskTypeSet.add(p.presetName);
       }
       if (dRev > 0 || (day.procedures||[]).length) daysActive++;
