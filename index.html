@@ -4658,6 +4658,50 @@ function renderStats() {
       { name: '加班', values: otIdx, color: '#f85149', fmt: 'num' },
     ], 720, 210);
 
+  // === 半年區間解析:四象限判定(收入Δ × 加班Δ),排除未結帳月 ===
+  const effVerdict = (revD, otD) => {
+    const f = 3;  // |Δ|<3% 視為持平
+    const rUp = revD > f, rDn = revD < -f, oUp = otD > f, oDn = otD < -f;
+    if (rUp && oDn) return ['✅', '效率↑(少加班多賺)'];
+    if (rUp && oUp) return revD > otD ? ['⚠️', '成長但偏勞力'] : ['⚠️', '過勞低效(加班漲更兇)'];
+    if (rDn && oDn) return ['〰️', '主動縮量'];
+    if (rDn && oUp) return ['❌', '惡化(更累更少)'];
+    if (rUp) return ['✅', '收入升、加班持平'];
+    if (rDn) return ['〰️', '收入降、加班持平'];
+    if (oDn) return ['✅', '加班降、收入持平'];
+    if (oUp) return ['⚠️', '加班升、收入持平'];
+    return ['〰️', '大致持平'];
+  };
+  const hy = {};
+  for (const r of rows) {
+    if (r.isOpen) continue;
+    const [yy, mo] = r.month.split('-').map(Number);
+    const k = `${yy} H${mo <= 6 ? 1 : 2}`;
+    if (!hy[k]) hy[k] = { key: k, sk: yy * 10 + (mo <= 6 ? 1 : 2), revSum: 0, otSum: 0, n: 0 };
+    hy[k].revSum += r.total; hy[k].otSum += r.ot; hy[k].n++;
+  }
+  const hbuckets = Object.values(hy).sort((a, b) => a.sk - b.sk).map(b => ({ key: b.key, rev: b.revSum / b.n, ot: b.otSum / b.n }));
+  if (hbuckets.length >= 2) {
+    const f0 = hbuckets[0], fL = hbuckets[hbuckets.length - 1];
+    const oRevD = f0.rev > 0 ? (fL.rev / f0.rev - 1) * 100 : 0;
+    const oOtD = f0.ot > 0 ? (fL.ot / f0.ot - 1) * 100 : 0;
+    const [oi, ol] = effVerdict(oRevD, oOtD);
+    html += `<div class="stats-panel" style="padding:10px 14px"><h3 style="margin-bottom:6px">半年區間解析 <span class="legend">全期 收入 ${oRevD >= 0 ? '+' : ''}${oRevD.toFixed(0)}% / 加班 ${oOtD >= 0 ? '+' : ''}${oOtD.toFixed(0)}% → ${oi} ${ol}</span></h3>`;
+    html += `<table class="settings-table"><tr><th>期間</th><th>月均收入</th><th>月均加班</th><th>vs 前期</th></tr>`;
+    hbuckets.forEach((b, i) => {
+      let chg = '基期';
+      if (i > 0) {
+        const p = hbuckets[i - 1];
+        const rD = p.rev > 0 ? (b.rev / p.rev - 1) * 100 : 0;
+        const oD = p.ot > 0 ? (b.ot / p.ot - 1) * 100 : 0;
+        const [ic, lbl] = effVerdict(rD, oD);
+        chg = `收入${rD >= 0 ? '+' : ''}${rD.toFixed(0)}% 加班${oD >= 0 ? '+' : ''}${oD.toFixed(0)}% → ${ic} ${lbl}`;
+      }
+      html += `<tr><td>${b.key}</td><td>${fmtMoney(Math.round(b.rev))}</td><td>${b.ot.toFixed(0)}h</td><td>${chg}</td></tr>`;
+    });
+    html += `</table><div class="settings-hint" style="margin-top:6px">月均=該半年各月平均(排除未結帳月);|Δ|<3% 視為持平</div></div>`;
+  }
+
   // === 兩欄:X-ray 獨立(P2-2) + D1b 真效率(收入÷總工時)===
   html += `<div class="stats-2col">`;
   html += chartPanel('X-ray 量(獨立)',
