@@ -4963,16 +4963,21 @@ function applyPastedCounts(date, parsed) {
 function parsePastedProcedures(text) {
   const presets = state.data.settings.presets || [];
   const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, '');
+  const findPreset = (nm) => presets.find(p => p.name.toLowerCase() === nm.toLowerCase())
+    || presets.find(p => norm(p.name) === norm(nm));
   const rows = [], errors = [];
   for (const raw of String(text).split(/\r?\n/)) {
     const line = raw.replace(/"/g, '').trim();
     if (!line) continue;
-    const m = line.match(/^(\S+)\s+(.+)$/);
-    let medRecord = '', name = line;
-    if (m && /^\d+$/.test(m[1])) { medRecord = m[1]; name = m[2].trim(); }
-    const preset = presets.find(p => p.name.toLowerCase() === name.toLowerCase())
-      || presets.find(p => norm(p.name) === norm(name));
-    if (!preset && !m) { errors.push(raw); continue; }
+    let medRecord = '', name = line, preset = findPreset(line);
+    if (!preset) {
+      const m = line.match(/^(\S+)\s+(.+)$/);   // 第一 token=病歷號(可含字母,如 S23871),其餘=preset 名
+      if (m) {
+        const rest = m[2].trim(), p2 = findPreset(rest);
+        if (p2) { medRecord = m[1]; name = rest; preset = p2; }
+        else if (/^[A-Za-z]*\d[A-Za-z0-9-]*$/.test(m[1])) { medRecord = m[1]; name = rest; }  // 像病歷號 → 切開,rest 待指派
+      }
+    }
     rows.push({ medRecord, name, preset: preset || null, matched: !!preset });
   }
   return { rows, errors };
