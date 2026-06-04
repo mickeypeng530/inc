@@ -681,6 +681,21 @@ select.btn-secondary option {
   text-align: right;
   font-size: 13px;
 }
+.proc-item-amount-input {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  color: var(--accent); width: 72px; text-align: right; font-size: 13px;
+  background: transparent; border: none; border-bottom: 1px dashed transparent; padding: 1px 2px;
+}
+.proc-item-amount-input:hover { border-bottom-color: var(--ink-cap); }
+.proc-item-amount-input:focus { outline: none; border-bottom: 1px solid var(--accent); color: var(--ink-1); }
+.proc-item-preset-sel {
+  flex: 1; min-width: 0; max-width: 100%;
+  background: transparent; border: none; color: var(--ink-1);
+  font-family: inherit; font-size: 12px; padding: 1px 2px;
+  border-bottom: 1px dashed transparent;
+}
+.proc-item-preset-sel:hover { border-bottom-color: var(--ink-cap); }
+.proc-item-preset-sel:focus { outline: none; border-bottom: 1px solid var(--accent); }
 .proc-item-detail {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -2968,10 +2983,20 @@ function renderProceduresPanel() {
   const list = $('proc-list');
   list.innerHTML = '';
   let procTotal = 0;
+  const presets = state.data.settings.presets || [];
   for (const [i, rec] of (day.procedures || []).entries()) {
     const items = rec.items || [];
     procTotal += items.reduce((s,it)=>s+Number(it.amount||0),0);
     const detailText = items.map(it => `${it.name} ${fmtMoney(it.amount)}`).join(' + ');
+    const known = rec.presetId && presets.some(p => p.id === rec.presetId);
+    const presetSel = el('select', { class: 'proc-item-preset-sel', title: '可重選 preset(會重新展開原子項)',
+      onchange: (e) => changeProcPreset(i, e.target.value) });
+    if (!known) presetSel.appendChild(el('option', { value: '' }, `⚠️ ${rec.presetName || '未指派'} ▾`));
+    for (const p of presets) {
+      const o = el('option', { value: p.id }, p.name);
+      if (p.id === rec.presetId) o.selected = true;
+      presetSel.appendChild(o);
+    }
     list.appendChild(el('li', { class: 'proc-item' },
       el('div', { style: 'flex:1;min-width:0' },
         el('div', { class: 'proc-item-name' },
@@ -2982,11 +3007,15 @@ function renderProceduresPanel() {
             title: '可編輯病歷號',
             oninput: (e) => updateProcMedRec(i, e.target.value),
           }),
-          el('span', { class: 'proc-item-presetname' }, rec.presetName)
+          presetSel
         ),
         el('div', { class: 'proc-item-detail' }, detailText)
       ),
-      el('div', { class: 'proc-item-amount' }, fmtMoney(items.reduce((s,it)=>s+Number(it.amount||0),0))),
+      el('input', { class: 'proc-item-amount-input', type: 'number', min: '0', inputmode: 'numeric',
+        value: String(items.reduce((s, it) => s + Number(it.amount || 0), 0)),
+        title: '可編輯金額(按比例分回原子項)',
+        onfocus: countSelectFocus,
+        onchange: (e) => updateProcAmount(i, e.target.value) }),
       el('button', { class: 'btn-del', title: '刪除', onclick: () => removeProc(i) }, '×')
     ));
   }
@@ -3000,6 +3029,47 @@ function updateProcMedRec(i, val) {
   day.updatedAt = new Date().toISOString();
   clearTimeout(state.saveDebounce);
   state.saveDebounce = setTimeout(() => storage.save(state.data), 200);
+}
+// 改某筆 procedure 金額:按比例分回原子項(保留 atomic / MSK 判定)
+function updateProcAmount(i, val) {
+  const day = getDay(state.currentDate);
+  const rec = day.procedures && day.procedures[i];
+  if (!rec) return;
+  const newTotal = Math.max(0, Number(val) || 0);
+  const items = rec.items || (rec.items = []);
+  const oldTotal = items.reduce((s, it) => s + Number(it.amount || 0), 0);
+  if (items.length === 0) {
+    items.push({ atomicId: rec.presetId || '', name: rec.presetName || '', amount: newTotal });
+  } else if (oldTotal > 0) {
+    const f = newTotal / oldTotal;
+    items.forEach(it => { it.amount = Math.round(Number(it.amount || 0) * f); });
+    const diff = newTotal - items.reduce((s, it) => s + Number(it.amount || 0), 0);
+    if (diff) items[0].amount = Math.max(0, Number(items[0].amount || 0) + diff);
+  } else {
+    items[0].amount = newTotal;
+  }
+  day.updatedAt = new Date().toISOString();
+  storage.save(state.data);
+  renderProceduresPanel();
+  renderStatsPanel();
+}
+// 下拉重選某筆 procedure 的 preset → 重新展開原子項
+function changeProcPreset(i, presetId) {
+  const day = getDay(state.currentDate);
+  const rec = day.procedures && day.procedures[i];
+  if (!rec) return;
+  const preset = (state.data.settings.presets || []).find(p => p.id === presetId);
+  if (!preset) return;
+  rec.presetId = preset.id;
+  rec.presetName = preset.name;
+  rec.items = (preset.items || []).map(it => {
+    const atom = state.data.settings.atomicItems.find(a => a.id === it.atomicId);
+    return { atomicId: it.atomicId, name: atom?.name || it.atomicId, amount: Number(it.amount || 0) };
+  });
+  day.updatedAt = new Date().toISOString();
+  storage.save(state.data);
+  renderProceduresPanel();
+  renderStatsPanel();
 }
 
 function addPresetToToday() {
@@ -4912,13 +4982,14 @@ function applyPastedProcedures(date, parsed) {
   if (!day.procedures) day.procedures = [];
   let added = 0;
   for (const r of parsed.rows) {
-    if (!r.preset) continue;
     day.procedures.push({
-      presetId: r.preset.id, presetName: r.preset.name, medRecord: r.medRecord,
-      items: (r.preset.items || []).map(it => {
+      presetId: r.preset ? r.preset.id : '',
+      presetName: r.preset ? r.preset.name : r.name,   // 對不到 → 保留貼上的名稱,待清單下拉指派
+      medRecord: r.medRecord,
+      items: r.preset ? (r.preset.items || []).map(it => {
         const atom = state.data.settings.atomicItems.find(a => a.id === it.atomicId);
         return { atomicId: it.atomicId, name: atom?.name || it.atomicId, amount: Number(it.amount || 0) };
-      }),
+      }) : [],
     });
     added++;
   }
@@ -5013,10 +5084,10 @@ function showImportModal(initType, initDate) {
       tbl.appendChild(el('tr', null, el('th', null, '病歷號'), el('th', null, 'Procedure'), el('th', null, '金額')));
       rows.forEach(r => tbl.appendChild(el('tr', null,
         el('td', { style: 'color:var(--ink-muted)' }, r.medRecord || '—'),
-        el('td', null, r.name + (r.matched ? '' : ' ⚠️對不到')),
+        el('td', null, r.name + (r.matched ? '' : ' ⚠️待指派')),
         el('td', { style: 'color:var(--accent);font-weight:600' }, r.preset ? fmtMoney((r.preset.items || []).reduce((s, it) => s + Number(it.amount || 0), 0)) : '—'))));
-      const ok = rows.filter(r => r.matched).length;
-      preview.appendChild(el('div', { class: 'paste-count-hint' }, `可匯入 ${ok} / ${rows.length} 筆${errors.length ? ' · ⚠️ ' + errors.length + ' 行略過' : ''}`));
+      const un = rows.filter(r => !r.matched).length;
+      preview.appendChild(el('div', { class: 'paste-count-hint' }, `將匯入 ${rows.length} 筆${un ? ` · ⚠️ ${un} 筆待指派(匯入後在清單下拉選 preset)` : ''}${errors.length ? ' · ' + errors.length + ' 行略過' : ''}`));
     }
     preview.appendChild(tbl);
   };
