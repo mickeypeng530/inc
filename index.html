@@ -4339,6 +4339,7 @@ function getMonthlyStats() {
     let total = 0, ir = 0, ot = 0, ctN = 0, mrN = 0, xrN = 0, bmdN = 0, daysActive = 0;
     let procIRraw = 0, mskIR = 0, procNraw = 0, mskNraw = 0;  // 逐筆金額/筆數
     let rdCt = 0, rdMr = 0, rdXr = 0, rdBmd = 0, rdSp = 0, rdOther = 0, estTotal = 0;  // 各類報告估算 + 估算總收入
+    let boneIR = 0, opdRev = 0;  // Bone biopsy 收入(從 MSK 扣)、OPD 看診收入
     const nonMskTypeSet = new Set();  // 非MSK-IR 的不同 procedure 類型(能力廣度)
     for (const date of Object.keys(state.data.days)) {
       if (!date.startsWith(m + '-')) continue;
@@ -4349,6 +4350,7 @@ function getMonthlyStats() {
       ot += Number(day.overtimeHours || 0);
       const rc = dayReadingByCat(day, settings.unitPrices);
       rdCt += rc.ct; rdMr += rc.mr; rdXr += rc.xray; rdBmd += rc.bmd; rdSp += rc.special; rdOther += rc.consult + rc.sono + rc.opd;
+      opdRev += rc.opd;
       estTotal += calcBaseRevenue(day, settings) + calcProcRevenue(day) + calcAddonRevenue(day);
       ctN += getGroupSum(day, 'CT'); mrN += getGroupSum(day, 'MR');
       xrN += getGroupSum(day, 'X-ray'); bmdN += getCount(day, 'bmd');
@@ -4358,7 +4360,10 @@ function getMonthlyStats() {
       for (const p of (day.procedures || [])) {
         const amt = (p.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
         procIRraw += amt; procNraw++;
-        if (procIsMSK(p)) { mskIR += amt * factor; mskNraw++; }
+        if (procIsMSK(p)) {
+          mskIR += amt * factor; mskNraw++;
+          if ((p.items || []).some(it => it.atomicId === 'bone')) boneIR += amt * factor;
+        }
         else nonMskTypeSet.add(p.presetName);
       }
       if (dRev > 0 || (day.procedures||[]).length) daysActive++;
@@ -4390,6 +4395,9 @@ function getMonthlyStats() {
       gapPct: (mm.perfTotal != null && mm.pretaxSalary != null && mm.pretaxSalary > 0) ? (mm.pretaxSalary - mm.perfTotal) / mm.pretaxSalary * 100 : null,
       // P3-2 能力廣度:非MSK-IR 類型數
       nonMskTypes: nonMskTypeSet.size,
+      // OPD 相關收入:OPD 看診 + MSK procedure(排除 Bone biopsy)
+      opdRev, boneIR, opdRelated: opdRev + Math.max(0, mskIR - boneIR),
+      opdRelatedPct: total > 0 ? (opdRev + Math.max(0, mskIR - boneIR)) / total * 100 : 0,
       // D2a 各類報告收入(counts×單價 估算)
       rdCt, rdMr, rdXr, rdBmd, rdSp, rdOther,
       // D2c 估算 total vs sheet 實收 total
@@ -4672,6 +4680,7 @@ function renderStats() {
   html += kpi(`${last.month} 我的Total`, fmt(last.total), estimate ? `月底預估 ${fmt(estimate)}(${estPct}%)` : `月均 ${fmt(avgTotal)}`, 'var(--accent)', spk('total', 'var(--accent)'));
   html += kpi(`IR Procedure 收入`, fmt(last.ir), `占 ${last.irPct.toFixed(0)}% 收入`, '#58a6ff', spk('ir', '#58a6ff'));
   html += kpi(`MSK IR 收入`, fmt(last.mskIR), `占 IR ${last.mskOfIRpct.toFixed(0)}% · 占總 ${last.mskOfTotalPct.toFixed(0)}%`, '#3fb950', spk('mskIR', '#3fb950'));
+  html += kpi(`OPD 相關收入`, fmt(last.opdRelated), `占總 ${last.opdRelatedPct.toFixed(0)}%(看診+MSK扣Bone)`, '#d29922', spk('opdRelated', '#d29922'));
   html += kpi(`閱片收入`, fmt(last.reading), `占 ${(100 - last.irPct).toFixed(0)}%`, 'var(--ink-2)', spk('reading', 'var(--ink-2)'));
   html += kpi(`本月 Procedure`, last.procCntEff, `MSK IR ${last.mskCntEff} 筆 · ${Math.round(last.mskOfCntPct)}%`, '#a371f7', spk('procCntEff', '#a371f7'));
   html += kpi(`加班時數`, `${last.ot}<span style="font-size:11px"> hr</span>`, last.perfTotal ? `績效 ${fmt(last.perfTotal)}` : '', '#e3a23b', spk('ot', '#e3a23b'));
@@ -4709,11 +4718,12 @@ function renderStats() {
       { name: 'MR', values: rows.map(r => r.mrN), color: '#58a6ff', fmt: 'num' },
       { name: 'BMD', values: rows.map(r => r.bmdN), color: '#a371f7', fmt: 'num' },
     ], 360, 190);
-  html += chartPanel('IR / MSK IR 占總收入趨勢',
-    '<i style="background:#58a6ff"></i>IR占總 <i style="background:#3fb950"></i>MSK IR占總',
+  html += chartPanel('IR / MSK IR / OPD相關 占總收入趨勢',
+    '<i style="background:#58a6ff"></i>IR占總 <i style="background:#3fb950"></i>MSK IR占總 <i style="background:#d29922"></i>OPD相關占總',
     'irmsk', labels, [
       { name: 'IR占總', values: rows.map(r => r.irPct), color: '#58a6ff', fmt: 'pct' },
       { name: 'MSK IR占總', values: rows.map(r => r.mskOfTotalPct), color: '#3fb950', fmt: 'pct' },
+      { name: 'OPD相關占總', values: rows.map(r => r.opdRelatedPct), color: '#d29922', fmt: 'pct' },
     ], 360, 190, { pct: true });
   html += `</div>`;
 
