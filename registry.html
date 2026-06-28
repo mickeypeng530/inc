@@ -923,6 +923,8 @@ function buildEditor(c) {
   } else if (eCat === 'ptgbd') {
     fields =
       selF('compSeverity', '併發症程度', ['', 'mild', 'sv'], o.compSeverity) +
+      txtF('age', '年齡', o.age) +
+      selF('sex', '性別', ['', 'M', 'F'], o.sex) +
       txtF('complication', '併發症(詳)', o.complication) +
       txtF('outcome', '轉歸', o.outcome) +
       chkF('expired', '死亡', o.expired) +
