@@ -725,8 +725,8 @@ function buildSubGroup(cat, sub, items) {
 const SEX = ['', 'M', 'F'];
 const COLS = {
   biopsy: [
-    { h: '病歷號', f: 'mrn', ro: 1 }, { h: '日期', f: 'date', ro: 1 },
-    { h: '年齡', f: 'age', t: 'text' }, { h: '性別', f: 'sex', t: 'sel', o: SEX },
+    { h: '病歷號', f: 'mrn', ro: 1, w: 80 }, { h: '日期', f: 'date', ro: 1, w: 94 },
+    { h: '年齡', f: 'age', t: 'text', w: 46 }, { h: '性別', f: 'sex', t: 'sel', o: SEX, w: 42 },
     { h: '位置', f: 'site', t: 'text' },
     { h: '類別', f: 'category', t: 'sel', o: ['', 'Tumor', 'Infection', 'Both'] },
     { h: '狀態', f: 'status', t: 'sel', o: ['', 'final', 'pending'] },
@@ -736,15 +736,15 @@ const COLS = {
     { reclass: 1 }, { chip: 1 },
   ],
   ptgbd: [
-    { h: '病歷號', f: 'mrn', ro: 1 }, { h: '日期', f: 'date', ro: 1 }, { h: '術式', f: 'sub', ro: 1 },
-    { h: '年齡', f: 'age', t: 'text' }, { h: '性別', f: 'sex', t: 'sel', o: SEX },
+    { h: '病歷號', f: 'mrn', ro: 1, w: 80 }, { h: '日期', f: 'date', ro: 1, w: 94 }, { h: '術式', f: 'sub', ro: 1 },
+    { h: '年齡', f: 'age', t: 'text', w: 46 }, { h: '性別', f: 'sex', t: 'sel', o: SEX, w: 42 },
     { h: '程度', f: 'compSeverity', t: 'sel', o: ['', 'mild', 'sv'] },
     { h: '併發症', f: 'complication', t: 'text' }, { h: '轉歸', f: 'outcome', t: 'text' },
     { h: '死亡', f: 'expired', t: 'chk' }, { h: 'OP後', f: 'opAfterDays', t: 'text' },
     { reclass: 1 }, { chip: 1 },
   ],
   pain: [
-    { h: '病歷號', f: 'mrn', ro: 1 }, { h: '日期', f: 'date', ro: 1 },
+    { h: '病歷號', f: 'mrn', ro: 1, w: 80 }, { h: '日期', f: 'date', ro: 1, w: 94 },
     { h: '術式', f: 'sub', t: 'subsel' },
     { h: '部位', f: 'region', t: 'sel', o: [''].concat(REGION_ENUM) },
     { h: '左右', f: 'laterality', t: 'sel', o: ['', 'R', 'L', 'B'] },
@@ -770,7 +770,7 @@ function buildTable(cat, items) {
   const tbl = el('table', 'grid');
   tbl.style.minWidth = (cols.length * 62) + 'px';   // 低於此寬才橫向捲動
   const thead = el('thead'), htr = el('tr');
-  cols.forEach(col => { const th = el('th'); th.textContent = col.chip ? '結果' : (col.reclass ? '分類' : col.h); htr.appendChild(th); });
+  cols.forEach(col => { const th = el('th'); if (col.w) th.style.width = col.w + 'px'; th.textContent = col.chip ? '結果' : (col.reclass ? '分類' : col.h); htr.appendChild(th); });
   thead.appendChild(htr); tbl.appendChild(thead);
   const tb = el('tbody');
   items.forEach(c => {
