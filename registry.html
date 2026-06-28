@@ -268,21 +268,28 @@ table.grid td.cat-Both { color: var(--accent); }
 .oc-info { color: var(--ink-2); border-color: var(--grid); }
 .oc-neg { color: var(--ink-muted); border-color: var(--grid); }
 
-/* === 結果分析條 === */
-.stats-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px 18px;
+/* === 結果分析小表 === */
+.stats-box {
+  display: inline-block;
   padding: 10px 14px;
   margin-bottom: 16px;
   background: var(--bg-head);
   border: 1px solid var(--border);
   border-radius: var(--r);
+}
+.stats-head {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--ink-muted);
+  margin-bottom: 8px;
 }
-.stats-bar b { color: var(--ink-1); font-weight: 600; }
+.stats-head b { color: var(--ink-1); font-weight: 600; }
+.stats-table { border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
+.stats-table th, .stats-table td { padding: 2px 16px 2px 0; text-align: right; color: var(--ink-2); }
+.stats-table th { color: var(--ink-cap); font-weight: 600; font-size: 10px; }
+.stats-table tr td:first-child, .stats-table tr th:first-child { text-align: left; color: var(--ink-muted); padding-right: 22px; }
+.stats-table b { color: var(--ink-1); }
+.stats-table tr.ref td { color: var(--ink-muted); font-style: italic; border-top: 1px dashed var(--border); }
 /* light 主題:綠/橘 chip 改淺底深字(深綠底近黑字對比過低) */
 :root[data-theme="light"] .oc-infect,
 :root[data-theme="light"] .oc-ok { background: #dcfce7; color: #15803d; }
@@ -891,7 +898,7 @@ function applyReclass(c, o) {
 // 只重畫統計條(不動表格,避免就地編輯被打斷)
 function refreshStats() {
   const content = document.querySelector('.tab-content'); if (!content) return;
-  const old = content.querySelector('.stats-bar'); if (!old) return;
+  const old = content.querySelector('.stats-box'); if (!old) return;
   const items = _cases.filter(c => c.cat === activeTab);
   const bar = activeTab === 'biopsy' ? buildBiopsyStats(items) : activeTab === 'ptgbd' ? buildPtgbdStats(items) : buildPainStats(items);
   old.replaceWith(bar);
@@ -918,14 +925,18 @@ function buildBiopsyStats(items) {
   const dates = items.map(c => c.date).filter(Boolean).sort();
   const perMonth = dates.length ? (items.length / monthSpan(dates[0], dates[dates.length - 1])).toFixed(2) : '—';
   const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
-  const bar = document.createElement('div');
-  bar.className = 'stats-bar';
-  bar.innerHTML =
-    `<span><b>${items.length}</b> 件 · ${perMonth}/月</span>
-     <span>腫瘤陽性率 <b>${tumorPos}/${tumorCls.length}</b> ${pct(tumorPos, tumorCls.length)}</span>
-     <span>感染陽性率 <b>${infPos}/${infCls.length}</b> ${pct(infPos, infCls.length)}</span>
-     <span>待回 <b>${pending}</b></span>`;
-  return bar;
+  const box = document.createElement('div');
+  box.className = 'stats-box';
+  box.innerHTML =
+    `<div class="stats-head">共 <b>${items.length}</b> 件 · ${perMonth}/月 · 待回 <b>${pending}</b></div>
+     <table class="stats-table">
+       <tr><th></th><th>Tumor</th><th>Infection</th></tr>
+       <tr><td>件數</td><td>${tumorCls.length}</td><td>${infCls.length}</td></tr>
+       <tr><td>陽性</td><td>${tumorPos}</td><td>${infPos}</td></tr>
+       <tr><td>陽性率</td><td><b>${pct(tumorPos, tumorCls.length)}</b></td><td><b>${pct(infPos, infCls.length)}</b></td></tr>
+       <tr class="ref"><td>Ref(VGH)</td><td>85%</td><td>23.8%</td></tr>
+     </table>`;
+  return box;
 }
 
 // Pain 結果分析條:療效率(改善/輕改/無變)。分母 = 已評(有 effectClass 且非 pending)
@@ -938,15 +949,17 @@ function buildPainStats(items) {
   const pend = items.filter(c => c.outcome && c.outcome.effectClass === 'pending').length;
   const comp = items.filter(c => c.outcome && c.outcome.effectClass === 'complication').length;
   const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
-  const bar = document.createElement('div');
-  bar.className = 'stats-bar';
-  bar.innerHTML =
-    `<span><b>${items.length}</b> 件 · 已評 ${denom}</span>
-     <span>改善 <b>${impv}/${denom}</b> ${pct(impv, denom)}</span>
-     <span>輕改 <b>${mild}/${denom}</b> ${pct(mild, denom)}</span>
-     <span>無變 <b>${none}/${denom}</b> ${pct(none, denom)}</span>
-     <span>待觀 <b>${pend}</b> · 併發症 <b>${comp}</b></span>`;
-  return bar;
+  const box = document.createElement('div');
+  box.className = 'stats-box';
+  box.innerHTML =
+    `<div class="stats-head">共 <b>${items.length}</b> 件 · 已評 <b>${denom}</b> · 待觀 ${pend} · 併發症 ${comp}</div>
+     <table class="stats-table">
+       <tr><th></th><th>件數</th><th>率</th></tr>
+       <tr><td>改善</td><td>${impv}</td><td><b>${pct(impv, denom)}</b></td></tr>
+       <tr><td>輕改</td><td>${mild}</td><td><b>${pct(mild, denom)}</b></td></tr>
+       <tr><td>無變</td><td>${none}</td><td><b>${pct(none, denom)}</b></td></tr>
+     </table>`;
+  return box;
 }
 
 // PTGBD 結果分析條:併發症率(mild / sv)、死亡率、件數/月。分母 = 已記 outcome 件數
@@ -959,14 +972,17 @@ function buildPtgbdStats(items) {
   const dates = items.map(c => c.date).filter(Boolean).sort();
   const perMonth = dates.length ? (items.length / monthSpan(dates[0], dates[dates.length - 1])).toFixed(2) : '—';
   const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
-  const bar = document.createElement('div');
-  bar.className = 'stats-bar';
-  bar.innerHTML =
-    `<span><b>${items.length}</b> 件 · ${perMonth}/月 · 已記 ${denom}</span>
-     <span>併發症 mild <b>${mild}/${denom}</b> ${pct(mild, denom)}</span>
-     <span>sv <b>${sv}/${denom}</b> ${pct(sv, denom)}</span>
-     <span>死亡 <b>${expired}/${denom}</b> ${pct(expired, denom)}</span>`;
-  return bar;
+  const box = document.createElement('div');
+  box.className = 'stats-box';
+  box.innerHTML =
+    `<div class="stats-head">共 <b>${items.length}</b> 件 · ${perMonth}/月 · 已記 <b>${denom}</b></div>
+     <table class="stats-table">
+       <tr><th></th><th>件數</th><th>率</th></tr>
+       <tr><td>併發症 mild</td><td>${mild}</td><td><b>${pct(mild, denom)}</b></td></tr>
+       <tr><td>併發症 sv</td><td>${sv}</td><td><b>${pct(sv, denom)}</b></td></tr>
+       <tr><td>死亡</td><td>${expired}</td><td><b>${pct(expired, denom)}</b></td></tr>
+     </table>`;
+  return box;
 }
 
 // outcome 摘要 chip(依術式)
