@@ -229,7 +229,21 @@ table.grid tbody tr.row:hover td { background: var(--border-row); }
 table.grid tbody tr.editing td { background: var(--bg-head); }
 table.grid tr.missing-mrn td:first-child { color: var(--danger); font-style: italic; }
 table.grid td.td-chip { overflow: visible; }
-.editor-row > td { padding: 0; max-width: none; white-space: normal; }
+table.grid td.cell { cursor: pointer; }
+table.grid td.cell:hover { background: var(--border-row); outline: 1px solid var(--border); }
+table.grid td.cell:empty::after { content: '＋'; color: var(--ink-muted); opacity: 0.35; }
+table.grid td.td-reclass { color: var(--ink-muted); }
+.cell-input {
+  width: 100%;
+  min-width: 56px;
+  background: var(--bg-panel);
+  border: 1px solid var(--accent);
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 2px;
+}
 
 /* === Outcome chip === */
 .oc {
@@ -763,67 +777,165 @@ function buildSubGroup(cat, sub, items) {
   return grp;
 }
 
-// 表格欄位定義(對齊 Excel)
+// 表格欄位定義(對齊 Excel)。ro=唯讀(來自 Worknum);t=輸入型 text/sel/chk;o=下拉選項
+const SEX = ['', 'M', 'F'];
 const COLS = {
   biopsy: [
-    { h: '病歷號', f: c => c.mrn || '—' }, { h: '日期', f: c => c.date },
-    { h: '年齡', f: c => c.outcome && c.outcome.age }, { h: '性別', f: c => c.outcome && c.outcome.sex },
-    { h: '位置', f: c => c.outcome && c.outcome.site }, { h: '類別', f: c => c.outcome && c.outcome.category },
-    { h: '病理', f: c => c.outcome && (c.outcome.pathoResult || c.outcome.patho) },
-    { h: '培養', f: c => c.outcome && (c.outcome.cultureResult || c.outcome.culture) },
-    { h: 'Imp', f: c => c.outcome && c.outcome.imp }, { h: '結果', chip: true },
+    { h: '病歷號', f: 'mrn', ro: 1 }, { h: '日期', f: 'date', ro: 1 },
+    { h: '年齡', f: 'age', t: 'text' }, { h: '性別', f: 'sex', t: 'sel', o: SEX },
+    { h: '位置', f: 'site', t: 'text' },
+    { h: '類別', f: 'category', t: 'sel', o: ['', 'Tumor', 'Infection', 'Both'] },
+    { h: '狀態', f: 'status', t: 'sel', o: ['', 'final', 'pending'] },
+    { h: '病理結果', f: 'pathoResult', t: 'sel', o: ['', 'Tumor', 'Infection', 'Inflammation', 'Negative'] },
+    { h: '培養', f: 'cultureResult', t: 'sel', o: ['', '+', '-', 'contam', 'na'] },
+    { h: 'Imp', f: 'imp', t: 'text' }, { h: 'Patho', f: 'patho', t: 'text' }, { h: 'Culture', f: 'culture', t: 'text' },
+    { reclass: 1 }, { chip: 1 },
   ],
   ptgbd: [
-    { h: '病歷號', f: c => c.mrn || '—' }, { h: '日期', f: c => c.date }, { h: '術式', f: c => c.sub },
-    { h: '年齡', f: c => c.outcome && c.outcome.age }, { h: '性別', f: c => c.outcome && c.outcome.sex },
-    { h: '程度', f: c => c.outcome && c.outcome.compSeverity }, { h: '併發症', f: c => c.outcome && c.outcome.complication },
-    { h: '轉歸', f: c => c.outcome && c.outcome.outcome }, { h: 'OP後', f: c => c.outcome && c.outcome.opAfterDays },
-    { h: '結果', chip: true },
+    { h: '病歷號', f: 'mrn', ro: 1 }, { h: '日期', f: 'date', ro: 1 }, { h: '術式', f: 'sub', ro: 1 },
+    { h: '年齡', f: 'age', t: 'text' }, { h: '性別', f: 'sex', t: 'sel', o: SEX },
+    { h: '程度', f: 'compSeverity', t: 'sel', o: ['', 'mild', 'sv'] },
+    { h: '併發症', f: 'complication', t: 'text' }, { h: '轉歸', f: 'outcome', t: 'text' },
+    { h: '死亡', f: 'expired', t: 'chk' }, { h: 'OP後', f: 'opAfterDays', t: 'text' },
+    { reclass: 1 }, { chip: 1 },
   ],
   pain: [
-    { h: '病歷號', f: c => c.mrn || '—' }, { h: '日期', f: c => c.date },
-    { h: '部位', f: c => c.outcome && c.outcome.region }, { h: '左右', f: c => c.outcome && c.outcome.laterality },
-    { h: '療效', f: c => c.outcome && c.outcome.effectClass }, { h: '改善%', f: c => c.outcome && c.outcome.effectPct },
-    { h: '劑量', f: c => c.outcome && c.outcome.dose }, { h: 'Note', f: c => c.note }, { h: '結果', chip: true },
+    { h: '病歷號', f: 'mrn', ro: 1 }, { h: '日期', f: 'date', ro: 1 },
+    { h: '術式', f: 'sub', t: 'subsel' },
+    { h: '部位', f: 'region', t: 'sel', o: [''].concat(REGION_ENUM) },
+    { h: '左右', f: 'laterality', t: 'sel', o: ['', 'R', 'L', 'B'] },
+    { h: '療效', f: 'effectClass', t: 'sel', o: ['', 'impv', 'mild', 'none', 'pending', 'complication'] },
+    { h: '改善%', f: 'effectPct', t: 'text' }, { h: '劑量', f: 'dose', t: 'text' },
+    { h: 'Note', f: 'note', ro: 1 }, { reclass: 1 }, { chip: 1 },
   ],
 };
+const RECLASS_CATS = [['biopsy', 'Biopsy'], ['ptgbd', 'PTGBD'], ['pain', 'Pain']];
+function el(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
+function cellVal(c, col) {
+  if (col.f === 'mrn') return c.mrn || '—';
+  if (col.f === 'date') return c.date;
+  if (col.f === 'sub') return c.sub || '';
+  if (col.f === 'note') return c.note || '';
+  const v = (c.outcome || {})[col.f];
+  return v == null ? '' : v;
+}
 
 function buildTable(cat, items) {
   const cols = COLS[cat];
-  const wrap = document.createElement('div');
-  wrap.className = 'table-wrap';
-  const tbl = document.createElement('table');
-  tbl.className = 'grid';
-  tbl.innerHTML = '<thead><tr>' + cols.map(c => `<th>${escapeHtml(c.h)}</th>`).join('') + '</tr></thead>';
-  const tb = document.createElement('tbody');
+  const wrap = el('div', 'table-wrap');
+  const tbl = el('table', 'grid');
+  const thead = el('thead'), htr = el('tr');
+  cols.forEach(col => { const th = el('th'); th.textContent = col.chip ? '結果' : (col.reclass ? '分類' : col.h); htr.appendChild(th); });
+  thead.appendChild(htr); tbl.appendChild(thead);
+  const tb = el('tbody');
   items.forEach(c => {
-    const tr = document.createElement('tr');
-    tr.className = 'row' + (c.mrn ? '' : ' missing-mrn') + (editingKey === c.key ? ' editing' : '');
-    tr.innerHTML = cols.map(col => {
-      if (col.chip) return `<td class="td-chip">${outcomeSummary(c)}</td>`;
-      let v = col.f(c);
-      v = (v == null || v === '') ? '' : String(v);
-      return `<td title="${escapeHtml(v)}">${escapeHtml(v)}</td>`;
-    }).join('');
-    tr.onclick = () => {
-      if (editingKey === c.key) { editingKey = null; }
-      else { editingKey = c.key; editCat = null; editSub = null; }
-      renderList(_cases);
-    };
+    const tr = el('tr', 'row' + (c.mrn ? '' : ' missing-mrn'));
+    cols.forEach(col => tr.appendChild(buildCell(c, col)));
     tb.appendChild(tr);
-    if (editingKey === c.key) {
-      const er = document.createElement('tr');
-      er.className = 'editor-row';
-      const td = document.createElement('td');
-      td.colSpan = cols.length;
-      td.appendChild(buildEditor(c));
-      er.appendChild(td);
-      tb.appendChild(er);
-    }
   });
-  tbl.appendChild(tb);
-  wrap.appendChild(tbl);
+  tbl.appendChild(tb); wrap.appendChild(tbl);
   return wrap;
+}
+
+function buildCell(c, col) {
+  if (col.chip) { const td = el('td', 'td-chip'); td.innerHTML = outcomeSummary(c); return td; }
+  if (col.reclass) {
+    const td = el('td', 'cell td-reclass');
+    td.textContent = (RECLASS_CATS.find(x => x[0] === c.cat) || [, c.cat])[1];
+    td.onclick = () => startReclass(td, c, 'cat');
+    return td;
+  }
+  const td = el('td');
+  const val = cellVal(c, col);
+  if (col.ro) {
+    td.textContent = col.t === 'chk' ? (val ? '✓' : '') : (val === '' ? '' : String(val));
+    return td;
+  }
+  td.className = 'cell';
+  td.textContent = col.t === 'chk' ? (val ? '✓' : '') : (val === '' ? '' : String(val));
+  td.title = td.textContent;
+  td.onclick = () => (col.t === 'subsel' ? startReclass(td, c, 'sub') : startEdit(td, c, col));
+  return td;
+}
+
+function startEdit(td, c, col) {
+  if (td.querySelector('input,select')) return;
+  const cur = cellVal(c, col);
+  let inp;
+  if (col.t === 'sel') {
+    inp = el('select', 'cell-input');
+    col.o.forEach(op => { const o = document.createElement('option'); o.value = op; o.textContent = op || '—'; if (op === cur) o.selected = true; inp.appendChild(o); });
+  } else if (col.t === 'chk') {
+    inp = el('input', 'cell-input'); inp.type = 'checkbox'; inp.checked = !!cur;
+  } else {
+    inp = el('input', 'cell-input'); inp.type = 'text'; inp.value = cur === '' ? '' : String(cur);
+  }
+  td.textContent = ''; td.appendChild(inp); inp.focus();
+  if (inp.select) { try { inp.select(); } catch (e) {} }
+  let done = false;
+  const commit = () => { if (done) return; done = true; saveField(td, c, col, col.t === 'chk' ? inp.checked : inp.value.trim()); };
+  inp.onblur = commit;
+  inp.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    else if (e.key === 'Escape') { done = true; td.textContent = cur === '' ? '' : String(cur); }
+  };
+  if (col.t !== 'text') inp.onchange = () => inp.blur();
+}
+
+// 分類/術式就地下拉(改 reCat/reSub → 個案移到正確 tab/組,需重畫)
+function startReclass(td, c, kind) {
+  if (td.querySelector('select')) return;
+  const opts = kind === 'cat' ? RECLASS_CATS.map(x => x[0]) : PAIN_SUB_ORDER;
+  const cur = kind === 'cat' ? c.cat : c.sub;
+  const sel = el('select', 'cell-input');
+  opts.forEach(op => { const o = document.createElement('option'); o.value = op; o.textContent = kind === 'cat' ? (RECLASS_CATS.find(x => x[0] === op)[1]) : op; if (op === cur) o.selected = true; sel.appendChild(o); });
+  td.textContent = ''; td.appendChild(sel); sel.focus();
+  sel.onchange = () => { kind === 'cat' ? reclassCase(c, sel.value) : reclassSub(c, sel.value); };
+  sel.onblur = () => renderList(_cases);
+}
+
+async function persistField(c) {
+  if (_uid) { try { await set(ref(fbDB, `users/${_uid}/worknum/registry/cases/${c.key}`), c.outcome); } catch (e) { console.error(e); alert('儲存失敗:' + (e.code || e.message)); } }
+}
+async function saveField(td, c, col, value) {
+  const o = Object.assign({}, c.outcome || {});
+  if (value === '' || value === false || value == null) delete o[col.f]; else o[col.f] = value;
+  if (Object.keys(o).some(k => k !== 'updatedAt')) { o.updatedAt = new Date().toISOString(); _registry[c.key] = o; c.outcome = o; }
+  else { delete _registry[c.key]; c.outcome = null; }
+  td.textContent = col.t === 'chk' ? (value ? '✓' : '') : ((value === '' || value === false) ? '' : String(value));
+  td.title = td.textContent;
+  const tr = td.parentElement, chip = tr && tr.querySelector('.td-chip');
+  if (chip) chip.innerHTML = outcomeSummary(c);
+  refreshStats();
+  persistField(c);
+}
+async function reclassCase(c, newCat) {
+  const o = Object.assign({}, c.outcome || {});
+  if (newCat === c.baseCat) { delete o.reCat; delete o.reSub; }
+  else { o.reCat = newCat; if (newCat === 'pain') o.reSub = o.reSub || PAIN_SUB_ORDER[0]; else delete o.reSub; }
+  applyReclass(c, o);
+}
+async function reclassSub(c, newSub) {
+  const o = Object.assign({}, c.outcome || {});
+  if (c.baseCat === 'pain' && newSub === c.baseSub) { delete o.reCat; delete o.reSub; }
+  else { o.reCat = 'pain'; o.reSub = newSub; }
+  applyReclass(c, o);
+}
+function applyReclass(c, o) {
+  if (Object.keys(o).some(k => k !== 'updatedAt')) { o.updatedAt = new Date().toISOString(); _registry[c.key] = o; c.outcome = o; }
+  else { delete _registry[c.key]; c.outcome = null; }
+  c.cat = o.reCat || c.baseCat;
+  c.sub = o.reCat ? (o.reSub || null) : c.baseSub;
+  renderList(_cases);
+  persistField(c);
+}
+// 只重畫統計條(不動表格,避免就地編輯被打斷)
+function refreshStats() {
+  const content = document.querySelector('.tab-content'); if (!content) return;
+  const old = content.querySelector('.stats-bar'); if (!old) return;
+  const items = _cases.filter(c => c.cat === activeTab);
+  const bar = activeTab === 'biopsy' ? buildBiopsyStats(items) : activeTab === 'ptgbd' ? buildPtgbdStats(items) : buildPainStats(items);
+  old.replaceWith(bar);
 }
 
 // 記錄是否含「真 outcome」(排除只有 reCat/reSub/updatedAt 的純改分類記錄)
