@@ -250,6 +250,23 @@ header h1 {
 .oc-bad { color: #fff; background: var(--danger); }
 .oc-ok  { color: #052e16; background: var(--ok); }
 .oc-info { color: var(--ink-2); border-color: var(--grid); }
+.oc-neg { color: var(--ink-muted); border-color: var(--grid); }
+
+/* === 結果分析條 === */
+.stats-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 18px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  background: var(--bg-head);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.stats-bar b { color: var(--ink-1); font-weight: 600; }
 /* light 主題:綠/橘 chip 改淺底深字(深綠底近黑字對比過低) */
 :root[data-theme="light"] .oc-infect,
 :root[data-theme="light"] .oc-ok { background: #dcfce7; color: #15803d; }
@@ -693,6 +710,7 @@ function renderList(cases) {
     });
     subKeys.forEach(sub => content.appendChild(buildSubGroup('pain', sub, bySub[sub])));
   } else {
+    if (activeTab === 'biopsy') content.appendChild(buildBiopsyStats(items));
     items.forEach(c => content.appendChild(buildCaseItem(c)));
   }
   root.appendChild(content);
@@ -755,6 +773,31 @@ function hasRealOutcome(o) {
   return !!o && Object.keys(o).some(k => !['reCat', 'reSub', 'updatedAt'].includes(k));
 }
 
+// Biopsy 結果分析條(腫瘤/感染陽性率、件數/月、待回)— 照原 Excel 口徑
+function monthSpan(d1, d2) {
+  const a = d1.split('-').map(Number), b = d2.split('-').map(Number);
+  return Math.max(1, (b[0] - a[0]) * 12 + (b[1] - a[1]) + 1);
+}
+function buildBiopsyStats(items) {
+  const fin = items.filter(c => hasRealOutcome(c.outcome) && c.outcome.status !== 'pending');
+  const pending = items.filter(c => c.outcome && c.outcome.status === 'pending').length;
+  const tumorCls = fin.filter(c => c.outcome.category === 'Tumor');
+  const tumorPos = tumorCls.filter(c => c.outcome.pathoResult === 'Tumor').length;
+  const infCls = fin.filter(c => c.outcome.category === 'Infection');
+  const infPos = infCls.filter(c => c.outcome.cultureResult === '+' || c.outcome.pathoResult === 'Infection').length;
+  const dates = items.map(c => c.date).filter(Boolean).sort();
+  const perMonth = dates.length ? (items.length / monthSpan(dates[0], dates[dates.length - 1])).toFixed(2) : '—';
+  const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
+  const bar = document.createElement('div');
+  bar.className = 'stats-bar';
+  bar.innerHTML =
+    `<span><b>${items.length}</b> 件 · ${perMonth}/月</span>
+     <span>腫瘤陽性率 <b>${tumorPos}/${tumorCls.length}</b> ${pct(tumorPos, tumorCls.length)}</span>
+     <span>感染陽性率 <b>${infPos}/${infCls.length}</b> ${pct(infPos, infCls.length)}</span>
+     <span>待回 <b>${pending}</b></span>`;
+  return bar;
+}
+
 // outcome 摘要 chip(依術式)
 function outcomeSummary(c) {
   const o = c.outcome;
@@ -762,8 +805,11 @@ function outcomeSummary(c) {
   let label = '', cls = 'oc-info';
   if (c.cat === 'biopsy') {
     if (o.status === 'pending') { label = '待回'; cls = 'oc-pending'; }
-    else if (o.category === 'Infection') { label = 'Infection'; cls = 'oc-infect'; }
-    else if (o.category) { label = o.category; cls = 'oc-tumor'; }
+    else if (o.pathoResult === 'Tumor') { label = '腫瘤+'; cls = 'oc-tumor'; }
+    else if (o.cultureResult === '+' || o.pathoResult === 'Infection') { label = '感染+'; cls = 'oc-infect'; }
+    else if (o.pathoResult === 'Negative') { label = '陰性'; cls = 'oc-neg'; }
+    else if (o.pathoResult === 'Inflammation') { label = '發炎'; cls = 'oc-info'; }
+    else if (o.category) { label = o.category; cls = 'oc-info'; }
   } else if (c.cat === 'ptgbd') {
     if (o.expired) { label = 'Expired'; cls = 'oc-bad'; }
     else if (o.complication && o.complication.toLowerCase() !== 'nil') { label = '併發症'; cls = 'oc-bad'; }
@@ -796,12 +842,13 @@ function buildEditor(c) {
   let fields = '';
   if (eCat === 'biopsy') {
     fields =
-      selF('category', '類別', ['', 'Tumor', 'Infection', 'Both'], o.category) +
+      selF('category', '類別(疑似)', ['', 'Tumor', 'Infection', 'Both'], o.category) +
       selF('status', '狀態', ['final', 'pending'], o.status || 'final') +
+      selF('pathoResult', '病理結果', ['', 'Tumor', 'Infection', 'Inflammation', 'Negative'], o.pathoResult) +
+      selF('cultureResult', '培養結果', ['', '+', '-', 'contam', 'na'], o.cultureResult) +
       txtF('imp', '影像判斷', o.imp) +
-      txtF('patho', '病理', o.patho) +
-      txtF('culture', '培養', o.culture) +
-      selF('cultureResult', '培養結果', ['', '+', '-', 'contam', 'na'], o.cultureResult);
+      txtF('patho', '病理(詳)', o.patho) +
+      txtF('culture', '培養(詳)', o.culture);
   } else if (eCat === 'ptgbd') {
     fields =
       txtF('complication', '併發症', o.complication) +
