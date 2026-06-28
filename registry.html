@@ -91,7 +91,7 @@ header h1 {
 .icon-btn:hover { border-color: var(--ink-cap); color: var(--ink-1); }
 
 /* === Layout === */
-.wrap { max-width: 980px; margin: 0 auto; padding: 20px 24px 80px; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 20px 24px 80px; }
 
 /* === Tabs === */
 .tabs {
@@ -200,7 +200,8 @@ header h1 {
 
 /* === Table (Excel-like) === */
 .table-wrap { overflow-x: auto; }
-table.grid { width: 100%; border-collapse: collapse; font-size: 12px; }
+/* 自適應寬度:欄位平分容器、內容過長截斷;只有視窗窄於 min-width 才橫向捲動 */
+table.grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
 table.grid thead th {
   text-align: left;
   font-family: var(--font-mono);
@@ -219,7 +220,6 @@ table.grid td {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 150px;
   font-family: var(--font-mono);
   color: var(--ink-2);
 }
@@ -768,6 +768,7 @@ function buildTable(cat, items) {
   const cols = COLS[cat];
   const wrap = el('div', 'table-wrap');
   const tbl = el('table', 'grid');
+  tbl.style.minWidth = (cols.length * 62) + 'px';   // 低於此寬才橫向捲動
   const thead = el('thead'), htr = el('tr');
   cols.forEach(col => { const th = el('th'); th.textContent = col.chip ? '結果' : (col.reclass ? '分類' : col.h); htr.appendChild(th); });
   thead.appendChild(htr); tbl.appendChild(thead);
