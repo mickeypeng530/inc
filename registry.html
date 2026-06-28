@@ -702,6 +702,7 @@ function renderList(cases) {
   if (!items.length) {
     content.innerHTML = `<div class="state"><div class="sub">此分類目前無個案</div></div>`;
   } else if (activeTab === 'pain') {
+    content.appendChild(buildPainStats(items));
     const bySub = {};
     items.forEach(c => { (bySub[c.sub || 'Other'] || (bySub[c.sub || 'Other'] = [])).push(c); });
     const subKeys = Object.keys(bySub).sort((a, b) => {
@@ -800,6 +801,27 @@ function buildBiopsyStats(items) {
   return bar;
 }
 
+// Pain 結果分析條:療效率(改善/輕改/無變)。分母 = 已評(有 effectClass 且非 pending)
+function buildPainStats(items) {
+  const ev = items.filter(c => hasRealOutcome(c.outcome) && c.outcome.effectClass && c.outcome.effectClass !== 'pending' && c.outcome.effectClass !== 'complication');
+  const denom = ev.length;
+  const impv = ev.filter(c => c.outcome.effectClass === 'impv').length;
+  const mild = ev.filter(c => c.outcome.effectClass === 'mild').length;
+  const none = ev.filter(c => c.outcome.effectClass === 'none').length;
+  const pend = items.filter(c => c.outcome && c.outcome.effectClass === 'pending').length;
+  const comp = items.filter(c => c.outcome && c.outcome.effectClass === 'complication').length;
+  const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
+  const bar = document.createElement('div');
+  bar.className = 'stats-bar';
+  bar.innerHTML =
+    `<span><b>${items.length}</b> 件 · 已評 ${denom}</span>
+     <span>改善 <b>${impv}/${denom}</b> ${pct(impv, denom)}</span>
+     <span>輕改 <b>${mild}/${denom}</b> ${pct(mild, denom)}</span>
+     <span>無變 <b>${none}/${denom}</b> ${pct(none, denom)}</span>
+     <span>待觀 <b>${pend}</b> · 併發症 <b>${comp}</b></span>`;
+  return bar;
+}
+
 // PTGBD 結果分析條:併發症率(mild / sv)、死亡率、件數/月。分母 = 已記 outcome 件數
 function buildPtgbdStats(items) {
   const withO = items.filter(c => hasRealOutcome(c.outcome));
@@ -838,7 +860,7 @@ function outcomeSummary(c) {
     else if (o.compSeverity === 'mild') { label = '併發症 mild'; cls = 'oc-pending'; }
     else if (o.outcome || o.compSeverity) { label = '✓'; cls = 'oc-ok'; }
   } else {
-    const m = { improve: ['改善', 'oc-ok'], pending: ['待觀', 'oc-pending'], none: ['無效', 'oc-bad'], complication: ['併發症', 'oc-bad'] };
+    const m = { impv: ['改善', 'oc-ok'], mild: ['輕改', 'oc-pending'], none: ['無變', 'oc-bad'], pending: ['待觀', 'oc-pending'], complication: ['併發症', 'oc-bad'] };
     if (o.effectClass && m[o.effectClass]) { label = m[o.effectClass][0]; cls = m[o.effectClass][1]; }
     else if (o.region) { label = o.region; }
   }
@@ -883,7 +905,7 @@ function buildEditor(c) {
     fields =
       selF('region', '部位', [''].concat(REGION_ENUM), o.region) +
       selF('laterality', '左右', ['', 'R', 'L', 'B'], o.laterality) +
-      selF('effectClass', '療效', ['', 'improve', 'pending', 'none', 'complication'], o.effectClass) +
+      selF('effectClass', '療效', ['', 'impv', 'mild', 'none', 'pending', 'complication'], o.effectClass) +
       txtF('effectPct', '改善%', o.effectPct) +
       txtF('dose', '劑量', o.dose);
   }
