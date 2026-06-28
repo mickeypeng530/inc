@@ -426,6 +426,8 @@ header h1 {
     <h1>Registry</h1>
     <a class="icon-btn" href="index.html">← 回 Worknum</a>
     <div class="header-spacer"></div>
+    <button class="icon-btn" id="import-btn" title="匯入歷史 outcome JSON">📥 匯入</button>
+    <input type="file" id="import-file" accept=".json,application/json" style="display:none">
     <button class="icon-btn" id="theme-toggle" title="切換主題">🌓</button>
     <button class="icon-btn" id="signout-btn">登出</button>
   </header>
@@ -441,7 +443,7 @@ header h1 {
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
-import { getDatabase, ref, get, set }
+import { getDatabase, ref, get, set, update }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-database.js";
 
 const firebaseConfig = {
@@ -585,6 +587,27 @@ async function enterApp(user) {
     applyTheme(cur === 'light' ? 'dark' : 'light');
   };
   document.getElementById('signout-btn').onclick = () => signOut(fbAuth).then(() => location.reload());
+
+  // 匯入歷史 outcome(合併寫入 registry/cases,不覆蓋未涉及的)
+  document.getElementById('import-btn').onclick = () => document.getElementById('import-file').click();
+  document.getElementById('import-file').onchange = (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = async () => {
+      let obj;
+      try { obj = JSON.parse(rd.result); } catch (err) { alert('JSON 解析失敗'); return; }
+      const n = Object.keys(obj || {}).length;
+      if (!n) { alert('檔案無資料'); return; }
+      if (!confirm(`匯入 ${n} 筆 outcome?(合併進 registry,不覆蓋未涉及的個案)`)) return;
+      try {
+        await update(ref(fbDB, `users/${_uid}/worknum/registry/cases`), obj);
+        alert(`已匯入 ${n} 筆`);
+        location.reload();
+      } catch (err) { alert('匯入失敗:' + (err.code || err.message)); }
+    };
+    rd.readAsText(f);
+  };
 
   renderLoading();
   try {

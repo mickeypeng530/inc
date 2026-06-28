@@ -24,6 +24,8 @@ scratchpad/
 worknum_export.json
 _mock_days.json
 *_mock*.json
+*_import.json
+registry_import.json
 
 # Claude 內部
 .claude/
