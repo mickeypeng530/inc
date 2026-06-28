@@ -914,6 +914,9 @@ function buildEditor(c) {
       selF('status', '狀態', ['final', 'pending'], o.status || 'final') +
       selF('pathoResult', '病理結果', ['', 'Tumor', 'Infection', 'Inflammation', 'Negative'], o.pathoResult) +
       selF('cultureResult', '培養結果', ['', '+', '-', 'contam', 'na'], o.cultureResult) +
+      txtF('age', '年齡', o.age) +
+      selF('sex', '性別', ['', 'M', 'F'], o.sex) +
+      txtF('site', '位置', o.site) +
       txtF('imp', '影像判斷', o.imp) +
       txtF('patho', '病理(詳)', o.patho) +
       txtF('culture', '培養(詳)', o.culture);
