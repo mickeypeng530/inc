@@ -225,8 +225,8 @@ table.grid td {
 }
 table.grid td:first-child { color: var(--ink-1); }
 table.grid tbody tr.row { cursor: pointer; }
-table.grid tbody tr.row:hover td { background: var(--border-row); }
-table.grid tbody tr.editing td { background: var(--bg-head); }
+table.grid tbody tr.row:nth-child(even) td { background: var(--bg-head); }   /* 隔行變色 */
+table.grid tbody tr.row:hover td { background: var(--border-row); }          /* hover 點亮當前列(壓過 zebra) */
 table.grid tr.missing-mrn td:first-child { color: var(--danger); font-style: italic; }
 table.grid td.td-chip { overflow: visible; }
 table.grid td.cell { cursor: pointer; }
