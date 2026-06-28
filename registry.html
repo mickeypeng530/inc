@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title> </title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+/* === Theme tokens (沿用 index.html 的色票系統) === */
+:root {
+  --bg-page:   #0e0f12;
+  --bg-panel:  #15171b;
+  --bg-head:   #1a1c21;
+  --border:    #25282e;
+  --border-row:#1e2028;
+  --grid:      #3d424b;
+  --ink-1:     #ffffff;
+  --ink-2:     #dcdfe4;
+  --ink-muted: #6b7280;
+  --ink-cap:   #9aa0a6;
+  --accent:    #e9a23b;
+  --danger:    #ef4444;
+  --ok:        #4ade80;
+  --font-ui:   'IBM Plex Sans','Noto Sans TC',system-ui,sans-serif;
+  --font-mono: 'IBM Plex Mono',monospace;
+  --font-disp: 'Fraunces',serif;
+  --r: 2px;
+}
+:root[data-theme="light"] {
+  --bg-page:   #f6f4ef;
+  --bg-panel:  #fbfaf6;
+  --bg-head:   #f1ede4;
+  --border:    #e5e1d6;
+  --border-row:#ebe7da;
+  --grid:      #cfc8b6;
+  --ink-1:     #1c1f1d;
+  --ink-2:     #3a3730;
+  --ink-muted: #7a7569;
+  --ink-cap:   #9a9485;
+  --accent:    #b45309;
+  --ok:        #15803d;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font-ui);
+  background: var(--bg-page);
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* === Header === */
+header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 24px;
+  background: var(--bg-head);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+header h1 {
+  font-family: var(--font-disp);
+  font-size: 17px;
+  font-weight: 500;
+  font-style: italic;
+  color: var(--ink-1);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.header-spacer { flex: 1; }
+.icon-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--ink-muted);
+  padding: 4px 9px;
+  border-radius: var(--r);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.icon-btn:hover { border-color: var(--ink-cap); color: var(--ink-1); }
+
+/* === Layout === */
+.wrap { max-width: 980px; margin: 0 auto; padding: 20px 24px 80px; }
+
+/* === Tabs === */
+.tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+}
+.tab {
+  padding: 8px 18px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.tab:hover { color: var(--ink-2); }
+.tab.active { color: var(--ink-1); border-bottom-color: var(--accent); }
+.tab .tcount {
+  margin-left: 7px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+/* === Category section === */
+.cat {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+.cat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-head);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+.cat-head:hover { background: var(--border-row); }
+.cat-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-1);
+}
+.cat-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.cat-caret {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-cap);
+  width: 14px;
+  text-align: center;
+  transition: transform 0.12s;
+}
+.cat.collapsed .cat-body { display: none; }
+.cat.collapsed .cat-caret { transform: rotate(-90deg); }
+
+/* === Sub-group (pain procType) === */
+.subgrp { border-bottom: 1px solid var(--border-row); }
+.subgrp:last-child { border-bottom: none; }
+.subgrp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px 7px 22px;
+  background: transparent;
+  cursor: pointer;
+  user-select: none;
+}
+.subgrp-head:hover { background: var(--border-row); }
+.subgrp-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+}
+.subgrp-count { font-family: var(--font-mono); font-size: 10px; color: var(--ink-muted); }
+.subgrp-caret {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-cap);
+  width: 12px;
+  text-align: center;
+  transition: transform 0.12s;
+}
+.subgrp.collapsed .subgrp-body { display: none; }
+.subgrp.collapsed .subgrp-caret { transform: rotate(-90deg); }
+
+/* === Rows === */
+.row {
+  display: grid;
+  grid-template-columns: 104px 92px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 14px 6px 30px;
+  border-top: 1px solid var(--border-row);
+  font-size: 12px;
+  cursor: pointer;
+}
+.row:hover { background: var(--border-row); }
+.row.editing { background: var(--bg-head); }
+.subgrp-body .row { padding-left: 38px; }
+.row:first-child { border-top: none; }
+.row .mrn { font-family: var(--font-mono); color: var(--ink-1); }
+.row .date { font-family: var(--font-mono); color: var(--ink-muted); }
+.row .proc { color: var(--ink-2); }
+.row .note { color: var(--ink-muted); margin-left: 8px; font-size: 11px; }
+.row.missing-mrn { opacity: 0.55; }
+.row.missing-mrn .mrn { color: var(--danger); font-style: italic; }
+.badge-missing {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--r);
+  padding: 0 5px;
+  margin-left: 6px;
+  opacity: 0.85;
+}
+
+/* === Outcome chip === */
+.oc {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 9px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  justify-self: end;
+}
+.oc-empty { color: var(--ink-muted); border-color: var(--border); opacity: 0.55; }
+.oc-tumor   { color: #fff; background: var(--danger); }
+.oc-infect  { color: #052e16; background: var(--ok); }
+.oc-pending { color: #7c2d12; background: #fdba74; }
+.oc-bad { color: #fff; background: var(--danger); }
+.oc-ok  { color: #052e16; background: var(--ok); }
+.oc-info { color: var(--ink-2); border-color: var(--grid); }
+/* light 主題:綠/橘 chip 改淺底深字(深綠底近黑字對比過低) */
+:root[data-theme="light"] .oc-infect,
+:root[data-theme="light"] .oc-ok { background: #dcfce7; color: #15803d; }
+:root[data-theme="light"] .oc-pending { background: #fde68a; color: #92400e; }
+:root[data-theme="light"] .oc-tumor,
+:root[data-theme="light"] .oc-bad { background: #dc2626; color: #fff; }
+
+/* === Inline outcome editor === */
+.editor {
+  padding: 12px 14px 14px 30px;
+  background: var(--bg-head);
+  border-top: 1px solid var(--border);
+}
+.subgrp-body .editor { padding-left: 38px; }
+.ed-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 9px 14px;
+}
+.ed-f { display: flex; flex-direction: column; gap: 3px; }
+.ed-f > span {
+  color: var(--ink-cap);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.ed-f input[type=text], .ed-f select {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--ink-1);
+  padding: 4px 6px;
+  border-radius: var(--r);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  width: 100%;
+}
+.ed-chk { flex-direction: row; align-items: center; gap: 6px; }
+.ed-chk > span { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--ink-2); }
+.ed-actions { margin-top: 12px; display: flex; gap: 8px; }
+.ed-actions button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 5px 14px;
+  border-radius: var(--r);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--ink-2);
+}
+.ed-save { background: var(--accent); color: #1a1a1a; border-color: var(--accent); font-weight: 600; }
+.ed-clear { color: var(--danger); margin-left: auto; }
+
+/* === States === */
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 50vh;
+  color: var(--ink-muted);
+  text-align: center;
+}
+.state .big { font-size: 15px; color: var(--ink-2); }
+.state .sub { font-size: 12px; color: var(--ink-muted); }
+.spinner {
+  width: 26px; height: 26px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* === Login screen === */
+#login-screen {
+  display: none;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 18px;
+  background: #0e1117;
+  font-family: 'Roboto', system-ui, -apple-system, sans-serif;
+}
+#login-screen .lead {
+  color: #c9d1d9;
+  font-family: var(--font-disp);
+  font-style: italic;
+  font-size: 18px;
+}
+#login-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  height: 44px;
+  background: #ffffff;
+  color: #1f1f1f;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.25px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  transition: box-shadow .15s, background .15s;
+}
+#login-btn:hover { box-shadow: 0 1px 3px rgba(0,0,0,0.5); background: #f8f9fa; }
+#login-err {
+  display: none;
+  color: #8b949e;
+  font-size: 11px;
+  background: #161b22;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+}
+
+@media (max-width: 600px) {
+  header { padding: 10px 14px; }
+  .wrap { padding: 16px 12px 60px; }
+  .row { grid-template-columns: 78px 70px 1fr auto; gap: 8px; padding-left: 18px; }
+  .ed-grid { grid-template-columns: 1fr 1fr; }
+  .subgrp-body .row { padding-left: 24px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===== Login screen (靜態元素:popup 需 user-gesture preserve) ===== -->
+<div id="login-screen">
+  <div class="lead">放射科臨床稽核</div>
+  <button id="login-btn" type="button">
+    <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+      <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/>
+      <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/>
+      <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/>
+      <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/>
+    </svg>
+    <span>Sign in with Google</span>
+  </button>
+  <div id="login-err"></div>
+</div>
+
+<!-- ===== App ===== -->
+<div id="app-root" style="display:none;">
+  <header>
+    <h1>Registry</h1>
+    <a class="icon-btn" href="index.html">← 回 Worknum</a>
+    <div class="header-spacer"></div>
+    <button class="icon-btn" id="theme-toggle" title="切換主題">🌓</button>
+    <button class="icon-btn" id="signout-btn">登出</button>
+  </header>
+  <div class="wrap" id="list-root">
+    <!-- loading / empty / 清單 由 JS render -->
+  </div>
+</div>
+
+<script type="module">
+'use strict';
+
+// ===== Firebase Setup (同 index.html:income-41a40) =====
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+import { getDatabase, ref, get, set }
+  from "https://www.gstatic.com/firebasejs/10.13.2/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBsyN2w1iKQu10ePNAJEXSAgqemj5gOS-g",
+  authDomain: "income-41a40.firebaseapp.com",
+  databaseURL: "https://income-41a40-default-rtdb.firebaseio.com",
+  projectId: "income-41a40",
+  storageBucket: "income-41a40.firebasestorage.app",
+  messagingSenderId: "838512452225",
+  appId: "1:838512452225:web:6ff8de1afa0f117f66a380"
+};
+const ALLOWED_EMAIL = 'deer530530@gmail.com';
+
+const fbApp = initializeApp(firebaseConfig);
+const fbAuth = getAuth(fbApp);
+const fbDB = getDatabase(fbApp);
+let currentUser = null;
+let _appEntered = false;
+let _registry = {};   // outcome 資料(users/<uid>/worknum/registry)
+let _uid = null;
+let editingKey = null;
+const REGION_ENUM = ['spine-cervical','spine-thoracic','spine-lumbar','sacral/SIJ','shoulder','elbow','wrist-hand','hip','knee','ankle-foot','other'];
+
+// Firebase key 安全化(去 . # $ [ ] / 及分隔符 ~)
+function fbSafe(s) { return String(s == null ? '' : s).replace(/[.#$\[\]/~]/g, '-'); }
+// 穩定 caseKey:有 time 用 time(today/mini 新增者唯一);無 time(批次匯入)用 idx 當 tiebreak 防碰撞
+function caseKey(c, idx) {
+  const tb = c.time ? '' : String(idx == null ? '' : idx);
+  return [c.date, fbSafe(c.time || ''), fbSafe(c.presetId || ''), fbSafe(c.mrn || ''), tb].join('~');
+}
+
+// ===== REGISTRY_PROCS：preset 名稱 → registry 類/子組 對映 (§9.3) =====
+// 三大類:biopsy / ptgbd / pain;pain 再切子組(sTAME / cTAME / Spine NB / Arthro)。
+// key 用「正規化後的 presetName」(去左右空白 + 小寫),value = { cat, sub }。
+const PROC_MAP = {
+  // --- biopsy ---(Bone / MSK biopsy;Lung biopsy 不收 — 非 MSK)
+  'bone biopsy': { cat: 'biopsy', sub: null },
+  'bone':        { cat: 'biopsy', sub: null },   // index.html preset 名為 "Bone"
+  'msk biopsy':  { cat: 'biopsy', sub: null },
+  'muscle':      { cat: 'biopsy', sub: null },   // 肌肉切片
+  'retromass':   { cat: 'biopsy', sub: null },   // 後腹腔腫塊切片
+  // --- ptgbd 類 (PTGBD + PTCD 都歸 ptgbd) ---
+  'ptgbd':       { cat: 'ptgbd', sub: 'PTGBD' },
+  'ptgbd+ptc':   { cat: 'ptgbd', sub: 'PTGBD' },
+  'ptcd':        { cat: 'ptgbd', sub: 'PTCD' },
+  'dr(ptcd)':    { cat: 'ptgbd', sub: 'PTCD' },
+  // --- pain 類 ---
+  'stame':       { cat: 'pain', sub: 'sTAME' },
+  'ctame':       { cat: 'pain', sub: 'cTAME' },
+  'c(s)tame':    { cat: 'pain', sub: 'cTAME' },   // 臨床上是 cTAME(計價才歸 sTAME)
+  's(c)tame':    { cat: 'pain', sub: 'sTAME' },
+  'ctame & 1500 sono': { cat: 'pain', sub: 'cTAME' },
+  'arthro':      { cat: 'pain', sub: 'Arthro' },
+  'nb arthro':   { cat: 'pain', sub: 'Arthro' },
+  'nb arthro 3500': { cat: 'pain', sub: 'Arthro' },
+  'nb arthro 1500': { cat: 'pain', sub: 'Arthro' },
+  'ct arthro sono 4500': { cat: 'pain', sub: 'Arthro' },
+  'ct nb':       { cat: 'pain', sub: 'Spine NB' },
+  'nb':          { cat: 'pain', sub: 'Spine NB' },
+  'nb 1400':     { cat: 'pain', sub: 'Spine NB' },
+  'nb simple':   { cat: 'pain', sub: 'Spine NB' },
+  'caudal block':{ cat: 'pain', sub: 'Spine NB' },
+  'cb':          { cat: 'pain', sub: 'Spine NB' },   // CB = Caudal block(user 確認)
+  'myelography': { cat: 'pain', sub: 'Spine NB' },
+  // --- Extremity 注射(parser 第 5 個 procType,§3/§7) ---
+  'extremity':      { cat: 'pain', sub: 'Extremity inj' },
+  'extremity+echo': { cat: 'pain', sub: 'Extremity inj' },
+};
+function classifyProc(presetName) {
+  if (!presetName) return null;
+  const k = presetName.trim().toLowerCase();
+  if (PROC_MAP[k]) return PROC_MAP[k];
+  // 射頻 RF / pRF 各種變體(RF、RF*1~3、RF*1 + joint、pRF×2/3點…)→ pain/RF
+  if (/^p?rf\b/.test(k)) {   // RF、RF*1~3、RF×、pRF×N點 等詞首變體
+    return { cat: 'pain', sub: 'RF' };
+  }
+  return null;
+}
+
+const CAT_LABEL = { biopsy: 'Biopsy', ptgbd: 'PTGBD / PTCD', pain: 'Pain' };
+const CAT_ORDER = ['biopsy', 'ptgbd', 'pain'];
+const PAIN_SUB_ORDER = ['sTAME', 'cTAME', 'Spine NB', 'Arthro', 'RF', 'Extremity inj'];
+
+// ===== 收合狀態(僅 session 內,T2 不持久化) =====
+const collapsed = {};      // key: cat 或 cat::sub → bool
+
+// ===== Theme =====
+function applyTheme(mode) {
+  if (mode === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  try { localStorage.setItem('registry_theme', mode); } catch (e) {}
+}
+
+// ===== Login UI helpers =====
+function showLoginUI(errMsg) {
+  document.title = '';
+  document.getElementById('app-root').style.display = 'none';
+  const ls = document.getElementById('login-screen');
+  ls.style.display = 'flex';
+  const errEl = document.getElementById('login-err');
+  if (errMsg) { errEl.textContent = errMsg; errEl.style.display = ''; }
+  else errEl.style.display = 'none';
+}
+function _loginErr(msg) {
+  const errEl = document.getElementById('login-err');
+  if (errEl) { errEl.textContent = msg; errEl.style.display = ''; }
+}
+
+// login button:純 popup(playbook:永遠 popup,不 fallback redirect)
+document.getElementById('login-btn').addEventListener('click', async () => {
+  try {
+    const provider = new GoogleAuthProvider();
+    await signInWithPopup(fbAuth, provider);
+  } catch (e) {
+    _loginErr('登入失敗:' + (e.code || e.message));
+  }
+});
+
+// ===== Init / auth 監聽 =====
+function init() {
+  applyTheme((function(){ try { return localStorage.getItem('registry_theme'); } catch(e){ return null; } })() || 'dark');
+  onAuthStateChanged(fbAuth, async (user) => {
+    if (!user) { if (!_appEntered) showLoginUI(); return; }
+    if (user.email !== ALLOWED_EMAIL) { await signOut(fbAuth); showLoginUI(`此帳號(${user.email})無權限`); return; }
+    if (_appEntered) return;
+    _appEntered = true;
+    await enterApp(user);
+  });
+}
+
+async function enterApp(user) {
+  currentUser = user;
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-root').style.display = '';
+  document.title = '臨床稽核';
+
+  // header 互動
+  document.getElementById('theme-toggle').onclick = () => {
+    const cur = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    applyTheme(cur === 'light' ? 'dark' : 'light');
+  };
+  document.getElementById('signout-btn').onclick = () => signOut(fbAuth).then(() => location.reload());
+
+  renderLoading();
+  try {
+    _uid = user.uid;
+    // days(個案來源)+ registry(outcome)都掛在 users/<uid>/worknum/ 下
+    const [daysSnap, regSnap] = await Promise.all([
+      get(ref(fbDB, `users/${user.uid}/worknum/days`)),
+      get(ref(fbDB, `users/${user.uid}/worknum/registry/cases`)),
+    ]);
+    const days = daysSnap.exists() ? daysSnap.val() : {};
+    _registry = regSnap.exists() ? regSnap.val() : {};
+    renderList(collectCases(days));
+  } catch (e) {
+    console.error('讀取失敗', e);
+    renderError(e);
+  }
+}
+
+// 病歷號清理:Worknum 的 medRecord 有時夾雜當日 procedure 文字 dump
+// pattern =「真病歷號 / 文字…」或「PTC PTGBD X00000」→ 取第一段、抽病歷號格式 token
+// 抽不到 token → 回空字串(該列標「需補病歷號」,不把 procedure 文字當病歷號)
+function cleanMrn(raw) {
+  if (raw == null) return '';
+  const head = String(raw).split(' / ')[0].split('\n')[0].trim();
+  // 病歷號 = 選填字母前綴 + ≥4 位數字(排除 '3D'、'GB' 這類 procedure 代號)
+  const tok = head.split(/\s+/).find(t => /^[A-Za-z]?\d{4,}[\dA-Za-z-]*$/.test(t));
+  return tok || '';
+}
+
+// ===== 從 days/ 蒐集 registry 個案 =====
+function collectCases(days) {
+  const out = [];
+  for (const date of Object.keys(days || {})) {
+    const day = days[date] || {};
+    const procs = Array.isArray(day.procedures) ? day.procedures : [];
+    procs.forEach((p, idx) => {
+      const cls = classifyProc(p && p.presetName);
+      if (!cls) return;
+      const rec = {
+        cat: cls.cat,
+        sub: cls.sub,
+        date,
+        time: p.time || null,
+        presetId: p.presetId || '',
+        // 病歷號:清理 medRecord(去除夾雜的當日文字 dump)
+        mrn: cleanMrn(p.medRecord),
+        rawMrn: (p.medRecord != null ? String(p.medRecord) : ''),
+        note: (p.note != null ? String(p.note).trim() : ''),
+        procName: p.presetName,
+      };
+      rec.key = caseKey(rec, idx);        // 穩定 key(無 time 時用 idx tiebreak)
+      rec.outcome = _registry[rec.key] || null;
+      out.push(rec);
+    });
+  }
+  // 日期新 → 舊
+  out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  return out;
+}
+
+// ===== Render: states =====
+function renderLoading() {
+  document.getElementById('list-root').innerHTML =
+    `<div class="state"><div class="spinner"></div><div class="sub">讀取個案中…</div></div>`;
+}
+function renderError(e) {
+  document.getElementById('list-root').innerHTML =
+    `<div class="state"><div class="big">讀取失敗</div><div class="sub">${escapeHtml(e && (e.code || e.message) || '未知錯誤')}</div></div>`;
+}
+function renderEmpty() {
+  document.getElementById('list-root').innerHTML =
+    `<div class="state"><div class="big">尚無稽核個案</div><div class="sub">Worknum days/ 中沒有屬於 biopsy / ptgbd / pain 的 procedure。</div></div>`;
+}
+
+// ===== Render: 三分頁清單 =====
+let _cases = [];
+let activeTab = null;
+
+function renderList(cases) {
+  _cases = cases;
+  if (!cases.length) { renderEmpty(); return; }
+
+  const byCat = { biopsy: [], ptgbd: [], pain: [] };
+  cases.forEach(c => { if (byCat[c.cat]) byCat[c.cat].push(c); });
+
+  // 預設分頁 = 第一個有資料的
+  if (!activeTab || !byCat[activeTab] || !byCat[activeTab].length) {
+    activeTab = CAT_ORDER.find(c => byCat[c].length) || 'biopsy';
+  }
+
+  const root = document.getElementById('list-root');
+  root.innerHTML = '';
+
+  // --- 分頁列 ---
+  const tabs = document.createElement('div');
+  tabs.className = 'tabs';
+  CAT_ORDER.forEach(cat => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tab' + (cat === activeTab ? ' active' : '');
+    b.innerHTML = `${CAT_LABEL[cat]}<span class="tcount">${byCat[cat].length}</span>`;
+    b.onclick = () => { activeTab = cat; renderList(_cases); };
+    tabs.appendChild(b);
+  });
+  root.appendChild(tabs);
+
+  // --- 分頁內容 ---
+  const content = document.createElement('div');
+  content.className = 'tab-content';
+  const items = byCat[activeTab] || [];
+  if (!items.length) {
+    content.innerHTML = `<div class="state"><div class="sub">此分類目前無個案</div></div>`;
+  } else if (activeTab === 'pain') {
+    const bySub = {};
+    items.forEach(c => { (bySub[c.sub || 'Other'] || (bySub[c.sub || 'Other'] = [])).push(c); });
+    const subKeys = Object.keys(bySub).sort((a, b) => {
+      const ia = PAIN_SUB_ORDER.indexOf(a), ib = PAIN_SUB_ORDER.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+    subKeys.forEach(sub => content.appendChild(buildSubGroup('pain', sub, bySub[sub])));
+  } else {
+    items.forEach(c => content.appendChild(buildCaseItem(c)));
+  }
+  root.appendChild(content);
+}
+
+function buildSubGroup(cat, sub, items) {
+  const key = cat + '::' + sub;
+  // Spine NB 量大,預設摺起(§9.2)
+  if (collapsed[key] === undefined && sub === 'Spine NB') collapsed[key] = true;
+
+  const grp = document.createElement('div');
+  grp.className = 'subgrp' + (collapsed[key] ? ' collapsed' : '');
+
+  const head = document.createElement('div');
+  head.className = 'subgrp-head';
+  head.innerHTML =
+    `<span class="subgrp-caret">▼</span>
+     <span class="subgrp-title">${escapeHtml(sub)}</span>
+     <span class="subgrp-count">${items.length} 筆</span>`;
+  head.onclick = () => { collapsed[key] = !collapsed[key]; grp.classList.toggle('collapsed'); };
+  grp.appendChild(head);
+
+  const body = document.createElement('div');
+  body.className = 'subgrp-body';
+  items.forEach(c => body.appendChild(buildCaseItem(c)));
+  grp.appendChild(body);
+  return grp;
+}
+
+function buildCaseItem(c) {
+  const wrap = document.createElement('div');
+  wrap.className = 'case-item';
+  wrap.appendChild(buildRow(c));
+  if (editingKey === c.key) wrap.appendChild(buildEditor(c));
+  return wrap;
+}
+
+function buildRow(c) {
+  const row = document.createElement('div');
+  const hasMrn = !!c.mrn;
+  row.className = 'row' + (hasMrn ? '' : ' missing-mrn') + (editingKey === c.key ? ' editing' : '');
+  const mrnHtml = `<span class="mrn">${hasMrn ? escapeHtml(c.mrn) : '—'}</span>`;
+  const missBadge = hasMrn ? '' : `<span class="badge-missing">需補號</span>`;
+  const noteHtml = c.note ? `<span class="note">${escapeHtml(c.note)}</span>` : '';
+  row.innerHTML =
+    `${mrnHtml}
+     <span class="date">${escapeHtml(c.date)}</span>
+     <span class="proc">${escapeHtml(c.procName || '')}${noteHtml}${missBadge}</span>
+     ${outcomeSummary(c)}`;
+  row.onclick = () => { editingKey = (editingKey === c.key ? null : c.key); renderList(_cases); };
+  return row;
+}
+
+// outcome 摘要 chip(依術式)
+function outcomeSummary(c) {
+  const o = c.outcome;
+  if (!o) return `<span class="oc oc-empty">＋ outcome</span>`;
+  let label = '', cls = 'oc-info';
+  if (c.cat === 'biopsy') {
+    if (o.status === 'pending') { label = '待回'; cls = 'oc-pending'; }
+    else if (o.category === 'Infection') { label = 'Infection'; cls = 'oc-infect'; }
+    else if (o.category) { label = o.category; cls = 'oc-tumor'; }
+  } else if (c.cat === 'ptgbd') {
+    if (o.expired) { label = 'Expired'; cls = 'oc-bad'; }
+    else if (o.complication && o.complication.toLowerCase() !== 'nil') { label = '併發症'; cls = 'oc-bad'; }
+    else if (o.outcome) { label = '✓'; cls = 'oc-ok'; }
+  } else {
+    const m = { improve: ['改善', 'oc-ok'], pending: ['待觀', 'oc-pending'], none: ['無效', 'oc-bad'], complication: ['併發症', 'oc-bad'] };
+    if (o.effectClass && m[o.effectClass]) { label = m[o.effectClass][0]; cls = m[o.effectClass][1]; }
+    else if (o.region) { label = o.region; }
+  }
+  if (!label) label = '已記';
+  return `<span class="oc ${cls}">${escapeHtml(label)}</span>`;
+}
+
+// ===== inline outcome 編輯器(依術式切欄位) =====
+function buildEditor(c) {
+  const o = c.outcome || {};
+  const ed = document.createElement('div');
+  ed.className = 'editor';
+  ed.onclick = (e) => e.stopPropagation();   // 不冒泡觸發 row 收合
+
+  let fields = '';
+  if (c.cat === 'biopsy') {
+    fields =
+      selF('category', '類別', ['', 'Tumor', 'Infection', 'Both'], o.category) +
+      selF('status', '狀態', ['final', 'pending'], o.status || 'final') +
+      txtF('imp', '影像判斷', o.imp) +
+      txtF('patho', '病理', o.patho) +
+      txtF('culture', '培養', o.culture) +
+      selF('cultureResult', '培養結果', ['', '+', '-', 'contam', 'na'], o.cultureResult);
+  } else if (c.cat === 'ptgbd') {
+    fields =
+      txtF('complication', '併發症', o.complication) +
+      txtF('outcome', '轉歸', o.outcome) +
+      chkF('expired', '死亡', o.expired) +
+      txtF('opAfterDays', 'OP後天數', o.opAfterDays);
+  } else {
+    fields =
+      selF('region', '部位', [''].concat(REGION_ENUM), o.region) +
+      selF('laterality', '左右', ['', 'R', 'L', 'B'], o.laterality) +
+      selF('effectClass', '療效', ['', 'improve', 'pending', 'none', 'complication'], o.effectClass) +
+      txtF('effectPct', '改善%', o.effectPct) +
+      txtF('dose', '劑量', o.dose);
+  }
+  ed.innerHTML =
+    `<div class="ed-grid">${fields}${txtF('note', '備註', o.note)}</div>
+     <div class="ed-actions">
+       <button type="button" class="ed-save">儲存</button>
+       <button type="button" class="ed-cancel">取消</button>
+       ${c.outcome ? '<button type="button" class="ed-clear">清除</button>' : ''}
+     </div>`;
+
+  ed.querySelector('.ed-save').onclick = () => {
+    const data = {};
+    ed.querySelectorAll('[data-f]').forEach(el => {
+      const f = el.dataset.f;
+      const v = el.type === 'checkbox' ? el.checked : el.value.trim();
+      if (v !== '' && v !== false) data[f] = v;
+    });
+    if (!Object.keys(data).length && c.outcome && !confirm('沒填任何內容,要清除原本的 outcome 嗎?')) return;
+    saveOutcome(c, data);
+  };
+  ed.querySelector('.ed-cancel').onclick = () => { editingKey = null; renderList(_cases); };
+  const clr = ed.querySelector('.ed-clear');
+  if (clr) clr.onclick = () => { if (confirm('清除此筆 outcome?')) saveOutcome(c, null); };
+  return ed;
+}
+
+function txtF(f, label, val) {
+  return `<label class="ed-f"><span>${escapeHtml(label)}</span><input data-f="${f}" type="text" value="${escapeHtml(val == null ? '' : val)}"></label>`;
+}
+function selF(f, label, opts, val) {
+  const os = opts.map(op => `<option value="${escapeHtml(op)}"${op === (val || '') ? ' selected' : ''}>${escapeHtml(op || '—')}</option>`).join('');
+  return `<label class="ed-f"><span>${escapeHtml(label)}</span><select data-f="${f}">${os}</select></label>`;
+}
+function chkF(f, label, val) {
+  return `<label class="ed-f ed-chk"><input data-f="${f}" type="checkbox"${val ? ' checked' : ''}><span>${escapeHtml(label)}</span></label>`;
+}
+
+// 寫入 outcome:更新本地 + Firebase(dev/無 uid 時只更新本地)
+async function saveOutcome(c, data) {
+  if (data && Object.keys(data).length) {
+    data.updatedAt = new Date().toISOString();
+    _registry[c.key] = data;
+    c.outcome = data;
+  } else {
+    delete _registry[c.key];
+    c.outcome = null;
+  }
+  editingKey = null;
+  renderList(_cases);
+  if (_uid) {
+    try {
+      await set(ref(fbDB, `users/${_uid}/worknum/registry/cases/${c.key}`), c.outcome);
+    } catch (e) { console.error('儲存 outcome 失敗', e); alert('儲存失敗:' + (e.code || e.message)); }
+  }
+}
+
+// ===== util =====
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+init();
+</script>
+</body>
+</html>

@@ -2,6 +2,9 @@
 VS會議 + 績效.xlsx
 *.xlsx
 *.bak
+# Firebase 服務帳戶金鑰(防呆:即使誤放根目錄也不會被 commit)
+*firebase-adminsdk*.json
+serviceAccountKey.json
 
 # 本機工作 artifact(設計圖 / 截圖 / 草稿 / Python 工具 / 內部文件)
 *.png
@@ -11,7 +14,16 @@ VS會議 + 績效.xlsx
 design_handoff_ui_styles/
 scripts/
 CLAUDE.md
+registry_plan.md
 database.rules.json
+# 防呆:含病歷號的 parser 暫存/輸出 + Worknum 匯出絕不上 repo
+scratchpad_*.txt
+scratchpad/
+*_parsed.json
+*_export.json
+worknum_export.json
+_mock_days.json
+*_mock*.json
 
 # Claude 內部
 .claude/
