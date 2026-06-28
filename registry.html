@@ -711,6 +711,7 @@ function renderList(cases) {
     subKeys.forEach(sub => content.appendChild(buildSubGroup('pain', sub, bySub[sub])));
   } else {
     if (activeTab === 'biopsy') content.appendChild(buildBiopsyStats(items));
+    else if (activeTab === 'ptgbd') content.appendChild(buildPtgbdStats(items));
     items.forEach(c => content.appendChild(buildCaseItem(c)));
   }
   root.appendChild(content);
@@ -799,6 +800,26 @@ function buildBiopsyStats(items) {
   return bar;
 }
 
+// PTGBD 結果分析條:併發症率(mild / sv)、死亡率、件數/月。分母 = 已記 outcome 件數
+function buildPtgbdStats(items) {
+  const withO = items.filter(c => hasRealOutcome(c.outcome));
+  const denom = withO.length;
+  const mild = withO.filter(c => c.outcome.compSeverity === 'mild').length;
+  const sv = withO.filter(c => c.outcome.compSeverity === 'sv').length;
+  const expired = withO.filter(c => c.outcome.expired).length;
+  const dates = items.map(c => c.date).filter(Boolean).sort();
+  const perMonth = dates.length ? (items.length / monthSpan(dates[0], dates[dates.length - 1])).toFixed(2) : '—';
+  const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
+  const bar = document.createElement('div');
+  bar.className = 'stats-bar';
+  bar.innerHTML =
+    `<span><b>${items.length}</b> 件 · ${perMonth}/月 · 已記 ${denom}</span>
+     <span>併發症 mild <b>${mild}/${denom}</b> ${pct(mild, denom)}</span>
+     <span>sv <b>${sv}/${denom}</b> ${pct(sv, denom)}</span>
+     <span>死亡 <b>${expired}/${denom}</b> ${pct(expired, denom)}</span>`;
+  return bar;
+}
+
 // outcome 摘要 chip(依術式)
 function outcomeSummary(c) {
   const o = c.outcome;
@@ -813,8 +834,9 @@ function outcomeSummary(c) {
     else if (o.category) { label = o.category; cls = 'oc-info'; }
   } else if (c.cat === 'ptgbd') {
     if (o.expired) { label = 'Expired'; cls = 'oc-bad'; }
-    else if (o.complication && o.complication.toLowerCase() !== 'nil') { label = '併發症'; cls = 'oc-bad'; }
-    else if (o.outcome) { label = '✓'; cls = 'oc-ok'; }
+    else if (o.compSeverity === 'sv') { label = '併發症 sv'; cls = 'oc-bad'; }
+    else if (o.compSeverity === 'mild') { label = '併發症 mild'; cls = 'oc-pending'; }
+    else if (o.outcome || o.compSeverity) { label = '✓'; cls = 'oc-ok'; }
   } else {
     const m = { improve: ['改善', 'oc-ok'], pending: ['待觀', 'oc-pending'], none: ['無效', 'oc-bad'], complication: ['併發症', 'oc-bad'] };
     if (o.effectClass && m[o.effectClass]) { label = m[o.effectClass][0]; cls = m[o.effectClass][1]; }
@@ -852,7 +874,8 @@ function buildEditor(c) {
       txtF('culture', '培養(詳)', o.culture);
   } else if (eCat === 'ptgbd') {
     fields =
-      txtF('complication', '併發症', o.complication) +
+      selF('compSeverity', '併發症程度', ['', 'mild', 'sv'], o.compSeverity) +
+      txtF('complication', '併發症(詳)', o.complication) +
       txtF('outcome', '轉歸', o.outcome) +
       chkF('expired', '死亡', o.expired) +
       txtF('opAfterDays', 'OP後天數', o.opAfterDays);
