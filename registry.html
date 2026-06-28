@@ -199,7 +199,7 @@ header h1 {
 .subgrp.collapsed .subgrp-caret { transform: rotate(-90deg); }
 
 /* === Table (Excel-like) === */
-.table-wrap { overflow: auto; max-height: calc(100vh - 200px); }
+.table-wrap { overflow: visible; }   /* 頁面捲動;窄螢幕才橫向捲(見 media query)*/
 /* 自適應寬度:欄位平分容器、內容過長截斷;只有視窗窄於 min-width 才橫向捲動 */
 table.grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
 table.grid thead th {
@@ -213,8 +213,8 @@ table.grid thead th {
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
-  position: sticky;       /* 表頭冷凍:貼在捲動視窗(.table-wrap)頂端 */
-  top: 0;
+  position: sticky;       /* 表頭冷凍:釘在視窗頂端(app header 47px 下方)*/
+  top: 47px;
   z-index: 5;
   background: var(--bg-head);
 }
@@ -287,7 +287,12 @@ table.grid td.cat-Both { color: var(--accent); }
   color: var(--ink-muted);
   margin-bottom: 8px;
 }
+.stats-head { cursor: pointer; user-select: none; }
 .stats-head b { color: var(--ink-1); font-weight: 600; }
+.stats-caret { display: inline-block; font-size: 9px; color: var(--ink-cap); margin-right: 6px; transition: transform 0.12s; }
+.stats-box.collapsed .stats-caret { transform: rotate(-90deg); }
+.stats-box.collapsed .stats-table { display: none; }
+.stats-box.collapsed .stats-head { margin-bottom: 0; }
 .stats-table { border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
 .stats-table th, .stats-table td { padding: 2px 16px 2px 0; text-align: right; color: var(--ink-2); }
 .stats-table th { color: var(--ink-cap); font-weight: 600; font-size: 10px; }
@@ -368,11 +373,12 @@ table.grid td.cat-Both { color: var(--accent); }
   border: 1px solid #30363d;
 }
 
+/* 窄到表格放不下才橫向捲(此時 sticky 表頭會失效,屬窄螢幕取捨)*/
+@media (max-width: 920px) { .table-wrap { overflow-x: auto; } }
 @media (max-width: 600px) {
   header { padding: 10px 14px; }
   .wrap { padding: 16px 12px 60px; }
   table.grid td { max-width: 110px; }
-  .subgrp-body .row { padding-left: 24px; }
 }
 </style>
 </head>
@@ -918,6 +924,14 @@ function monthSpan(d1, d2) {
   const a = d1.split('-').map(Number), b = d2.split('-').map(Number);
   return Math.max(1, (b[0] - a[0]) * 12 + (b[1] - a[1]) + 1);
 }
+// 統計座(可收闔)— 點標題列摺疊/展開,狀態跨重繪保留
+let statsCollapsed = false;
+function statsBox(headHtml, tableHtml) {
+  const box = el('div', 'stats-box' + (statsCollapsed ? ' collapsed' : ''));
+  box.innerHTML = `<div class="stats-head"><span class="stats-caret">▼</span>${headHtml}</div>${tableHtml}`;
+  box.querySelector('.stats-head').onclick = () => { statsCollapsed = !statsCollapsed; refreshStats(); };
+  return box;
+}
 function buildBiopsyStats(items) {
   // 分母 = 該類別全部(含 pending),同 Excel countif(F,"Tumor");分子 = 確診陽性
   const withO = items.filter(c => hasRealOutcome(c.outcome));
@@ -929,18 +943,16 @@ function buildBiopsyStats(items) {
   const dates = items.map(c => c.date).filter(Boolean).sort();
   const perMonth = dates.length ? (items.length / monthSpan(dates[0], dates[dates.length - 1])).toFixed(2) : '—';
   const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
-  const box = document.createElement('div');
-  box.className = 'stats-box';
-  box.innerHTML =
-    `<div class="stats-head">共 <b>${items.length}</b> 件 · ${perMonth}/月 · 待回 <b>${pending}</b></div>
-     <table class="stats-table">
+  return statsBox(
+    `共 <b>${items.length}</b> 件 · ${perMonth}/月 · 待回 <b>${pending}</b>`,
+    `<table class="stats-table">
        <tr><th></th><th>Tumor</th><th>Infection</th></tr>
        <tr><td>件數</td><td>${tumorCls.length}</td><td>${infCls.length}</td></tr>
        <tr><td>陽性</td><td>${tumorPos}</td><td>${infPos}</td></tr>
        <tr><td>陽性率</td><td><b>${pct(tumorPos, tumorCls.length)}</b></td><td><b>${pct(infPos, infCls.length)}</b></td></tr>
        <tr class="ref"><td>Ref(VGH)</td><td>85%</td><td>23.8%</td></tr>
-     </table>`;
-  return box;
+     </table>`
+  );
 }
 
 // Pain 結果分析條:療效率(改善/輕改/無變)。分母 = 已評(有 effectClass 且非 pending)
@@ -953,17 +965,15 @@ function buildPainStats(items) {
   const pend = items.filter(c => c.outcome && c.outcome.effectClass === 'pending').length;
   const comp = items.filter(c => c.outcome && c.outcome.effectClass === 'complication').length;
   const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
-  const box = document.createElement('div');
-  box.className = 'stats-box';
-  box.innerHTML =
-    `<div class="stats-head">共 <b>${items.length}</b> 件 · 已評 <b>${denom}</b> · 待觀 ${pend} · 併發症 ${comp}</div>
-     <table class="stats-table">
+  return statsBox(
+    `共 <b>${items.length}</b> 件 · 已評 <b>${denom}</b> · 待觀 ${pend} · 併發症 ${comp}`,
+    `<table class="stats-table">
        <tr><th></th><th>件數</th><th>率</th></tr>
        <tr><td>改善</td><td>${impv}</td><td><b>${pct(impv, denom)}</b></td></tr>
        <tr><td>輕改</td><td>${mild}</td><td><b>${pct(mild, denom)}</b></td></tr>
        <tr><td>無變</td><td>${none}</td><td><b>${pct(none, denom)}</b></td></tr>
-     </table>`;
-  return box;
+     </table>`
+  );
 }
 
 // PTGBD 結果分析條:併發症率(mild / sv)、死亡率、件數/月。分母 = 已記 outcome 件數
@@ -976,17 +986,15 @@ function buildPtgbdStats(items) {
   const dates = items.map(c => c.date).filter(Boolean).sort();
   const perMonth = dates.length ? (items.length / monthSpan(dates[0], dates[dates.length - 1])).toFixed(2) : '—';
   const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
-  const box = document.createElement('div');
-  box.className = 'stats-box';
-  box.innerHTML =
-    `<div class="stats-head">共 <b>${items.length}</b> 件 · ${perMonth}/月 · 已記 <b>${denom}</b></div>
-     <table class="stats-table">
+  return statsBox(
+    `共 <b>${items.length}</b> 件 · ${perMonth}/月 · 已記 <b>${denom}</b>`,
+    `<table class="stats-table">
        <tr><th></th><th>件數</th><th>率</th></tr>
        <tr><td>併發症 mild</td><td>${mild}</td><td><b>${pct(mild, denom)}</b></td></tr>
        <tr><td>併發症 sv</td><td>${sv}</td><td><b>${pct(sv, denom)}</b></td></tr>
        <tr><td>死亡</td><td>${expired}</td><td><b>${pct(expired, denom)}</b></td></tr>
-     </table>`;
-  return box;
+     </table>`
+  );
 }
 
 // outcome 摘要 chip(依術式)
