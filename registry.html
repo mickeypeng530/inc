@@ -233,6 +233,10 @@ table.grid td.cell { cursor: pointer; }
 table.grid td.cell:hover { background: var(--border-row); outline: 1px solid var(--border); }
 table.grid td.cell:empty::after { content: '＋'; color: var(--ink-muted); opacity: 0.35; }
 table.grid td.td-reclass { color: var(--ink-muted); }
+table.grid td.catcell { font-weight: 600; }
+table.grid td.cat-Tumor { color: var(--danger); }
+table.grid td.cat-Infection { color: var(--ok); }
+table.grid td.cat-Both { color: var(--accent); }
 .cell-input {
   width: 100%;
   min-width: 56px;
@@ -728,11 +732,11 @@ const COLS = {
     { h: '病歷號', f: 'mrn', ro: 1, w: 80 }, { h: '日期', f: 'date', ro: 1, w: 94 },
     { h: '年齡', f: 'age', t: 'text', w: 46 }, { h: '性別', f: 'sex', t: 'sel', o: SEX, w: 42 },
     { h: '位置', f: 'site', t: 'text' },
-    { h: '類別', f: 'category', t: 'sel', o: ['', 'Tumor', 'Infection', 'Both'] },
-    { h: '狀態', f: 'status', t: 'sel', o: ['', 'final', 'pending'] },
+    { h: '類別', f: 'category', t: 'sel', o: ['', 'Tumor', 'Infection', 'Both'], tint: 1 },
     { h: '病理結果', f: 'pathoResult', t: 'sel', o: ['', 'Tumor', 'Infection', 'Inflammation', 'Negative'] },
     { h: '培養', f: 'cultureResult', t: 'sel', o: ['', '+', '-', 'contam', 'na'] },
-    { h: 'Imp', f: 'imp', t: 'text' }, { h: 'Patho', f: 'patho', t: 'text' }, { h: 'Culture', f: 'culture', t: 'text' },
+    { h: 'Imp', f: 'imp', t: 'text', w: 150 }, { h: 'Patho', f: 'patho', t: 'text' }, { h: 'Culture', f: 'culture', t: 'text' },
+    { h: '狀態', f: 'status', t: 'sel', o: ['', 'final', 'pending'], w: 60 },
     { reclass: 1 }, { chip: 1 },
   ],
   ptgbd: [
@@ -799,8 +803,17 @@ function buildCell(c, col) {
   td.className = 'cell';
   td.textContent = col.t === 'chk' ? (val ? '✓' : '') : (val === '' ? '' : String(val));
   td.title = td.textContent;
+  tintCell(td, col, val);
   td.onclick = () => (col.t === 'subsel' ? startReclass(td, c, 'sub') : startEdit(td, c, col));
   return td;
+}
+
+// 類別套色(Tumor 紅 / Infection 綠 / Both 琥珀)
+function tintCell(td, col, val) {
+  if (!col.tint) return;
+  td.classList.remove('cat-Tumor', 'cat-Infection', 'cat-Both');
+  td.classList.toggle('catcell', !!val);
+  if (val) td.classList.add('cat-' + val);
 }
 
 function startEdit(td, c, col) {
@@ -849,6 +862,7 @@ async function saveField(td, c, col, value) {
   else { delete _registry[c.key]; c.outcome = null; }
   td.textContent = col.t === 'chk' ? (value ? '✓' : '') : ((value === '' || value === false) ? '' : String(value));
   td.title = td.textContent;
+  tintCell(td, col, (value === '' || value === false) ? '' : value);
   const tr = td.parentElement, chip = tr && tr.querySelector('.td-chip');
   if (chip) chip.innerHTML = outcomeSummary(c);
   refreshStats();
