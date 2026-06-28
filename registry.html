@@ -286,59 +286,6 @@ table.grid td.td-reclass { color: var(--ink-muted); }
 :root[data-theme="light"] .oc-tumor,
 :root[data-theme="light"] .oc-bad { background: #dc2626; color: #fff; }
 
-/* === Inline outcome editor === */
-.editor {
-  padding: 12px 14px 14px 30px;
-  background: var(--bg-head);
-  border-top: 1px solid var(--border);
-}
-.subgrp-body .editor { padding-left: 38px; }
-.ed-reclass {
-  display: flex;
-  gap: 14px;
-  margin-bottom: 11px;
-  padding-bottom: 11px;
-  border-bottom: 1px dashed var(--border);
-}
-.ed-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 9px 14px;
-}
-.ed-f { display: flex; flex-direction: column; gap: 3px; }
-.ed-f > span {
-  color: var(--ink-cap);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.ed-f input[type=text], .ed-f select {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  color: var(--ink-1);
-  padding: 4px 6px;
-  border-radius: var(--r);
-  font-family: var(--font-ui);
-  font-size: 12px;
-  width: 100%;
-}
-.ed-chk { flex-direction: row; align-items: center; gap: 6px; }
-.ed-chk > span { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--ink-2); }
-.ed-actions { margin-top: 12px; display: flex; gap: 8px; }
-.ed-actions button {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 5px 14px;
-  border-radius: var(--r);
-  cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--bg-panel);
-  color: var(--ink-2);
-}
-.ed-save { background: var(--accent); color: #1a1a1a; border-color: var(--accent); font-weight: 600; }
-.ed-clear { color: var(--danger); margin-left: auto; }
-
 /* === States === */
 .state {
   display: flex;
@@ -410,7 +357,6 @@ table.grid td.td-reclass { color: var(--ink-muted); }
   header { padding: 10px 14px; }
   .wrap { padding: 16px 12px 60px; }
   table.grid td { max-width: 110px; }
-  .ed-grid { grid-template-columns: 1fr 1fr; }
   .subgrp-body .row { padding-left: 24px; }
 }
 </style>
@@ -476,8 +422,6 @@ let currentUser = null;
 let _appEntered = false;
 let _registry = {};   // outcome 資料(users/<uid>/worknum/registry/cases)
 let _uid = null;
-let editingKey = null;
-let editCat = null, editSub = null;   // 編輯中暫存的分類覆寫
 const REGION_ENUM = ['spine-cervical','spine-thoracic','spine-lumbar','sacral/SIJ','shoulder','elbow','wrist-hand','hip','knee','ankle-foot','other'];
 
 // Firebase key 安全化(去 . # $ [ ] / 及分隔符 ~)
@@ -1037,133 +981,6 @@ function outcomeSummary(c) {
 }
 
 // ===== inline outcome 編輯器(依術式切欄位) =====
-const CAT_LABELS = { biopsy: 'Biopsy', ptgbd: 'PTGBD/PTCD', pain: 'Pain' };
-
-function buildEditor(c) {
-  const o = c.outcome || {};
-  const eCat = editCat || c.cat;                       // 有效分類(編輯中暫存覆寫優先)
-  const eSub = editCat ? editSub : c.sub;
-  const ed = document.createElement('div');
-  ed.className = 'editor';
-  ed.onclick = (e) => e.stopPropagation();   // 不冒泡觸發 row 收合
-
-  // 改分類控制(臨床覆寫 preset)
-  const reCtl =
-    selRaw('reclass-cat', '分類', ['biopsy', 'ptgbd', 'pain'], eCat, CAT_LABELS) +
-    (eCat === 'pain' ? selRaw('reclass-sub', '術式', PAIN_SUB_ORDER, eSub || PAIN_SUB_ORDER[0]) : '');
-
-  let fields = '';
-  if (eCat === 'biopsy') {
-    fields =
-      selF('category', '類別(疑似)', ['', 'Tumor', 'Infection', 'Both'], o.category) +
-      selF('status', '狀態', ['final', 'pending'], o.status || 'final') +
-      selF('pathoResult', '病理結果', ['', 'Tumor', 'Infection', 'Inflammation', 'Negative'], o.pathoResult) +
-      selF('cultureResult', '培養結果', ['', '+', '-', 'contam', 'na'], o.cultureResult) +
-      txtF('age', '年齡', o.age) +
-      selF('sex', '性別', ['', 'M', 'F'], o.sex) +
-      txtF('site', '位置', o.site) +
-      txtF('imp', '影像判斷', o.imp) +
-      txtF('patho', '病理(詳)', o.patho) +
-      txtF('culture', '培養(詳)', o.culture);
-  } else if (eCat === 'ptgbd') {
-    fields =
-      selF('compSeverity', '併發症程度', ['', 'mild', 'sv'], o.compSeverity) +
-      txtF('age', '年齡', o.age) +
-      selF('sex', '性別', ['', 'M', 'F'], o.sex) +
-      txtF('complication', '併發症(詳)', o.complication) +
-      txtF('outcome', '轉歸', o.outcome) +
-      chkF('expired', '死亡', o.expired) +
-      txtF('opAfterDays', 'OP後天數', o.opAfterDays);
-  } else {
-    fields =
-      selF('region', '部位', [''].concat(REGION_ENUM), o.region) +
-      selF('laterality', '左右', ['', 'R', 'L', 'B'], o.laterality) +
-      selF('effectClass', '療效', ['', 'impv', 'mild', 'none', 'pending', 'complication'], o.effectClass) +
-      txtF('effectPct', '改善%', o.effectPct) +
-      txtF('dose', '劑量', o.dose);
-  }
-  ed.innerHTML =
-    `<div class="ed-reclass">${reCtl}</div>
-     <div class="ed-grid">${fields}${txtF('note', '備註', o.note)}</div>
-     <div class="ed-actions">
-       <button type="button" class="ed-save">儲存</button>
-       <button type="button" class="ed-cancel">取消</button>
-       ${c.outcome ? '<button type="button" class="ed-clear">清除</button>' : ''}
-     </div>`;
-
-  // 分類切換 → 暫存 + 就地重建編輯器(欄位隨之切換)
-  ed.querySelector('.reclass-cat').onchange = (e) => {
-    editCat = e.target.value;
-    editSub = editCat === 'pain' ? PAIN_SUB_ORDER[0] : null;
-    ed.replaceWith(buildEditor(c));
-  };
-  const subSel = ed.querySelector('.reclass-sub');
-  if (subSel) subSel.onchange = (e) => { editSub = e.target.value; };
-
-  ed.querySelector('.ed-save').onclick = () => {
-    const data = {};
-    ed.querySelectorAll('[data-f]').forEach(el => {
-      const f = el.dataset.f;
-      const v = el.type === 'checkbox' ? el.checked : el.value.trim();
-      if (v !== '' && v !== false) data[f] = v;
-    });
-    // 分類覆寫:有效分類 ≠ preset 原始分類才記
-    const fCat = editCat || c.cat;
-    const fSub = editCat ? editSub : c.sub;
-    if (fCat !== c.baseCat || (fCat === 'pain' && fSub !== c.baseSub)) {
-      data.reCat = fCat;
-      if (fCat === 'pain') data.reSub = fSub;
-    }
-    if (!Object.keys(data).length && c.outcome && !confirm('沒填任何內容,要清除原本的 outcome 嗎?')) return;
-    saveOutcome(c, data);
-  };
-  ed.querySelector('.ed-cancel').onclick = () => { editingKey = null; renderList(_cases); };
-  const clr = ed.querySelector('.ed-clear');
-  if (clr) clr.onclick = () => { if (confirm('清除此筆 outcome?')) saveOutcome(c, null); };
-  return ed;
-}
-
-// 不含 data-f 的 select(改分類用,不被當 outcome 欄位蒐集)
-function selRaw(cls, label, opts, val, labels) {
-  const os = opts.map(op => `<option value="${escapeHtml(op)}"${op === (val || '') ? ' selected' : ''}>${escapeHtml((labels && labels[op]) || op)}</option>`).join('');
-  return `<label class="ed-f"><span>${escapeHtml(label)}</span><select class="${cls}">${os}</select></label>`;
-}
-
-function txtF(f, label, val) {
-  return `<label class="ed-f"><span>${escapeHtml(label)}</span><input data-f="${f}" type="text" value="${escapeHtml(val == null ? '' : val)}"></label>`;
-}
-function selF(f, label, opts, val) {
-  const os = opts.map(op => `<option value="${escapeHtml(op)}"${op === (val || '') ? ' selected' : ''}>${escapeHtml(op || '—')}</option>`).join('');
-  return `<label class="ed-f"><span>${escapeHtml(label)}</span><select data-f="${f}">${os}</select></label>`;
-}
-function chkF(f, label, val) {
-  return `<label class="ed-f ed-chk"><input data-f="${f}" type="checkbox"${val ? ' checked' : ''}><span>${escapeHtml(label)}</span></label>`;
-}
-
-// 寫入 outcome:更新本地 + Firebase(dev/無 uid 時只更新本地)
-async function saveOutcome(c, data) {
-  if (data && Object.keys(data).length) {
-    data.updatedAt = new Date().toISOString();
-    _registry[c.key] = data;
-    c.outcome = data;
-    // 套用分類覆寫到 in-memory case → 立刻移到正確 tab/組
-    c.cat = data.reCat || c.baseCat;
-    c.sub = data.reCat ? (data.reSub || null) : c.baseSub;
-  } else {
-    delete _registry[c.key];
-    c.outcome = null;
-    c.cat = c.baseCat; c.sub = c.baseSub;   // 還原
-  }
-  editingKey = null;
-  editCat = null; editSub = null;
-  renderList(_cases);
-  if (_uid) {
-    try {
-      await set(ref(fbDB, `users/${_uid}/worknum/registry/cases/${c.key}`), c.outcome);
-    } catch (e) { console.error('儲存 outcome 失敗', e); alert('儲存失敗:' + (e.code || e.message)); }
-  }
-}
-
 // ===== util =====
 function escapeHtml(s) {
   return String(s == null ? '' : s)
