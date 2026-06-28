@@ -264,6 +264,13 @@ header h1 {
   border-top: 1px solid var(--border);
 }
 .subgrp-body .editor { padding-left: 38px; }
+.ed-reclass {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 11px;
+  padding-bottom: 11px;
+  border-bottom: 1px dashed var(--border);
+}
 .ed-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -436,9 +443,10 @@ const fbAuth = getAuth(fbApp);
 const fbDB = getDatabase(fbApp);
 let currentUser = null;
 let _appEntered = false;
-let _registry = {};   // outcome 資料(users/<uid>/worknum/registry)
+let _registry = {};   // outcome 資料(users/<uid>/worknum/registry/cases)
 let _uid = null;
 let editingKey = null;
+let editCat = null, editSub = null;   // 編輯中暫存的分類覆寫
 const REGION_ENUM = ['spine-cervical','spine-thoracic','spine-lumbar','sacral/SIJ','shoulder','elbow','wrist-hand','hip','knee','ankle-foot','other'];
 
 // Firebase key 安全化(去 . # $ [ ] / 及分隔符 ~)
@@ -611,7 +619,11 @@ function collectCases(days) {
         procName: p.presetName,
       };
       rec.key = caseKey(rec, idx);        // 穩定 key(無 time 時用 idx tiebreak)
-      rec.outcome = _registry[rec.key] || null;
+      const ov = _registry[rec.key] || null;
+      rec.baseCat = cls.cat; rec.baseSub = cls.sub;        // preset 原始分類
+      rec.cat = (ov && ov.reCat) ? ov.reCat : cls.cat;     // 臨床覆寫優先
+      rec.sub = (ov && ov.reCat) ? (ov.reSub || null) : cls.sub;
+      rec.outcome = ov;
       out.push(rec);
     });
   }
@@ -730,14 +742,23 @@ function buildRow(c) {
      <span class="date">${escapeHtml(c.date)}</span>
      <span class="proc">${escapeHtml(c.procName || '')}${noteHtml}${missBadge}</span>
      ${outcomeSummary(c)}`;
-  row.onclick = () => { editingKey = (editingKey === c.key ? null : c.key); renderList(_cases); };
+  row.onclick = () => {
+    if (editingKey === c.key) { editingKey = null; }
+    else { editingKey = c.key; editCat = null; editSub = null; }   // 開新編輯器:重置分類暫存
+    renderList(_cases);
+  };
   return row;
+}
+
+// 記錄是否含「真 outcome」(排除只有 reCat/reSub/updatedAt 的純改分類記錄)
+function hasRealOutcome(o) {
+  return !!o && Object.keys(o).some(k => !['reCat', 'reSub', 'updatedAt'].includes(k));
 }
 
 // outcome 摘要 chip(依術式)
 function outcomeSummary(c) {
   const o = c.outcome;
-  if (!o) return `<span class="oc oc-empty">＋ outcome</span>`;
+  if (!hasRealOutcome(o)) return `<span class="oc oc-empty">＋ outcome</span>`;
   let label = '', cls = 'oc-info';
   if (c.cat === 'biopsy') {
     if (o.status === 'pending') { label = '待回'; cls = 'oc-pending'; }
@@ -757,14 +778,23 @@ function outcomeSummary(c) {
 }
 
 // ===== inline outcome 編輯器(依術式切欄位) =====
+const CAT_LABELS = { biopsy: 'Biopsy', ptgbd: 'PTGBD/PTCD', pain: 'Pain' };
+
 function buildEditor(c) {
   const o = c.outcome || {};
+  const eCat = editCat || c.cat;                       // 有效分類(編輯中暫存覆寫優先)
+  const eSub = editCat ? editSub : c.sub;
   const ed = document.createElement('div');
   ed.className = 'editor';
   ed.onclick = (e) => e.stopPropagation();   // 不冒泡觸發 row 收合
 
+  // 改分類控制(臨床覆寫 preset)
+  const reCtl =
+    selRaw('reclass-cat', '分類', ['biopsy', 'ptgbd', 'pain'], eCat, CAT_LABELS) +
+    (eCat === 'pain' ? selRaw('reclass-sub', '術式', PAIN_SUB_ORDER, eSub || PAIN_SUB_ORDER[0]) : '');
+
   let fields = '';
-  if (c.cat === 'biopsy') {
+  if (eCat === 'biopsy') {
     fields =
       selF('category', '類別', ['', 'Tumor', 'Infection', 'Both'], o.category) +
       selF('status', '狀態', ['final', 'pending'], o.status || 'final') +
@@ -772,7 +802,7 @@ function buildEditor(c) {
       txtF('patho', '病理', o.patho) +
       txtF('culture', '培養', o.culture) +
       selF('cultureResult', '培養結果', ['', '+', '-', 'contam', 'na'], o.cultureResult);
-  } else if (c.cat === 'ptgbd') {
+  } else if (eCat === 'ptgbd') {
     fields =
       txtF('complication', '併發症', o.complication) +
       txtF('outcome', '轉歸', o.outcome) +
@@ -787,12 +817,22 @@ function buildEditor(c) {
       txtF('dose', '劑量', o.dose);
   }
   ed.innerHTML =
-    `<div class="ed-grid">${fields}${txtF('note', '備註', o.note)}</div>
+    `<div class="ed-reclass">${reCtl}</div>
+     <div class="ed-grid">${fields}${txtF('note', '備註', o.note)}</div>
      <div class="ed-actions">
        <button type="button" class="ed-save">儲存</button>
        <button type="button" class="ed-cancel">取消</button>
        ${c.outcome ? '<button type="button" class="ed-clear">清除</button>' : ''}
      </div>`;
+
+  // 分類切換 → 暫存 + 就地重建編輯器(欄位隨之切換)
+  ed.querySelector('.reclass-cat').onchange = (e) => {
+    editCat = e.target.value;
+    editSub = editCat === 'pain' ? PAIN_SUB_ORDER[0] : null;
+    ed.replaceWith(buildEditor(c));
+  };
+  const subSel = ed.querySelector('.reclass-sub');
+  if (subSel) subSel.onchange = (e) => { editSub = e.target.value; };
 
   ed.querySelector('.ed-save').onclick = () => {
     const data = {};
@@ -801,6 +841,13 @@ function buildEditor(c) {
       const v = el.type === 'checkbox' ? el.checked : el.value.trim();
       if (v !== '' && v !== false) data[f] = v;
     });
+    // 分類覆寫:有效分類 ≠ preset 原始分類才記
+    const fCat = editCat || c.cat;
+    const fSub = editCat ? editSub : c.sub;
+    if (fCat !== c.baseCat || (fCat === 'pain' && fSub !== c.baseSub)) {
+      data.reCat = fCat;
+      if (fCat === 'pain') data.reSub = fSub;
+    }
     if (!Object.keys(data).length && c.outcome && !confirm('沒填任何內容,要清除原本的 outcome 嗎?')) return;
     saveOutcome(c, data);
   };
@@ -808,6 +855,12 @@ function buildEditor(c) {
   const clr = ed.querySelector('.ed-clear');
   if (clr) clr.onclick = () => { if (confirm('清除此筆 outcome?')) saveOutcome(c, null); };
   return ed;
+}
+
+// 不含 data-f 的 select(改分類用,不被當 outcome 欄位蒐集)
+function selRaw(cls, label, opts, val, labels) {
+  const os = opts.map(op => `<option value="${escapeHtml(op)}"${op === (val || '') ? ' selected' : ''}>${escapeHtml((labels && labels[op]) || op)}</option>`).join('');
+  return `<label class="ed-f"><span>${escapeHtml(label)}</span><select class="${cls}">${os}</select></label>`;
 }
 
 function txtF(f, label, val) {
@@ -827,11 +880,16 @@ async function saveOutcome(c, data) {
     data.updatedAt = new Date().toISOString();
     _registry[c.key] = data;
     c.outcome = data;
+    // 套用分類覆寫到 in-memory case → 立刻移到正確 tab/組
+    c.cat = data.reCat || c.baseCat;
+    c.sub = data.reCat ? (data.reSub || null) : c.baseSub;
   } else {
     delete _registry[c.key];
     c.outcome = null;
+    c.cat = c.baseCat; c.sub = c.baseSub;   // 還原
   }
   editingKey = null;
+  editCat = null; editSub = null;
   renderList(_cases);
   if (_uid) {
     try {
@@ -845,6 +903,22 @@ function escapeHtml(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// DEV(僅 localhost 生效,部署 Pages 不會定義)：讀本地 mock 跳過登入驗證 UI
+if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+  window.__devMock = async function () {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app-root').style.display = '';
+    renderLoading();
+    try {
+      const days = await (await fetch('_mock_days.json')).json();
+      try { _registry = await (await fetch('_mock_registry.json')).json(); } catch (e) { _registry = {}; }
+      const cases = collectCases(days);
+      renderList(cases);
+      return 'rendered ' + Object.keys(days).length + ' days, ' + cases.length + ' cases';
+    } catch (e) { renderError(e); return 'ERR ' + e.message; }
+  };
 }
 
 init();
