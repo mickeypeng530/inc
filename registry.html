@@ -779,11 +779,12 @@ function monthSpan(d1, d2) {
   return Math.max(1, (b[0] - a[0]) * 12 + (b[1] - a[1]) + 1);
 }
 function buildBiopsyStats(items) {
-  const fin = items.filter(c => hasRealOutcome(c.outcome) && c.outcome.status !== 'pending');
-  const pending = items.filter(c => c.outcome && c.outcome.status === 'pending').length;
-  const tumorCls = fin.filter(c => c.outcome.category === 'Tumor');
+  // 分母 = 該類別全部(含 pending),同 Excel countif(F,"Tumor");分子 = 確診陽性
+  const withO = items.filter(c => hasRealOutcome(c.outcome));
+  const pending = withO.filter(c => c.outcome.status === 'pending').length;
+  const tumorCls = withO.filter(c => c.outcome.category === 'Tumor');
   const tumorPos = tumorCls.filter(c => c.outcome.pathoResult === 'Tumor').length;
-  const infCls = fin.filter(c => c.outcome.category === 'Infection');
+  const infCls = withO.filter(c => c.outcome.category === 'Infection');
   const infPos = infCls.filter(c => c.outcome.cultureResult === '+' || c.outcome.pathoResult === 'Infection').length;
   const dates = items.map(c => c.date).filter(Boolean).sort();
   const perMonth = dates.length ? (items.length / monthSpan(dates[0], dates[dates.length - 1])).toFixed(2) : '—';
