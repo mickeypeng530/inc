@@ -123,6 +123,17 @@ header h1 {
   color: var(--ink-muted);
 }
 
+/* === Pain 二級分頁 === */
+.subtabs { display: flex; gap: 2px; margin-bottom: 14px; border-bottom: 1px solid var(--border-row); }
+.subtab {
+  padding: 5px 14px; background: transparent; border: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--ink-muted); font-family: var(--font-mono); font-size: 11px; cursor: pointer;
+}
+.subtab:hover { color: var(--ink-2); }
+.subtab.active { color: var(--ink-1); border-bottom-color: var(--accent); }
+.subtab .tcount { margin-left: 5px; font-size: 9px; color: var(--ink-muted); }
+
 /* === Category section === */
 .cat {
   background: var(--bg-panel);
@@ -666,6 +677,18 @@ function renderEmpty() {
 // ===== Render: 三分頁清單 =====
 let _cases = [];
 let activeTab = null;
+// Pain 二級分頁
+const PAIN_SUBTABS = [
+  ['TAME', c => c.sub === 'sTAME' || c.sub === 'cTAME'],
+  ['Spine', c => c.sub === 'Spine NB'],
+  ['Arthro', c => c.sub === 'Arthro'],
+  ['All', () => true],
+];
+let painSubTab = 'All';
+function filterPainSub(items) {
+  const f = (PAIN_SUBTABS.find(x => x[0] === painSubTab) || PAIN_SUBTABS[3])[1];
+  return items.filter(f);
+}
 
 function renderList(cases) {
   _cases = cases;
@@ -702,14 +725,20 @@ function renderList(cases) {
   if (!items.length) {
     content.innerHTML = `<div class="state"><div class="sub">此分類目前無個案</div></div>`;
   } else if (activeTab === 'pain') {
-    content.appendChild(buildPainStats(items));
-    const bySub = {};
-    items.forEach(c => { (bySub[c.sub || 'Other'] || (bySub[c.sub || 'Other'] = [])).push(c); });
-    const subKeys = Object.keys(bySub).sort((a, b) => {
-      const ia = PAIN_SUB_ORDER.indexOf(a), ib = PAIN_SUB_ORDER.indexOf(b);
-      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    // 二級分頁 TAME / Spine / Arthro / All
+    const subtabs = el('div', 'subtabs');
+    PAIN_SUBTABS.forEach(([name, filt]) => {
+      const n = items.filter(filt).length;
+      const b = el('button', 'subtab' + (name === painSubTab ? ' active' : ''));
+      b.type = 'button';
+      b.innerHTML = `${name}<span class="tcount">${n}</span>`;
+      b.onclick = () => { painSubTab = name; renderList(_cases); };
+      subtabs.appendChild(b);
     });
-    subKeys.forEach(sub => content.appendChild(buildSubGroup('pain', sub, bySub[sub])));
+    content.appendChild(subtabs);
+    const sub = filterPainSub(items);
+    content.appendChild(buildPainStats(sub));
+    content.appendChild(buildTable('pain', sub));
   } else {
     if (activeTab === 'biopsy') content.appendChild(buildBiopsyStats(items));
     else if (activeTab === 'ptgbd') content.appendChild(buildPtgbdStats(items));
@@ -909,7 +938,8 @@ function applyReclass(c, o) {
 function refreshStats() {
   const content = document.querySelector('.tab-content'); if (!content) return;
   const old = content.querySelector('.stats-box'); if (!old) return;
-  const items = _cases.filter(c => c.cat === activeTab);
+  let items = _cases.filter(c => c.cat === activeTab);
+  if (activeTab === 'pain') items = filterPainSub(items);
   const bar = activeTab === 'biopsy' ? buildBiopsyStats(items) : activeTab === 'ptgbd' ? buildPtgbdStats(items) : buildPainStats(items);
   old.replaceWith(bar);
 }
