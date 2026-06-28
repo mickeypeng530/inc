@@ -91,7 +91,7 @@ header h1 {
 .icon-btn:hover { border-color: var(--ink-cap); color: var(--ink-1); }
 
 /* === Layout === */
-.wrap { max-width: 1200px; margin: 0 auto; padding: 20px 24px 80px; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 20px 24px 110px; }
 
 /* === Tabs === */
 .tabs {
@@ -391,6 +391,114 @@ table.grid td.cat-Both { color: var(--accent); }
   .wrap { padding: 16px 12px 60px; }
   table.grid td { max-width: 110px; }
 }
+/* === 統計浮動卡（可拖動） === */
+#stats-float {
+  position: fixed;
+  top: 56px;
+  right: 24px;
+  z-index: 25;
+  background: var(--bg-head);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r);
+  padding: 10px 14px;
+  max-width: 340px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.28);
+  opacity: 0;
+  transform: translateY(-10px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+#stats-float.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+#stats-float .stats-head {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+  margin-bottom: 0;
+  cursor: pointer;
+  user-select: none;
+}
+#stats-float .stats-head b { color: var(--ink-1); font-weight: 600; }
+#stats-float .stats-caret {
+  display: inline-block; font-size: 8px; color: var(--ink-cap);
+  margin-right: 4px; transition: transform 0.12s;
+}
+#stats-float .stats-table {
+  border-collapse: collapse; font-family: var(--font-mono);
+  font-size: 10px; margin-top: 8px;
+}
+#stats-float .stats-table th,
+#stats-float .stats-table td {
+  padding: 2px 14px 2px 0; text-align: right; color: var(--ink-2);
+}
+#stats-float .stats-table th {
+  color: var(--ink-cap); font-weight: 600; font-size: 9px;
+}
+#stats-float .stats-table tr td:first-child,
+#stats-float .stats-table tr th:first-child {
+  text-align: left; color: var(--ink-muted); padding-right: 18px;
+}
+#stats-float .stats-table b { color: var(--ink-1); }
+#stats-float .stats-table tr.ref td {
+  color: var(--ink-muted); font-style: italic; border-top: 1px dashed var(--border);
+}
+#stats-float .float-grip {
+  display: flex; align-items: center; gap: 7px;
+  margin: -10px -14px 9px; padding: 5px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: grab; user-select: none; touch-action: none;
+  font-family: var(--font-mono); font-size: 9px;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-cap);
+}
+#stats-float.dragging { transition: none; box-shadow: 0 10px 32px rgba(0,0,0,0.4); }
+#stats-float.dragging .float-grip { cursor: grabbing; }
+#stats-float .float-grip .dots { color: var(--ink-muted); font-size: 11px; line-height: 1; }
+:root[data-theme="light"] #stats-float { box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+:root[data-theme="light"] #stats-float.dragging { box-shadow: 0 10px 32px rgba(0,0,0,0.16); }
+
+/* === 底部狀態列 === */
+#stats-bar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 25;
+  background: var(--bg-head);
+  border-top: 1px solid var(--border);
+  padding: 7px 24px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 -2px 10px rgba(0,0,0,0.18);
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+#stats-bar:empty { display: none; }
+#stats-bar .bar-label {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+#stats-bar .bar-sep {
+  color: var(--border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+#stats-bar .bar-summary { color: var(--ink-muted); }
+#stats-bar .bar-summary b { color: var(--ink-1); font-weight: 600; }
+#stats-bar .bar-rates { color: var(--ink-muted); font-size: 10px; }
+#stats-bar .bar-rates b { color: var(--ink-1); font-weight: 600; }
+:root[data-theme="light"] #stats-bar { box-shadow: 0 -2px 10px rgba(0,0,0,0.05); }
 </style>
 </head>
 <body>
@@ -1078,6 +1186,135 @@ if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
 }
 
 init();
+
+// === 統計浮動卡（可拖動） ===
+(function() {
+  var floatEl = document.createElement('div');
+  floatEl.id = 'stats-float';
+  var grip = document.createElement('div');
+  grip.className = 'float-grip';
+  grip.innerHTML = '<span class="dots">☰</span><span>結果分析 · 拖曳移動</span>';
+  var fbody = document.createElement('div');
+  floatEl.appendChild(grip);
+  floatEl.appendChild(fbody);
+  document.getElementById('app-root').appendChild(floatEl);
+  var floatExpanded = true;
+
+  var pos = null;
+  try { var saved = localStorage.getItem('registry_floatpos'); if (saved) pos = JSON.parse(saved); } catch(e){}
+  function applyPos() {
+    if (pos) { floatEl.style.left = pos.left + 'px'; floatEl.style.top = pos.top + 'px'; floatEl.style.right = 'auto'; }
+  }
+
+  function syncFloat() {
+    var sb = document.querySelector('.tab-content .stats-box');
+    if (!sb) { floatEl.classList.remove('visible'); return; }
+    var rect = sb.getBoundingClientRect();
+    if (rect.bottom < 47) {
+      fbody.innerHTML = sb.innerHTML;
+      var head = fbody.querySelector('.stats-head');
+      var tbl = fbody.querySelector('.stats-table');
+      var caret = fbody.querySelector('.stats-caret');
+      if (!floatExpanded && tbl) { tbl.style.display = 'none'; if(caret) caret.style.transform = 'rotate(-90deg)'; }
+      if (head) {
+        head.onclick = function(e) {
+          e.stopPropagation();
+          floatExpanded = !floatExpanded;
+          if (tbl) tbl.style.display = floatExpanded ? '' : 'none';
+          if (caret) caret.style.transform = floatExpanded ? '' : 'rotate(-90deg)';
+        };
+      }
+      applyPos();
+      floatEl.classList.add('visible');
+    } else {
+      floatEl.classList.remove('visible');
+    }
+  }
+
+  var dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+  grip.addEventListener('pointerdown', function(e) {
+    dragging = true;
+    floatEl.classList.add('dragging');
+    var r = floatEl.getBoundingClientRect();
+    ox = r.left; oy = r.top; sx = e.clientX; sy = e.clientY;
+    grip.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  grip.addEventListener('pointermove', function(e) {
+    if (!dragging) return;
+    var nx = ox + (e.clientX - sx);
+    var ny = oy + (e.clientY - sy);
+    nx = Math.max(4, Math.min(nx, window.innerWidth - floatEl.offsetWidth - 4));
+    ny = Math.max(50, Math.min(ny, window.innerHeight - 44));
+    pos = { left: nx, top: ny };
+    applyPos();
+  });
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    floatEl.classList.remove('dragging');
+    try { localStorage.setItem('registry_floatpos', JSON.stringify(pos)); } catch(err){}
+  }
+  grip.addEventListener('pointerup', endDrag);
+  grip.addEventListener('pointercancel', endDrag);
+
+  window.addEventListener('scroll', syncFloat, { passive: true });
+  var _lr = document.getElementById('list-root');
+  if (_lr) new MutationObserver(syncFloat).observe(_lr, { childList: true, subtree: true });
+})();
+
+// === 底部狀態列 ===
+(function() {
+  var barEl = document.createElement('div');
+  barEl.id = 'stats-bar';
+  document.getElementById('app-root').appendChild(barEl);
+
+  function syncBar() {
+    var sb = document.querySelector('.tab-content .stats-box');
+    if (!sb) { barEl.innerHTML = ''; return; }
+    var tabBtn = document.querySelector('.tab.active');
+    var tabName = '';
+    if (tabBtn) {
+      for (var i = 0; i < tabBtn.childNodes.length; i++) {
+        if (tabBtn.childNodes[i].nodeType === 3) { tabName = tabBtn.childNodes[i].textContent.trim(); break; }
+      }
+    }
+    var head = sb.querySelector('.stats-head');
+    var headHtml = '';
+    if (head) {
+      headHtml = head.innerHTML.replace(/<span class="stats-caret">[\s\S]*?<\/span>\s*/, '');
+    }
+    var ratesHtml = '';
+    var tbl = sb.querySelector('.stats-table');
+    if (tbl) {
+      var parts = [];
+      var rows = tbl.querySelectorAll('tr');
+      for (var r = 0; r < rows.length; r++) {
+        if (rows[r].classList.contains('ref')) continue;
+        if (rows[r].querySelector('th')) continue;
+        var tds = rows[r].querySelectorAll('td');
+        if (tds.length < 2) continue;
+        var lbl = tds[0].textContent.trim();
+        for (var j = 1; j < tds.length; j++) {
+          var bEl = tds[j].querySelector('b');
+          if (bEl) { parts.push(lbl + ' <b>' + bEl.textContent.trim() + '</b>'); break; }
+        }
+      }
+      if (parts.length) ratesHtml = parts.join(' · ');
+    }
+    var html = '<span class="bar-label">' + tabName + '</span>';
+    html += '<span class="bar-sep">│</span>';
+    html += '<span class="bar-summary">' + headHtml + '</span>';
+    if (ratesHtml) {
+      html += '<span class="bar-sep">│</span>';
+      html += '<span class="bar-rates">' + ratesHtml + '</span>';
+    }
+    barEl.innerHTML = html;
+  }
+  var _lr = document.getElementById('list-root');
+  if (_lr) new MutationObserver(syncBar).observe(_lr, { childList: true, subtree: true });
+  syncBar();
+})();
 </script>
 </body>
 </html>
