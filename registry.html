@@ -199,7 +199,7 @@ header h1 {
 .subgrp.collapsed .subgrp-caret { transform: rotate(-90deg); }
 
 /* === Table (Excel-like) === */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow: auto; max-height: calc(100vh - 200px); }
 /* 自適應寬度:欄位平分容器、內容過長截斷;只有視窗窄於 min-width 才橫向捲動 */
 table.grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
 table.grid thead th {
@@ -213,6 +213,10 @@ table.grid thead th {
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+  position: sticky;       /* 表頭冷凍:貼在捲動視窗(.table-wrap)頂端 */
+  top: 0;
+  z-index: 5;
+  background: var(--bg-head);
 }
 table.grid td {
   padding: 5px 8px;
