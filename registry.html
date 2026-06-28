@@ -198,40 +198,38 @@ header h1 {
 .subgrp.collapsed .subgrp-body { display: none; }
 .subgrp.collapsed .subgrp-caret { transform: rotate(-90deg); }
 
-/* === Rows === */
-.row {
-  display: grid;
-  grid-template-columns: 104px 92px 1fr auto;
-  gap: 12px;
-  align-items: center;
-  padding: 6px 14px 6px 30px;
-  border-top: 1px solid var(--border-row);
-  font-size: 12px;
-  cursor: pointer;
-}
-.row:hover { background: var(--border-row); }
-.row.editing { background: var(--bg-head); }
-.subgrp-body .row { padding-left: 38px; }
-.row:first-child { border-top: none; }
-.row .mrn { font-family: var(--font-mono); color: var(--ink-1); }
-.row .date { font-family: var(--font-mono); color: var(--ink-muted); }
-.row .proc { color: var(--ink-2); }
-.row .note { color: var(--ink-muted); margin-left: 8px; font-size: 11px; }
-.row.missing-mrn { opacity: 0.55; }
-.row.missing-mrn .mrn { color: var(--danger); font-style: italic; }
-.badge-missing {
-  display: inline-block;
+/* === Table (Excel-like) === */
+.table-wrap { overflow-x: auto; }
+table.grid { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.grid thead th {
+  text-align: left;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--danger);
-  border: 1px solid var(--danger);
-  border-radius: var(--r);
-  padding: 0 5px;
-  margin-left: 6px;
-  opacity: 0.85;
+  letter-spacing: 0.04em;
+  color: var(--ink-cap);
+  font-weight: 600;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
+table.grid td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-row);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+  font-family: var(--font-mono);
+  color: var(--ink-2);
+}
+table.grid td:first-child { color: var(--ink-1); }
+table.grid tbody tr.row { cursor: pointer; }
+table.grid tbody tr.row:hover td { background: var(--border-row); }
+table.grid tbody tr.editing td { background: var(--bg-head); }
+table.grid tr.missing-mrn td:first-child { color: var(--danger); font-style: italic; }
+table.grid td.td-chip { overflow: visible; }
+.editor-row > td { padding: 0; max-width: none; white-space: normal; }
 
 /* === Outcome chip === */
 .oc {
@@ -397,7 +395,7 @@ header h1 {
 @media (max-width: 600px) {
   header { padding: 10px 14px; }
   .wrap { padding: 16px 12px 60px; }
-  .row { grid-template-columns: 78px 70px 1fr auto; gap: 8px; padding-left: 18px; }
+  table.grid td { max-width: 110px; }
   .ed-grid { grid-template-columns: 1fr 1fr; }
   .subgrp-body .row { padding-left: 24px; }
 }
@@ -736,7 +734,7 @@ function renderList(cases) {
   } else {
     if (activeTab === 'biopsy') content.appendChild(buildBiopsyStats(items));
     else if (activeTab === 'ptgbd') content.appendChild(buildPtgbdStats(items));
-    items.forEach(c => content.appendChild(buildCaseItem(c)));
+    content.appendChild(buildTable(activeTab, items));
   }
   root.appendChild(content);
 }
@@ -760,37 +758,72 @@ function buildSubGroup(cat, sub, items) {
 
   const body = document.createElement('div');
   body.className = 'subgrp-body';
-  items.forEach(c => body.appendChild(buildCaseItem(c)));
+  body.appendChild(buildTable('pain', items));
   grp.appendChild(body);
   return grp;
 }
 
-function buildCaseItem(c) {
-  const wrap = document.createElement('div');
-  wrap.className = 'case-item';
-  wrap.appendChild(buildRow(c));
-  if (editingKey === c.key) wrap.appendChild(buildEditor(c));
-  return wrap;
-}
+// 表格欄位定義(對齊 Excel)
+const COLS = {
+  biopsy: [
+    { h: '病歷號', f: c => c.mrn || '—' }, { h: '日期', f: c => c.date },
+    { h: '年齡', f: c => c.outcome && c.outcome.age }, { h: '性別', f: c => c.outcome && c.outcome.sex },
+    { h: '位置', f: c => c.outcome && c.outcome.site }, { h: '類別', f: c => c.outcome && c.outcome.category },
+    { h: '病理', f: c => c.outcome && (c.outcome.pathoResult || c.outcome.patho) },
+    { h: '培養', f: c => c.outcome && (c.outcome.cultureResult || c.outcome.culture) },
+    { h: 'Imp', f: c => c.outcome && c.outcome.imp }, { h: '結果', chip: true },
+  ],
+  ptgbd: [
+    { h: '病歷號', f: c => c.mrn || '—' }, { h: '日期', f: c => c.date }, { h: '術式', f: c => c.sub },
+    { h: '年齡', f: c => c.outcome && c.outcome.age }, { h: '性別', f: c => c.outcome && c.outcome.sex },
+    { h: '程度', f: c => c.outcome && c.outcome.compSeverity }, { h: '併發症', f: c => c.outcome && c.outcome.complication },
+    { h: '轉歸', f: c => c.outcome && c.outcome.outcome }, { h: 'OP後', f: c => c.outcome && c.outcome.opAfterDays },
+    { h: '結果', chip: true },
+  ],
+  pain: [
+    { h: '病歷號', f: c => c.mrn || '—' }, { h: '日期', f: c => c.date },
+    { h: '部位', f: c => c.outcome && c.outcome.region }, { h: '左右', f: c => c.outcome && c.outcome.laterality },
+    { h: '療效', f: c => c.outcome && c.outcome.effectClass }, { h: '改善%', f: c => c.outcome && c.outcome.effectPct },
+    { h: '劑量', f: c => c.outcome && c.outcome.dose }, { h: 'Note', f: c => c.note }, { h: '結果', chip: true },
+  ],
+};
 
-function buildRow(c) {
-  const row = document.createElement('div');
-  const hasMrn = !!c.mrn;
-  row.className = 'row' + (hasMrn ? '' : ' missing-mrn') + (editingKey === c.key ? ' editing' : '');
-  const mrnHtml = `<span class="mrn">${hasMrn ? escapeHtml(c.mrn) : '—'}</span>`;
-  const missBadge = hasMrn ? '' : `<span class="badge-missing">需補號</span>`;
-  const noteHtml = c.note ? `<span class="note">${escapeHtml(c.note)}</span>` : '';
-  row.innerHTML =
-    `${mrnHtml}
-     <span class="date">${escapeHtml(c.date)}</span>
-     <span class="proc">${escapeHtml(c.procName || '')}${noteHtml}${missBadge}</span>
-     ${outcomeSummary(c)}`;
-  row.onclick = () => {
-    if (editingKey === c.key) { editingKey = null; }
-    else { editingKey = c.key; editCat = null; editSub = null; }   // 開新編輯器:重置分類暫存
-    renderList(_cases);
-  };
-  return row;
+function buildTable(cat, items) {
+  const cols = COLS[cat];
+  const wrap = document.createElement('div');
+  wrap.className = 'table-wrap';
+  const tbl = document.createElement('table');
+  tbl.className = 'grid';
+  tbl.innerHTML = '<thead><tr>' + cols.map(c => `<th>${escapeHtml(c.h)}</th>`).join('') + '</tr></thead>';
+  const tb = document.createElement('tbody');
+  items.forEach(c => {
+    const tr = document.createElement('tr');
+    tr.className = 'row' + (c.mrn ? '' : ' missing-mrn') + (editingKey === c.key ? ' editing' : '');
+    tr.innerHTML = cols.map(col => {
+      if (col.chip) return `<td class="td-chip">${outcomeSummary(c)}</td>`;
+      let v = col.f(c);
+      v = (v == null || v === '') ? '' : String(v);
+      return `<td title="${escapeHtml(v)}">${escapeHtml(v)}</td>`;
+    }).join('');
+    tr.onclick = () => {
+      if (editingKey === c.key) { editingKey = null; }
+      else { editingKey = c.key; editCat = null; editSub = null; }
+      renderList(_cases);
+    };
+    tb.appendChild(tr);
+    if (editingKey === c.key) {
+      const er = document.createElement('tr');
+      er.className = 'editor-row';
+      const td = document.createElement('td');
+      td.colSpan = cols.length;
+      td.appendChild(buildEditor(c));
+      er.appendChild(td);
+      tb.appendChild(er);
+    }
+  });
+  tbl.appendChild(tb);
+  wrap.appendChild(tbl);
+  return wrap;
 }
 
 // 記錄是否含「真 outcome」(排除只有 reCat/reSub/updatedAt 的純改分類記錄)
