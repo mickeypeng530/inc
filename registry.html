@@ -848,7 +848,7 @@ function renderList(cases) {
     content.appendChild(subtabs);
     const sub = filterPainSub(items);
     content.appendChild(buildPainStats(sub));
-    content.appendChild(buildTable('pain', sub));
+    content.appendChild(buildTable(painSubTab === 'Arthro' ? 'painArthro' : 'pain', sub));
   } else {
     if (activeTab === 'biopsy') content.appendChild(buildBiopsyStats(items));
     else if (activeTab === 'ptgbd') content.appendChild(buildPtgbdStats(items));
@@ -911,6 +911,15 @@ const COLS = {
     { h: '療效', f: 'effectClass', t: 'sel', o: ['', 'impv', 'mild', 'none', 'pending', 'complication'] },
     { h: '改善%', f: 'effectPct', t: 'text' }, { h: '劑量', f: 'dose', t: 'text' },
     { h: 'Note', f: 'note', ro: 1 }, { reclass: 1 }, { chip: 1 },
+  ],
+  // Arthro:診斷性關節注射 — 部位/左右/劑量/體重,不要療效
+  painArthro: [
+    { h: '病歷號', f: 'mrn', ro: 1, w: 80 }, { h: '日期', f: 'date', ro: 1, w: 94 },
+    { h: '部位', f: 'region', t: 'sel', o: [''].concat(REGION_ENUM) },
+    { h: '左右', f: 'laterality', t: 'sel', o: ['', 'R', 'L', 'B'] },
+    { h: '劑量', f: 'dose', t: 'text' },
+    { h: '體重', f: 'weight', t: 'text' },
+    { h: 'Note', f: 'note', ro: 1 }, { reclass: 1 },
   ],
 };
 const RECLASS_CATS = [['biopsy', 'Biopsy'], ['ptgbd', 'PTGBD'], ['pain', 'Pain']];
@@ -1114,6 +1123,10 @@ function buildPainStats(items) {
     ? `<div class="stats-sub">部位分布</div><table class="stats-table">` +
       regKeys.map(r => `<tr><td>${REG_LABEL[r] || r}</td><td><b>${regCount[r]}</b></td></tr>`).join('') + `</table>`
     : '';
+  // Arthro:診斷性,不算療效率,只給件數 + 部位分布
+  if (painSubTab === 'Arthro') {
+    return statsBox(`共 <b>${items.length}</b> 件 · 部位如下`, regTable || '<div class="stats-sub">尚無部位資料</div>');
+  }
   return statsBox(
     `共 <b>${items.length}</b> 件 · 已評 <b>${denom}</b> · 待觀 ${pend} · 併發症 ${comp}`,
     `<table class="stats-table">
