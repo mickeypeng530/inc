@@ -528,6 +528,8 @@ table.grid td.cat-Both { color: var(--accent); }
     <div class="header-spacer"></div>
     <button class="icon-btn" id="import-btn" title="匯入歷史 outcome JSON">📥 匯入</button>
     <input type="file" id="import-file" accept=".json,application/json" style="display:none">
+    <button class="icon-btn" id="font-dec" title="字體縮小">A−</button>
+    <button class="icon-btn" id="font-inc" title="字體放大">A+</button>
     <button class="icon-btn" id="theme-toggle" title="切換主題">🌓</button>
     <button class="icon-btn" id="signout-btn">登出</button>
   </header>
@@ -1210,6 +1212,20 @@ if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
 }
 
 init();
+
+// === 全頁字級調整（zoom,記憶設定）===
+(function() {
+  var scale = 1;
+  try { var s = parseFloat(localStorage.getItem('registry_fontscale')); if (s) scale = s; } catch(e){}
+  function apply() {
+    document.documentElement.style.zoom = scale;
+    try { localStorage.setItem('registry_fontscale', String(scale)); } catch(e){}
+  }
+  apply();
+  var dec = document.getElementById('font-dec'), inc = document.getElementById('font-inc');
+  if (dec) dec.onclick = function() { scale = Math.max(0.7, Math.round((scale - 0.1) * 10) / 10); apply(); };
+  if (inc) inc.onclick = function() { scale = Math.min(1.6, Math.round((scale + 0.1) * 10) / 10); apply(); };
+})();
 
 // === 統計浮動卡（可拖動） ===
 (function() {
