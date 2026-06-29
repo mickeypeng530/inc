@@ -303,7 +303,9 @@ table.grid td.cat-Both { color: var(--accent); }
 .stats-caret { display: inline-block; font-size: 9px; color: var(--ink-cap); margin-right: 6px; transition: transform 0.12s; }
 .stats-box.collapsed .stats-caret { transform: rotate(-90deg); }
 .stats-box.collapsed .stats-table { display: none; }
+.stats-box.collapsed .stats-sub { display: none; }
 .stats-box.collapsed .stats-head { margin-bottom: 0; }
+.stats-sub { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-cap); margin: 10px 0 4px; }
 .stats-table { border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
 .stats-table th, .stats-table td { padding: 2px 16px 2px 0; text-align: right; color: var(--ink-2); }
 .stats-table th { color: var(--ink-cap); font-weight: 600; font-size: 10px; }
@@ -1103,6 +1105,15 @@ function buildPainStats(items) {
   const pend = items.filter(c => c.outcome && c.outcome.effectClass === 'pending').length;
   const comp = items.filter(c => c.outcome && c.outcome.effectClass === 'complication').length;
   const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
+  // 部位分布(Spine 即 L/C;其他術式即各關節)
+  const REG_LABEL = { 'spine-lumbar':'腰 L', 'spine-cervical':'頸 C', 'spine-thoracic':'胸 T', 'sacral/SIJ':'薦/SIJ', 'shoulder':'肩', 'elbow':'肘', 'wrist-hand':'腕手', 'hip':'髖', 'knee':'膝', 'ankle-foot':'踝足', 'other':'其他' };
+  const regCount = {};
+  items.forEach(c => { const r = c.outcome && c.outcome.region; if (r) regCount[r] = (regCount[r] || 0) + 1; });
+  const regKeys = Object.keys(regCount).sort((a, b) => regCount[b] - regCount[a]);
+  const regTable = regKeys.length
+    ? `<div class="stats-sub">部位分布</div><table class="stats-table">` +
+      regKeys.map(r => `<tr><td>${REG_LABEL[r] || r}</td><td><b>${regCount[r]}</b></td></tr>`).join('') + `</table>`
+    : '';
   return statsBox(
     `共 <b>${items.length}</b> 件 · 已評 <b>${denom}</b> · 待觀 ${pend} · 併發症 ${comp}`,
     `<table class="stats-table">
@@ -1110,7 +1121,7 @@ function buildPainStats(items) {
        <tr><td>改善</td><td>${impv}</td><td><b>${pct(impv, denom)}</b></td></tr>
        <tr><td>輕改</td><td>${mild}</td><td><b>${pct(mild, denom)}</b></td></tr>
        <tr><td>無變</td><td>${none}</td><td><b>${pct(none, denom)}</b></td></tr>
-     </table>`
+     </table>` + regTable
   );
 }
 
