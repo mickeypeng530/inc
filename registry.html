@@ -230,14 +230,18 @@ table.grid thead th {
   background: var(--bg-head);
 }
 table.grid td {
-  padding: 5px 8px;
+  padding: 7px 9px;                                  /* B:列高加大 */
   border-bottom: 1px solid var(--border-row);
+  border-right: 1px solid var(--border-row);         /* C:淡直線分欄 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--font-mono);
   color: var(--ink-2);
+  line-height: 1.5;
 }
+table.grid th { border-right: 1px solid var(--border-row); }   /* C:表頭也加直線 */
+table.grid tr > *:last-child { border-right: none; }           /* 最後一欄不畫 */
 table.grid td:first-child { color: var(--ink-1); }
 table.grid tbody tr.row { cursor: pointer; }
 table.grid tbody tr.row:nth-child(even) td { background: var(--bg-head); }   /* 隔行變色 */
@@ -248,10 +252,12 @@ table.grid td.cell { cursor: pointer; }
 table.grid td.cell:hover { background: var(--border-row); outline: 1px solid var(--border); }
 table.grid td.cell:empty::after { content: '＋'; color: var(--ink-muted); opacity: 0.35; }
 table.grid td.td-reclass { color: var(--ink-muted); }
-table.grid td.catcell { font-weight: 600; }
-table.grid td.cat-Tumor { color: var(--danger); }
-table.grid td.cat-Infection { color: var(--ok); }
-table.grid td.cat-Both { color: var(--accent); }
+/* 結果鋪格底色(半透明;!important 蓋過 zebra/hover,讓結果色恆顯)*/
+table.grid td.t-red    { background: rgba(239,68,68,0.18) !important; }
+table.grid td.t-green  { background: rgba(74,222,128,0.18) !important; }
+table.grid td.t-amber  { background: rgba(233,162,59,0.20) !important; }
+table.grid td.t-orange { background: rgba(253,186,116,0.22) !important; }
+table.grid td.t-grey   { background: rgba(130,130,140,0.14) !important; }
 .cell-input {
   width: 100%;
   min-width: 56px;
@@ -975,12 +981,19 @@ function buildCell(c, col) {
   return td;
 }
 
-// 類別套色(Tumor 紅 / Infection 綠 / Both 琥珀)
+// 依結果鋪格底色(比照原 Excel 顏色)— 紅腫瘤/綠感染/琥珀both·輕/橘待·灰陰性
+const CELL_TINT = {
+  category:      { Tumor: 't-red', Infection: 't-green', Both: 't-amber' },
+  pathoResult:   { Tumor: 't-red', Infection: 't-green', Inflammation: 't-green', Negative: 't-grey' },
+  cultureResult: { '+': 't-green', 'contam': 't-amber' },
+  status:        { pending: 't-orange' },
+  effectClass:   { impv: 't-green', mild: 't-amber', none: 't-red', complication: 't-red', pending: 't-orange' },
+  compSeverity:  { sv: 't-red', mild: 't-amber' },
+};
 function tintCell(td, col, val) {
-  if (!col.tint) return;
-  td.classList.remove('cat-Tumor', 'cat-Infection', 'cat-Both');
-  td.classList.toggle('catcell', !!val);
-  if (val) td.classList.add('cat-' + val);
+  td.classList.remove('t-red', 't-green', 't-amber', 't-orange', 't-grey');
+  var m = CELL_TINT[col.f];
+  if (m && m[val]) td.classList.add(m[val]);
 }
 
 function startEdit(td, c, col) {
