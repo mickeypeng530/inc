@@ -752,9 +752,12 @@ function collectCases(days) {
     procs.forEach((p, idx) => {
       const cls = classifyProc(p && p.presetName);
       if (!cls) return;
+      // Bone preset + note 有 PRP → 實為 pain(PRP 注射,非切片;如 calcaneal intraosseous PRP)
+      let bc = cls.cat, bs = cls.sub;
+      if (bc === 'biopsy' && /PRP/i.test((p.note || '') + ' ' + (p.medRecord || ''))) { bc = 'pain'; bs = 'Extremity inj'; }
       const rec = {
-        cat: cls.cat,
-        sub: cls.sub,
+        cat: bc,
+        sub: bs,
         date,
         time: p.time || null,
         presetId: p.presetId || '',
@@ -766,9 +769,9 @@ function collectCases(days) {
       };
       rec.key = caseKey(rec, idx);        // 穩定 key(無 time 時用 idx tiebreak)
       const ov = _registry[rec.key] || null;
-      rec.baseCat = cls.cat; rec.baseSub = cls.sub;        // preset 原始分類
-      rec.cat = (ov && ov.reCat) ? ov.reCat : cls.cat;     // 臨床覆寫優先
-      rec.sub = (ov && ov.reCat) ? (ov.reSub || null) : cls.sub;
+      rec.baseCat = bc; rec.baseSub = bs;                  // 基礎分類(已套 PRP→pain)
+      rec.cat = (ov && ov.reCat) ? ov.reCat : bc;          // 臨床覆寫優先
+      rec.sub = (ov && ov.reCat) ? (ov.reSub || null) : bs;
       rec.outcome = ov;
       out.push(rec);
     });
