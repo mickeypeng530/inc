@@ -1793,6 +1793,7 @@ body:not(.mini-mode) #view-mini { display: none; }
     <button id="month-next" class="btn-secondary">→</button>
     <span class="header-spacer" style="flex:1"></span>
     <button id="month-import" class="btn-secondary" title="匯入:計數 / 會議 / procedure(指定日期)">📥 匯入</button>
+    <button id="month-paste-sheet" class="btn-secondary" title="貼上整月 Excel sheet(Ctrl+A 全選複製該月分頁)一鍵解析:計數/收入/IR/procedure/會議/加班">📄 貼整月</button>
     <button id="month-edit-toggle" class="btn-secondary" title="切換編輯模式:解鎖所有格子(計數/加班/收入/IR)">✏️ 編輯</button>
   </div>
   <div style="overflow-x:auto">
@@ -5143,6 +5144,560 @@ function showImportModal(initType, initDate) {
   setTimeout(() => ta.focus(), 50);
 }
 
+// === 整月 sheet 貼上解析(pure — 不碰 DOM/state,node 可獨立測)===
+// 支援 2512+ 現行 sheet 格式:row1 日期 header、A 欄類別(CT/MR/...)、
+// B='Total' 每日$列、B='IR' 每日IR列、detail 列(病歷號+術式)、加班刷卡、
+// A='Total' 月總列(E/F=績效/稅前)、會議列(主講/參與)、值班、A='n/m' 筆數。
+// 與 scripts/import_xlsx.py 同邏輯 — 兩邊改要同步。
+function msTsvToGrid(text) {
+  // Excel 剪貼簿 TSV:含 \t/\n/" 的 cell 會被 "..." 包住、內部 " 變 ""
+  const rows = []; let row = []; let cell = ''; let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else inQ = false; }
+      else cell += ch;
+    } else if (ch === '"' && cell === '') inQ = true;
+    else if (ch === '\t') { row.push(cell); cell = ''; }
+    else if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+    else if (ch !== '\r') cell += ch;
+  }
+  row.push(cell); rows.push(row);
+  return rows;
+}
+function msNum(v) {
+  if (v == null) return null;
+  const s = String(v).trim().replace(/,/g, '');
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+const MS_CAT_LABELS = ['CT', 'MR', 'BMD', 'Special', 'X ray', 'Xray', '會診', 'Sono', 'OPD'];
+// 術式 alias(長的先,與 import_xlsx.py PROC_ALIAS 同步;略去歷史限定日期 override)
+const MS_PROC_ALIAS = [
+  ['guide+so inj+3d', 'guide_inj_3d'], ['guide+soinj+3d', 'guide_inj_3d'],
+  ['guide+so inj', 'guide_inj'], ['guide+soinj', 'guide_inj'], ['guide+so', 'guide_inj'],
+  ['tae+spinal', 'tae_spinal'], ['tae spinal', 'tae_spinal'],
+  ['tae+spine', 'tae_spinal'], ['tae spine', 'tae_spinal'],
+  ['tae+aorta', 'tae_aorta'], ['tae aorta', 'tae_aorta'],
+  ['trigger point injection', 'nb'], ['sono biopsy', 'msk_biopsy'],
+  ['muscle', 'muscle'], ['retromass', 'retromass'],
+  ['ct nb', 'ct_nb'], ['ctnb', 'ct_nb'], ['ct_nb', 'ct_nb'],
+  ['bone biopsy', 'bone'], ['caudal block', 'caudal_block'],
+  ['cb+nb', 'cb_nb'], ['cb +nb', 'cb_nb'], ['cb nb', 'cb_nb'],
+  ['cbnb', 'cb_nb'], ['nbcb', 'cb_nb'], ['cb+myel', 'cb_nb'], ['cb +myel', 'cb_nb'],
+  ['cb', 'cb_nb'],
+  ['ce2ren', 'ce2_renal'], ['ce 2 ren', 'ce2_renal'],
+  ['celiac over 2', 'celiaco2'], ['celiac over two', 'celiaco2'],
+  ['celiac2', 'celiaco2'], ['ceo2', 'celiaco2'], ['celiac', 'celiaco2'],
+  ['extremity+echo', 'stame'], ['extremity', 'stame'],
+  ['subph dr', 'drain_sub'], ['subphdr', 'drain_sub'], ['subphenic', 'drain_sub'],
+  ['dr sub', 'drain_sub'], ['d sub', 'drain_sub'], ['dr', 'drain_sub'],
+  ['echo guide', 'echo_guide'],
+  ['drainage', 'drain_intra'], ['drain', 'drain_intra'],
+  ['ptcdr', 'ptcdr'], ['ptgbd', 'ptgbd'], ['cstame', 'cstame'], ['ctame', 'ctame'],
+  ['c(s)tame', 'cstame'], ['s(c)tame', 'cstame'], ['(s)tame', 'cstame'], ['(c)tame', 'cstame'],
+  ['stame', 'stame'], ['ptcd', 'ptcd'], ['pcnr', 'pcnr'], ['picc', 'picc'],
+  ['guide', 'guide'], ['biopsy', 'lung'], ['lung', 'lung'], ['bone', 'bone'],
+  ['arthro', 'arthro'], ['ptc', 'ptc'], ['pcn', 'pcn'],
+  ['tame', 'stame'], ['tae', 'tae'], ['caudal', 'caudal_block'],
+  ['prf3', 'rf3pt'], ['prf2', 'rf2pt'], ['prf', 'rf'],
+  ['pic', 'picc'], ['pi', 'picc'], ['inj', 'nb'],
+  ['nb', 'nb'], ['av', 'av'], ['gb', 'ptgbd'], ['ptr', 'ptcdr'],
+];
+const MS_COMBO_PRICE = { picc: 3134, pcn: 3315, ptgbd: 2988 };
+const MS_PRICE_DEFAULT = {
+  pcn: 3000, ap: 315, pcnr: 480, ptc: 1260, ptcd: 3840, ptcdr: 480,
+  ptgbd: 1728, guide: 1520, av: 2100, picc: 1034, tae: 8800,
+  ctame: 8800, cstame: 8800, stame: 1950, lung: 1520, bone: 1520,
+  arthro: 360, inj: 600, nb: 733, sono: 150, echo_guide: 600,
+  drain_intra: 4843, drain_sub: 4598, caudal_block: 540, cb_nb: 2047,
+  celiaco2: 5250, tae_spinal: 12300, guide_inj: 2120, guide_inj_3d: 2720,
+  tae_aorta: 10732, ct_nb: 3387, msk_biopsy: 600, ce2_renal: 5631,
+  rf: 2520, muscle: 1520, retromass: 1520, dr_pcn: 3315, dr_ptcd: 3840,
+  rf2pt: 3604, rf3pt: 3768,
+};
+const MS_DISPLAY_NAME = {
+  stame: 'sTAME', ctame: 'cTAME', cstame: 'c(s)TAME', ct_nb: 'CT NB',
+  tae_spinal: 'TAE+Spine', tae_aorta: 'TAE+aorta',
+  guide_inj: 'CT NB', guide_inj_3d: 'CT NB', cb_nb: 'CB',
+  caudal_block: 'Caudal block', celiaco2: 'Celiac over 2',
+  drain_intra: 'Drain intraabdominal', drain_sub: 'Drain subphernic',
+  dr_pcn: 'DR(PCN)', dr_ptcd: 'DR(PTCD)', rf2pt: 'pRF2', rf3pt: 'pRF3',
+  echo_guide: 'ECHO guide', msk_biopsy: 'MSK biopsy', ce2_renal: 'Celiac2+Renal',
+  muscle: 'Muscle', retromass: 'RetroMass',
+};
+const MS_ADDON_PRICE = { d3: 600, source: 100 };
+const MS_MEDREC_LINE = /^([A-Z]?\d{4,})\s+\S/;
+
+// 主解析:text=整張分頁 TSV;month='YYYY-MM';meetingCatalog=settings.meetingCatalog
+// 回傳 { days, monthlyMeta, report }
+function parseMonthSheetTSV(text, month, meetingCatalog) {
+  const g = msTsvToGrid(text);
+  const A = (r) => (g[r] && g[r][0] != null) ? String(g[r][0]).trim() : '';
+  const B = (r) => (g[r] && g[r][1] != null) ? String(g[r][1]).trim() : '';
+  const cell = (r, c) => (g[r] && g[r][c] != null) ? g[r][c] : '';
+  const report = { warnings: [], unmatched: [], cats: [], meetings: [] };
+
+  // --- 日期 header(前 5 列找 ≥5 個 1..31 遞增整數)---
+  let headerRow = -1; let dayCols = null;
+  for (let r = 0; r < Math.min(5, g.length); r++) {
+    const cols = {}; let last = 0; let okRun = true;
+    for (let c = 1; c < (g[r] || []).length; c++) {
+      const n = msNum(cell(r, c));
+      if (n != null && Number.isInteger(n) && n >= 1 && n <= 31) {
+        if (n < last) { okRun = false; break; }
+        cols[c] = n; last = n;
+      }
+    }
+    if (okRun && Object.keys(cols).length >= 5) { headerRow = r; dayCols = cols; break; }
+  }
+  if (!dayCols) return { days: null, monthlyMeta: null, report: { ...report, error: '找不到日期 header 列(1..31)— 請確認複製的是整張月份分頁' } };
+  const sheetName = A(headerRow);
+  if (/^\d{2,4}$/.test(sheetName) && sheetName.slice(-2) !== month.slice(-2))
+    report.warnings.push(`sheet 標頭「${sheetName}」與選擇月份 ${month} 的月份不同,請確認`);
+  if (String(cell(1, 0)).trim() && msNum(cell(1, 0)) != null && typeof cell(1, 1) === 'string' && /[A-Za-z]/.test(cell(1, 1)))
+    report.warnings.push('偵測到舊版格式(Total 在 A 欄)— 此功能只支援 2512+ 格式,結果可能不完整');
+
+  // --- count 區結束 = A='Total' 列(月總)---
+  let countEnd = g.length;
+  let perfTotal = null, pretaxSalary = null;
+  for (let r = headerRow + 1; r < g.length; r++) {
+    if (A(r) === 'Total') {
+      countEnd = r;
+      const d = msNum(cell(r, 3)), e = msNum(cell(r, 4)), f = msNum(cell(r, 5));
+      if (d != null) { perfTotal = d; if (e != null) pretaxSalary = e < 10000 ? e * 1000 : e; }
+      else if (e != null) { perfTotal = e; if (f != null) pretaxSalary = f < 10000 ? f * 1000 : f; }
+      if (perfTotal != null && perfTotal > 0 && perfTotal < 10000) perfTotal *= 1000;
+      break;
+    }
+  }
+  // 驗證用月總:A='Total' 列 C 欄(新格式)或 B 欄
+  const revSheet = countEnd < g.length ? (msNum(cell(countEnd, 2)) ?? msNum(cell(countEnd, 1))) : null;
+  let irSheet = null;
+  for (let r = countEnd; r < g.length; r++) if (A(r) === 'Total IR') { irSheet = msNum(cell(r, 2)); break; }
+  // PH(澎湖)收入
+  let phRevenue = null, totalWithPH = null;
+  for (let r = Math.max(1, countEnd - 4); r < g.length; r++) {
+    const a = A(r); const c = msNum(cell(r, 2));
+    if (a === 'PH' && c != null && r >= countEnd - 4 && r <= countEnd) phRevenue = c;
+    else if ((a === 'Total + PH' || a === 'Total+PH') && c != null) totalWithPH = c;
+  }
+
+  // --- 類別 anchor + sub 列 ---
+  const cats = [];
+  {
+    let r = headerRow + 1;
+    while (r < countEnd) {
+      const lbl = A(r);
+      if (MS_CAT_LABELS.includes(lbl)) {
+        const subs = []; let rr = r + 1; let emptySkipped = 0;
+        while (rr < countEnd) {
+          const nxt = A(rr);
+          if (MS_CAT_LABELS.includes(nxt)) break;
+          if (nxt && (nxt.includes('加班') || nxt.includes('Total') || nxt.includes('/'))) break;
+          const hasDayData = Object.keys(dayCols).some(c => msNum(cell(rr, c)) != null);
+          const hasSubLabel = nxt.startsWith('(');
+          const bNum = msNum(cell(rr, 1));
+          if (hasDayData || hasSubLabel || (!nxt && bNum != null)) { subs.push(rr); rr++; emptySkipped = 0; }
+          else { emptySkipped++; if (emptySkipped > 2) break; rr++; }
+        }
+        cats.push({ label: lbl, main: r, subs });
+        r = rr;
+      } else r++;
+    }
+  }
+
+  // --- day 物件工廠 ---
+  const days = {};
+  const dnumKey = (dn) => `${month}-${String(dn).padStart(2, '0')}`;
+  const ensure = (dn) => {
+    const k = dnumKey(dn);
+    if (!days[k]) days[k] = { counts: {}, procedures: [], meetings: [], overtimeHours: 0, schedule: {}, notes: '', updatedAt: '', _import: true };
+    return days[k];
+  };
+  const setCnt = (d, key, val) => {
+    if (!(val > 0)) return;
+    const parts = key.split('.');
+    let tgt = d.counts;
+    for (const p of parts.slice(0, -1)) { if (!tgt[p]) tgt[p] = {}; tgt = tgt[p]; }
+    const leaf = parts[parts.length - 1];
+    tgt[leaf] = (tgt[leaf] || 0) + Math.round(val);
+  };
+  const addSpecialOther = (d, cnt) => {
+    if (!(cnt > 0)) return;
+    if (!d.counts.special) d.counts.special = {};
+    if (!d.counts.special.others) d.counts.special.others = [];
+    const others = d.counts.special.others;
+    others.push({ id: `imp_${month}_${others.length}_${Math.round(cnt)}`, catalogId: 'legacy_other', amount: 231, count: Math.round(cnt) });
+  };
+  const readRow = (r) => {
+    const res = {};
+    for (const [c, dn] of Object.entries(dayCols)) {
+      const v = msNum(cell(r, Number(c)));
+      if (v != null && v !== 0) res[dn] = v;
+    }
+    return res;
+  };
+  // 兩 pass sub 指派(有 label 先、無 label 依序補)
+  const assignSubs = (subRows, defaultKeys, labelMap) => {
+    const labels = subRows.map(rr => A(rr));
+    const assigned = new Array(subRows.length).fill(null);
+    const used = new Set();
+    labels.forEach((lb, i) => {
+      if (!lb) return;
+      for (const [kw, mapped] of Object.entries(labelMap))
+        if (lb.includes(kw)) { assigned[i] = mapped; used.add(mapped); break; }
+    });
+    let di = 0;
+    for (let i = 0; i < subRows.length; i++) {
+      if (assigned[i]) continue;
+      while (di < defaultKeys.length && used.has(defaultKeys[di])) di++;
+      if (di < defaultKeys.length) { assigned[i] = defaultKeys[di]; used.add(defaultKeys[di]); di++; }
+    }
+    return subRows.map((rr, i) => [assigned[i], rr]).filter(x => x[0]);
+  };
+
+  // --- counts ---
+  for (const cat of cats) {
+    const main = readRow(cat.main);
+    const apply = (pairs) => { for (const [k, rr] of pairs) for (const [dn, v] of Object.entries(readRow(rr))) setCnt(ensure(Number(dn)), k, v); };
+    if (cat.label === 'CT') {
+      for (const [dn, v] of Object.entries(main)) setCnt(ensure(Number(dn)), 'ct.opd', v);
+      apply(assignSubs(cat.subs, ['ct.er_adm_self', 'ct.ldct_health', 'ct.ph'], { LDCT: 'ct.ldct_health', ER: 'ct.er_adm_self', PH: 'ct.ph' }));
+    } else if (cat.label === 'MR') {
+      for (const [dn, v] of Object.entries(main)) setCnt(ensure(Number(dn)), 'mr.opd', v);
+      apply(assignSubs(cat.subs, ['mr.er_adm_health', 'mr.ph'], { ER: 'mr.er_adm_health', PH: 'mr.ph' }));
+    } else if (cat.label === 'BMD') {
+      for (const [dn, v] of Object.entries(main)) setCnt(ensure(Number(dn)), 'bmd', v);
+    } else if (cat.label === 'Special') {
+      for (const [dn, v] of Object.entries(main)) addSpecialOther(ensure(Number(dn)), v);
+      const dflt = cat.subs.length === 1 ? ['special.hsg'] : ['special.swal', 'special.hsg'];
+      apply(assignSubs(cat.subs, dflt, { HSG: 'special.hsg', Swal: 'special.swal', Swallow: 'special.swal' }));
+    } else if (cat.label === 'X ray' || cat.label === 'Xray') {
+      for (const [dn, v] of Object.entries(main)) setCnt(ensure(Number(dn)), 'xray.opd', v);
+      apply(assignSubs(cat.subs, ['xray.portable', 'xray.er', 'xray.ph'], { ER: 'xray.er', PORT: 'xray.portable', PH: 'xray.ph' }));
+    } else if (cat.label === '會診') {
+      for (const [dn, v] of Object.entries(main)) setCnt(ensure(Number(dn)), 'consult', v);
+    } else if (cat.label === 'Sono') {
+      for (const [dn, v] of Object.entries(main)) setCnt(ensure(Number(dn)), 'sono', v);
+    } else if (cat.label === 'OPD') {
+      for (const [dn, v] of Object.entries(main)) setCnt(ensure(Number(dn)), 'opd', v);
+    }
+  }
+
+  // --- 加班刷卡(0 也記)---
+  let otRow = null;
+  for (let r = headerRow + 1; r < g.length; r++) if (A(r).includes('加班刷卡')) { otRow = r; break; }
+  if (otRow != null) for (const [c, dn] of Object.entries(dayCols)) {
+    const v = msNum(cell(otRow, Number(c)));
+    if (v != null) ensure(dn).overtimeHours = v;
+  }
+
+  // --- 每日 $(B='Total' 列)= importedRevenue 權威值;已存在但空 → 0 ---
+  let revenueRow = null, irRow = null;
+  for (let r = headerRow + 1; r < countEnd; r++) {
+    if (B(r) === 'Total' && revenueRow == null) revenueRow = r;
+    if (B(r) === 'IR' && irRow == null) irRow = r;
+  }
+  if (revenueRow != null) for (const [c, dn] of Object.entries(dayCols)) {
+    const v = msNum(cell(revenueRow, Number(c)));
+    if (v != null) ensure(dn).importedRevenue = v;
+    else if (days[dnumKey(dn)]) days[dnumKey(dn)].importedRevenue = 0;
+  }
+  else report.warnings.push('找不到每日 $ 列(B 欄=Total)— 收入權威值未匯入');
+  if (irRow != null) for (const [c, dn] of Object.entries(dayCols)) {
+    const v = msNum(cell(irRow, Number(c)));
+    if (v != null && v !== 0) ensure(dn).irRevenue = v;
+  }
+
+  // --- detail 列(病歷號+術式;含 3D/資源共享 addon)---
+  let procRow = null;
+  for (let r = headerRow + 1; r < countEnd; r++) {
+    const dayHasStr = Object.keys(dayCols).some(c => { const v = cell(r, Number(c)); return typeof v === 'string' && v.trim() && msNum(v) == null; });
+    if (!dayHasStr) continue;
+    const summaryLike = A(r).includes('/') || (B(r) && (B(r).includes(' ') || B(r).includes('/')));
+    if (summaryLike || msNum(cell(r, 0)) != null) { procRow = r; break; }
+  }
+  if (procRow == null) for (let r = headerRow + 1; r < countEnd; r++) {
+    if (Object.keys(dayCols).some(c => { const v = cell(r, Number(c)); return typeof v === 'string' && v.trim() && msNum(v) == null; })) { procRow = r; break; }
+  }
+  const richness = (r) => {
+    let rich = 0;
+    for (const c of Object.keys(dayCols)) {
+      const v = cell(r, Number(c));
+      if (typeof v !== 'string') continue;
+      if (v.split('\n').some(line => MS_MEDREC_LINE.test(line.trim()))) rich++;
+    }
+    return rich;
+  };
+  const candidates = [];
+  if (procRow != null) candidates.push(procRow);
+  if (revenueRow != null && otRow != null) for (let r = revenueRow + 1; r < otRow; r++) candidates.push(r);
+  else if (revenueRow != null) candidates.push(revenueRow + 1);
+  if (otRow != null) for (let r = otRow + 1; r < countEnd; r++) candidates.push(r);
+  let detailRow = null, bestRich = 0;
+  for (const r of [...new Set(candidates)]) {
+    const rich = richness(r);
+    // 同分取較後列(row19 通常比 row16 完整:多 3D/資源共享/漏筆)
+    if (rich > bestRich || (detailRow != null && rich > 0 && rich === bestRich)) { bestRich = rich; detailRow = r; }
+  }
+  const detectAddon = (line) => {
+    let t = line.trim();
+    if (!t) return null;
+    const m = t.match(/^[A-Z]?\d{4,}\s+(.+)$/);
+    if (m) t = m[1].trim();
+    let s = t.toLowerCase();
+    let cnt = 1;
+    const cm = s.match(/\*\s*(\d+)\s*$/);
+    if (cm) { cnt = Number(cm[1]); s = s.slice(0, cm.index).trim(); }
+    if (s === '3d') return ['d3', cnt];
+    if (['source', 'sourse', 'src', '資源共享', 'res_share'].includes(s)) return ['source', cnt];
+    return null;
+  };
+  let procTotal = 0;
+  if (detailRow != null) {
+    for (const [c, dn] of Object.entries(dayCols)) {
+      const v = cell(detailRow, Number(c));
+      if (typeof v !== 'string' || !v.trim()) continue;
+      const d = ensure(dn);
+      for (const raw of v.split('\n')) {
+        const line = raw.trim();
+        if (!line) continue;
+        const ad = detectAddon(line);
+        if (ad) {
+          if (!d.addons) d.addons = [];
+          d.addons.push({ type: ad[0], count: ad[1], amount: MS_ADDON_PRICE[ad[0]], _import: true });
+          continue;
+        }
+        let medrec = '', text = line;
+        let m = line.match(/^([A-Z]?\d{4,})\s*(.*)$/);
+        if (m) { medrec = m[1]; text = (m[2] || '').trim(); }
+        else {
+          const m2 = line.match(/\b([A-Z]?\d{4,})\b/);
+          if (m2) { medrec = m2[1]; text = (line.slice(0, m2.index) + line.slice(m2.index + m2[1].length)).trim(); }
+        }
+        const lower = text.toLowerCase();
+        let aid = null, matchedKw = null;
+        for (const [kw, mapped] of MS_PROC_ALIAS) {
+          if (kw.length <= 2 ? new RegExp('\\b' + kw + '\\b').test(lower) : lower.includes(kw)) { aid = mapped; matchedKw = kw; break; }
+        }
+        if (!aid) { if (text) report.unmatched.push(`${dnumKey(dn)}: ${line}`); continue; }
+        if (aid === 'arthro' && /\bnb\b/.test(lower)) aid = 'nb';  // NB+arthro 記 1 筆 NB
+        if (aid === 'drain_sub' && dnumKey(dn) >= '2025-12-01') {
+          aid = lower.replace(/\s/g, '').includes('(pcn)') ? 'dr_pcn' : 'dr_ptcd';  // DR 借碼計價
+        }
+        let cnt = 1;
+        const mStar = text.match(/\*\s*(\d+)\b/);
+        if (mStar) cnt = Number(mStar[1]);
+        else if (matchedKw && /^[a-z ]+$/.test(matchedKw)) {
+          const sm = lower.match(new RegExp(matchedKw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\d+)\\b'));
+          if (sm) { const n = Number(sm[1]); if (n >= 2 && n <= 20) cnt = n; }
+        }
+        const price = MS_COMBO_PRICE[aid] || MS_PRICE_DEFAULT[aid] || 0;
+        const disp = MS_DISPLAY_NAME[aid] || (aid.length <= 5 ? aid.toUpperCase() : aid);
+        for (let i = 0; i < cnt; i++) {
+          d.procedures.push({ presetId: aid, presetName: disp, medRecord: medrec, items: [{ atomicId: aid, name: disp, amount: price }], time: '', note: text, _import: true });
+          procTotal++;
+        }
+      }
+    }
+  }
+
+  // --- 會議(A='Total' 月總列之後,主講/參與)---
+  let mtgTotal = 0;
+  for (let r = countEnd; r < g.length; r++) {
+    let role = null, roleCol = null;
+    for (let c = 0; c < (g[r] || []).length; c++) {
+      const v = cell(r, c);
+      const mm = typeof v === 'string' ? v.trim().match(/^(主講|參與)/) : null;
+      if (mm) { role = mm[1]; roleCol = c; break; }
+    }
+    if (!role) continue;
+    let datesRaw = null, name = null, amount = null;
+    for (let c = 0; c < (g[r] || []).length; c++) {
+      if (c === roleCol || c <= 2) continue;
+      if (c < roleCol - 1 || c > roleCol + 3) continue;
+      const v = cell(r, c);
+      const vs = typeof v === 'string' ? v.trim() : '';
+      // 多日期字串(「1,8,15,23,29」「6 13 20 27」)要先攔 — msNum 會把逗號當千分位吃掉
+      if (/^\d[\d,\s]*$/.test(vs) && /\d[,\s]+\d/.test(vs)) { datesRaw = vs; continue; }
+      const n = msNum(v);
+      if (n != null) {
+        if (n >= 1 && n <= 31 && Number.isInteger(n) && datesRaw == null) datesRaw = String(n);
+        else if ((n === 0 || (n > 31 && n <= 50000)) && c > roleCol) amount = n;
+      } else if (typeof v === 'string' && v.trim()) {
+        const vs = v.trim();
+        if (/^[\d,\s]+$/.test(vs)) datesRaw = vs;
+        else if (c > roleCol && vs.length > (name || '').length) name = vs;
+      }
+    }
+    if (datesRaw == null || name == null) continue;
+    const dnums = datesRaw.split(/[,\s]+/).map(x => parseInt(x, 10)).filter(x => x >= 1 && x <= 31);
+    const matched = (meetingCatalog || []).find(mc => mc.name === name.trim());
+    let catalogId;
+    if (matched && matched.role !== role) {
+      // sheet role 與 catalog 不同(如 2606 案例討論會這次是主講)→ 以 sheet 為準
+      catalogId = matched.id;
+      amount = (amount && dnums.length) ? amount / dnums.length : (role === '主講' ? 3000 : 500);
+    } else if (matched) {
+      // catalog 標準單價權威 — sheet 金額欄填法不一(有時總額/有時舊單價),不可靠
+      catalogId = matched.id; role = matched.role;
+      amount = matched.amount ? matched.amount : (amount == null ? 0 : amount);
+    } else {
+      catalogId = 'imp_' + name.replace(/[^\p{L}\p{N}_]+/gu, '').slice(0, 12);
+      if (amount == null) amount = role === '主講' ? 3000 : 500;
+      else if (dnums.length > 1) amount = amount / dnums.length;
+    }
+    for (const dn of dnums) {
+      ensure(dn).meetings.push({ catalogId, role, name: name.trim(), amount, _import: true });
+      mtgTotal++;
+      report.meetings.push(`${month}-${String(dn).padStart(2, '0')} ${role} ${name.trim()} $${amount}`);
+    }
+  }
+
+  // --- monthlyMeta ---
+  const meta = {};
+  for (let r = headerRow + 1; r < countEnd; r++) {
+    const mm = A(r).match(/^(\d+)\s*\/\s*(\d+)$/);
+    if (mm) { meta.procMSKCount = Number(mm[1]); meta.procCount = Number(mm[2]); break; }
+  }
+  for (let r = 0; r < g.length; r++) {
+    let hit = -1;
+    for (let c = 0; c < (g[r] || []).length; c++) if (String(cell(r, c)).trim() === '值班') { hit = c; break; }
+    if (hit >= 0) {
+      for (let c = hit + 1; c < (g[r] || []).length; c++) {
+        const v = String(cell(r, c)).trim();
+        if (v) { meta.dutyNote = v; break; }
+      }
+      if (meta.dutyNote) break;
+    }
+  }
+  if (perfTotal != null) meta.perfTotal = perfTotal;
+  if (pretaxSalary != null) meta.pretaxSalary = pretaxSalary;
+  if (phRevenue) { meta.phRevenue = phRevenue; if (totalWithPH != null) meta.totalWithPH = totalWithPH; }
+
+  // --- 驗證報告 ---
+  const catSum = (keys) => {
+    let s = 0;
+    for (const d of Object.values(days)) for (const k of keys) {
+      let v = d.counts;
+      for (const p of k.split('.')) v = (v && typeof v === 'object') ? v[p] : undefined;
+      if (typeof v === 'number') s += v;
+    }
+    return s;
+  };
+  const CAT_KEYS = {
+    CT: ['ct.opd', 'ct.er_adm_self', 'ct.ldct_health', 'ct.ph'],
+    MR: ['mr.opd', 'mr.er_adm_health', 'mr.ph'], BMD: ['bmd'],
+    'X ray': ['xray.opd', 'xray.portable', 'xray.er', 'xray.ph'],
+    Xray: ['xray.opd', 'xray.portable', 'xray.er', 'xray.ph'],
+    '會診': ['consult'], Sono: ['sono'], OPD: ['opd'],
+  };
+  for (const cat of cats) {
+    let parsed;
+    if (cat.label === 'Special') {
+      parsed = 0;
+      for (const d of Object.values(days)) {
+        const sp = (d.counts || {}).special || {};
+        parsed += (sp.others || []).reduce((s, o) => s + o.count, 0) + (sp.swal || 0) + (sp.hsg || 0);
+      }
+    } else parsed = catSum(CAT_KEYS[cat.label] || []);
+    const bMain = msNum(cell(cat.main, 1));
+    const bSubs = cat.subs.reduce((s, rr) => s + (msNum(cell(rr, 1)) || 0), 0);
+    // sheet 月計欄 B 有兩種公式:只加 main 列 or 涵蓋全部子列 — 任一吻合即 ✓
+    const ok = bMain == null || bMain === parsed || bMain + bSubs === parsed;
+    report.cats.push({ label: cat.label, parsed, sheet: bMain == null ? null : (bMain === parsed ? bMain : bMain + bSubs), ok });
+  }
+  report.revSum = Object.values(days).reduce((s, d) => s + (d.importedRevenue || 0), 0);
+  report.revSheet = revSheet;
+  report.irSum = Object.values(days).reduce((s, d) => s + (d.irRevenue || 0), 0);
+  report.irSheet = irSheet;
+  report.otSum = Object.values(days).reduce((s, d) => s + (d.overtimeHours || 0), 0);
+  report.procTotal = procTotal;
+  report.mtgTotal = mtgTotal;
+  report.addonDays = Object.values(days).filter(d => d.addons && d.addons.length).length;
+  report.dayCount = Object.keys(days).length;
+  return { days, monthlyMeta: Object.keys(meta).length ? meta : null, report };
+}
+// === END 整月 sheet 解析 ===
+
+// --- 整月 sheet 貼上 modal(月表「📄 貼整月」開啟)---
+function showMonthSheetModal() {
+  const mount = $('modal-mount');
+  const monthInput = el('input', { type: 'month', class: 'paste-date', value: state.currentMonth });
+  const ta = el('textarea', { class: 'paste-textarea', rows: '10', placeholder: '到 Excel 該月份分頁 → Ctrl+A 全選 → Ctrl+C → 回來這裡 Ctrl+V 貼上' });
+  const preview = el('div', { class: 'paste-preview' });
+  let lastParsed = null;
+  const renderPrev = () => {
+    preview.innerHTML = '';
+    lastParsed = null;
+    if (!ta.value.trim()) return;
+    const parsed = parseMonthSheetTSV(ta.value, monthInput.value || state.currentMonth, state.data.settings.meetingCatalog);
+    const rep = parsed.report;
+    if (rep.error) { preview.appendChild(el('div', { class: 'paste-count-hint', style: 'color:var(--danger,#e66)' }, '✗ ' + rep.error)); return; }
+    lastParsed = parsed;
+    for (const w of rep.warnings) preview.appendChild(el('div', { class: 'paste-count-hint', style: 'color:var(--warn,#da3)' }, '⚠️ ' + w));
+    const overlap = Object.keys(parsed.days).filter(k => state.data.days[k]).length;
+    preview.appendChild(el('div', { class: 'paste-count-hint' },
+      `${rep.dayCount} 天(覆蓋已存在 ${overlap} 天)· procedure ${rep.procTotal} 筆 · 會議 ${rep.mtgTotal} 場 · 加班 ${rep.otSum}h` + (rep.addonDays ? ` · addon ${rep.addonDays} 天` : '')));
+    const tbl = el('table', { class: 'settings-table' });
+    tbl.appendChild(el('tr', null, el('th', null, '項目'), el('th', null, 'sheet'), el('th', null, '解析'), el('th', null, '')));
+    for (const c of rep.cats) tbl.appendChild(el('tr', null,
+      el('td', null, c.label), el('td', null, c.sheet == null ? '—' : String(c.sheet)),
+      el('td', { style: 'color:var(--accent);font-weight:600' }, String(c.parsed)),
+      el('td', null, c.ok ? '✓' : '⚠️')));
+    const rowChk = (label, sheet, sum) => {
+      const ok = sheet == null || Math.abs(sheet - sum) < 1;
+      tbl.appendChild(el('tr', null, el('td', null, label), el('td', null, sheet == null ? '—' : fmtMoney(sheet)),
+        el('td', { style: 'color:var(--accent);font-weight:600' }, fmtMoney(sum)), el('td', null, ok ? '✓' : '⚠️')));
+    };
+    rowChk('當月收入 $', rep.revSheet, rep.revSum);
+    rowChk('IR $', rep.irSheet, rep.irSum);
+    preview.appendChild(tbl);
+    if (parsed.monthlyMeta) preview.appendChild(el('div', { class: 'paste-count-hint' }, 'monthlyMeta:' + JSON.stringify(parsed.monthlyMeta)));
+    if (rep.meetings.length) preview.appendChild(el('div', { class: 'paste-count-hint' }, '會議:' + rep.meetings.join(' / ')));
+    if (rep.unmatched.length) preview.appendChild(el('div', { class: 'paste-count-hint', style: 'color:var(--warn,#da3)' }, `⚠️ ${rep.unmatched.length} 行術式沒對到(略過):` + rep.unmatched.join(';')));
+  };
+  ta.addEventListener('input', renderPrev);
+  monthInput.addEventListener('change', renderPrev);
+  const overlay = el('div', { class: 'modal-overlay' });
+  const close = () => overlay.remove();
+  const modal = el('div', { class: 'modal paste-modal' },
+    el('h3', null, '📄 貼整月 sheet'),
+    el('div', { class: 'paste-date-row', style: 'display:flex;align-items:center;gap:8px;margin:2px 0 8px' },
+      el('span', { class: 'settings-hint' }, '目標月份'), monthInput,
+      el('span', { class: 'settings-hint' }, '(sheet 分頁名沒有年份,以此為準)')),
+    el('p', { class: 'settings-hint', style: 'margin:4px 0 10px' },
+      '解析計數/每日$/IR/procedure(含病歷號)/3D·資源共享/會議/加班/值班/績效總額。貼上的日子整天覆蓋;sheet 沒資料的日子不動。'),
+    el('div', { class: 'paste-body' }, ta, preview),
+    el('div', { class: 'modal-actions' },
+      el('button', { class: 'btn-secondary', onclick: close }, '取消'),
+      el('button', { class: 'btn-primary', onclick: () => {
+        if (!lastParsed) { toast('✗ 尚未解析到有效資料', ''); return; }
+        const month = monthInput.value || state.currentMonth;
+        const keys = Object.keys(lastParsed.days);
+        const overlap = keys.filter(k => state.data.days[k]);
+        if (!confirm(`將寫入 ${month} 共 ${keys.length} 天(覆蓋已存在 ${overlap.length} 天)${lastParsed.monthlyMeta ? ' + monthlyMeta' : ''},sheet 沒資料的日子不動。確定?`)) return;
+        const now = new Date().toISOString();
+        for (const k of keys) { lastParsed.days[k].updatedAt = now; state.data.days[k] = lastParsed.days[k]; }
+        if (lastParsed.monthlyMeta) {
+          if (!state.data.monthlyMeta) state.data.monthlyMeta = {};
+          state.data.monthlyMeta[month] = { ...state.data.monthlyMeta[month], ...lastParsed.monthlyMeta };
+        }
+        storage.save(state.data);
+        close();
+        renderAll();
+        toast(`✓ 已匯入 ${month} 共 ${keys.length} 天`, 'success');
+      } }, '套用')
+    )
+  );
+  overlay.appendChild(modal);
+  // 刻意不綁 overlay 點擊關閉 — 避免誤點掉整貼的內容
+  mount.appendChild(overlay);
+  setTimeout(() => ta.focus(), 50);
+}
+
 // --- TSV export ---
 function exportDayTSV() {
   const day = getDay(state.currentDate);
@@ -5743,6 +6298,7 @@ async function enterApp(user) {
 
   $('export-day').onclick = exportDayTSV;
   $('month-import').onclick = () => showImportModal();
+  $('month-paste-sheet').onclick = () => showMonthSheetModal();
 
   $('theme-toggle').onclick = () => applyTheme(state.data.settings.theme === 'light' ? 'dark' : 'light');
 

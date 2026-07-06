@@ -14,6 +14,7 @@ serviceAccountKey.json
 design_handoff_ui_styles/
 scripts/
 CLAUDE.md
+DECISION_LOG.md
 registry_plan.md
 registry_design.html
 database.rules.json
