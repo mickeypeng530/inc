@@ -1799,7 +1799,7 @@ body:not(.mini-mode) #view-mini { display: none; }
     <button id="month-paste-sheet" class="btn-secondary" title="貼上整月 Excel sheet(Ctrl+A 全選複製該月分頁)一鍵解析:計數/收入/IR/procedure/會議/加班">📄 貼整月</button>
     <button id="month-edit-toggle" class="btn-secondary" title="切換編輯模式:解鎖所有格子(計數/加班/收入/IR)">✏️ 編輯</button>
   </div>
-  <div style="overflow-x:auto">
+  <div style="overflow-x:auto" id="month-pivot-scroll">
     <table class="pivot-table" id="month-pivot"></table>
   </div>
 
@@ -6302,6 +6302,17 @@ async function enterApp(user) {
   $('export-day').onclick = exportDayTSV;
   $('month-import').onclick = () => showImportModal();
   $('month-paste-sheet').onclick = () => showMonthSheetModal();
+  // 月表 pivot:滾輪直接橫向捲動;捲到底/頭時放行給頁面直捲
+  const mps = $('month-pivot-scroll');
+  mps.addEventListener('wheel', (e) => {
+    if (e.shiftKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return; // Shift+滾輪/觸控板橫滑走原生
+    if (mps.scrollWidth <= mps.clientWidth) return;                     // 沒有橫向溢出
+    const dy = e.deltaY * (e.deltaMode === 1 ? 40 : 1);                 // Firefox line 模式換算
+    const max = mps.scrollWidth - mps.clientWidth;
+    if ((dy < 0 && mps.scrollLeft <= 0) || (dy > 0 && mps.scrollLeft >= max - 1)) return;
+    e.preventDefault();
+    mps.scrollLeft = Math.max(0, Math.min(max, mps.scrollLeft + dy));
+  }, { passive: false });
 
   $('theme-toggle').onclick = () => applyTheme(state.data.settings.theme === 'light' ? 'dark' : 'light');
 
