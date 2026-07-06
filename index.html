@@ -4558,6 +4558,13 @@ function svgSparkline(values, color, w = 130, h = 26) {
 }
 
 // 各 procedure 累積次數 + MSK 月趨勢
+// 排行分組名:TAME 家族(sTAME / cTAME / c(s)TAME·s(c)TAME)合併為一類
+// — 同術式家族只是計價不同,分開排會低估整體貢獻;月表分項計次表(countsAs)不受影響
+function procRankName(p) {
+  const ids = [p.presetId, ...(p.items || []).map(it => it.atomicId)];
+  if (ids.some(id => id === 'stame' || id === 'ctame' || id === 'cstame') || /tame/i.test(p.presetName || '')) return 'TAME';
+  return p.presetName || '?';
+}
 function getProcStats() {
   const cum = {};   // name → { n, amt, msk }
   let totalProc = 0, totalAmt = 0;
@@ -4568,7 +4575,7 @@ function getProcStats() {
     const daySum = procs.reduce((s, p) => s + (p.items || []).reduce((ss, it) => ss + Number(it.amount || 0), 0), 0);
     const factor = (typeof day.irRevenue === 'number' && daySum > 0) ? day.irRevenue / daySum : 1;
     for (const p of procs) {
-      const nm = p.presetName || '?';
+      const nm = procRankName(p);
       const amt = (p.items || []).reduce((s, it) => s + Number(it.amount || 0), 0) * factor;
       if (!cum[nm]) cum[nm] = { n: 0, amt: 0, msk: procIsMSK(p) };
       cum[nm].n += 1; cum[nm].amt += amt;
