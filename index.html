@@ -106,6 +106,8 @@ header h1 {
   cursor: pointer;
   font-family: var(--font-mono);
   font-size: 10px;
+  text-decoration: none;   /* header 的 <a class="icon-btn">(Registry 連結)不要底線 */
+  display: inline-block;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   white-space: nowrap;
@@ -1695,6 +1697,7 @@ body:not(.mini-mode) #view-mini { display: none; }
   </nav>
   <span class="day-mini-label" id="day-mini-label" style="display:none"></span>
   <div class="header-spacer"></div>
+  <a class="icon-btn" href="registry.html" title="臨床稽核 Registry(biopsy / PTGBD / pain)">🗂️ Registry</a>
   <button class="icon-btn" id="open-mini" title="開啟迷你快輸視窗">🪟 迷你</button>
   <button class="icon-btn" id="theme-toggle" title="切換主題">🌓</button>
   <button class="icon-btn" id="export-day" title="複製當日計數為 sheet 一欄">📋 當日</button>
