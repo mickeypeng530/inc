@@ -716,19 +716,34 @@ select.btn-secondary option {
 }
 .proc-item .btn-del:hover { color: var(--danger); }
 /* === 月表 Procedure 逐筆清單 === */
+.mp-dayhead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px 4px;
+  margin-top: 6px;
+  border-bottom: 1px solid var(--ink-cap);
+}
+.mp-dayhead-label { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--ink-1); }
+.mp-dayhead-n { font-size: 11px; color: var(--ink-muted); }
+.mp-dayhead-ir { font-size: 10px; color: var(--accent); font-family: var(--font-mono); }
+.mp-clearday {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--ink-muted);
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.mp-clearday:hover { border-color: var(--danger); color: var(--danger); }
 .mp-row {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 4px;
   border-bottom: 1px solid var(--border);
-}
-.mp-row .mp-day {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--ink-muted);
-  min-width: 22px;
-  text-align: right;
 }
 .mp-row .mp-date {
   background: var(--bg-2, transparent);
@@ -4300,6 +4315,17 @@ function mpMedRec(date, i, val) {
   clearTimeout(state.saveDebounce);
   state.saveDebounce = setTimeout(() => storage.save(state.data), 200);
 }
+function mpClearDay(date) {
+  const day = state.data.days[date];
+  const n = (day?.procedures || []).length;
+  if (!n) return;
+  if (!confirm(`清空 ${date} 全部 ${n} 筆 procedure?(貼錯天可先清空,再用「📥 匯入」貼到正確的天)`)) return;
+  day.procedures = [];
+  day.updatedAt = new Date().toISOString();
+  storage.save(state.data);
+  toast(`✓ 已清空 ${date} 的 ${n} 筆 procedure`, 'success');
+  mpRefresh();
+}
 function mpAmount(date, i, val) {
   const rec = state.data.days[date]?.procedures?.[i];
   if (!rec) return;
@@ -4328,13 +4354,20 @@ function renderMonthProcList() {
   for (const date of dates) {
     const day = state.data.days[date];
     const hasIR = typeof day.irRevenue === 'number';
-    for (const [i, rec] of (day.procedures || []).entries()) {
+    const dayProcs = day.procedures || [];
+    // 每天一個標題列(日期 + 筆數 + 清空當日)— 貼錯天可整天清掉再重貼
+    wrap.appendChild(el('div', { class: 'mp-dayhead' },
+      el('span', { class: 'mp-dayhead-label' }, `${date.slice(5)}(週${'日一二三四五六'[new Date(date + 'T00:00').getDay()]})`),
+      el('span', { class: 'mp-dayhead-n' }, `${dayProcs.length} 筆`),
+      hasIR ? el('span', { class: 'mp-dayhead-ir', title: '此日有手算 IR 總額,改分項不動當日收入總額' }, `IR $${fmtMoney(day.irRevenue)}`) : null,
+      el('button', { class: 'mp-clearday', title: '清空這天全部 procedure(之後可用 📥 匯入 貼到正確的天)', onclick: () => mpClearDay(date) }, '🗑 清空當日')
+    ));
+    for (const [i, rec] of dayProcs.entries()) {
       total++;
       const items = rec.items || [];
       const amt = items.reduce((s, it) => s + Number(it.amount || 0), 0);
       const detail = items.map(it => `${it.name} ${fmtMoney(it.amount)}`).join(' + ');
       const known = rec.presetId && presets.some(p => p.id === rec.presetId);
-      const dd = date.slice(8);
       const dateInput = el('input', { class: 'mp-date', type: 'date', value: date, title: '改天:改這裡把此筆搬到別天' });
       dateInput.min = month + '-01';
       dateInput.onchange = (e) => mpMoveDay(date, i, e.target.value);
@@ -4347,7 +4380,6 @@ function renderMonthProcList() {
         presetSel.appendChild(o);
       }
       wrap.appendChild(el('div', { class: 'mp-row' },
-        el('span', { class: 'mp-day' }, dd),
         dateInput,
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
