@@ -738,6 +738,13 @@ select.btn-secondary option {
   cursor: pointer;
 }
 .mp-clearday:hover { border-color: var(--danger); color: var(--danger); }
+.dayproc-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.dayproc-toolbar .mp-clearday { margin-left: auto; }
+.dayproc-list { max-height: 46vh; overflow-y: auto; }
+.dayproc-add {
+  display: flex; gap: 8px; align-items: center;
+  margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); flex-wrap: wrap;
+}
 .mp-row {
   display: flex;
   align-items: center;
@@ -3763,8 +3770,8 @@ function renderMonth() {
     const editable = state.monthEditMode;
     headRow.appendChild(el('th', {
       class: weekCls(dateStr).trim() + (editable ? ' pivot-day-paste' : ''),
-      title: editable ? `匯入 ${dateStr}(計數/procedure)` : '',
-      onclick: editable ? () => showImportModal('counts', dateStr) : null
+      title: editable ? `編輯 ${dateStr} 的 procedure(改天/刪/改/新增)` : '',
+      onclick: editable ? () => showDayProcModal(dateStr) : null
     },
       el('div', null, String(d)),
       el('div', { class: 'pivot-wd' + (dow === 0 || dow === 6 ? ' wd-end' : '') }, WD_CHAR[dow])
@@ -4266,7 +4273,10 @@ function renderMonthProcBreakdown() {
 
 // === 本月 Procedure 逐筆清單(可就地改天 / 刪 / 改 preset·病歷號·金額)===
 // day-aware helper:month view 各筆綁 (date, i),不動 today view 那組(綁 currentDate)
-function mpRefresh() { renderMonthProcList(); renderMonth(); renderStatsPanel(); }
+function mpRefresh() {
+  if (state._dayProcModalRender) state._dayProcModalRender();  // 若當天 procedure modal 開著,一起刷新
+  renderMonthProcList(); renderMonth(); renderStatsPanel();
+}
 function mpRemove(date, i) {
   const day = state.data.days[date];
   if (!day || !day.procedures) return;
@@ -4393,6 +4403,97 @@ function renderMonthProcList() {
   }
   if (!total) wrap.appendChild(el('div', { style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '本月尚無 procedure 紀錄'));
   else wrap.appendChild(el('div', { class: 'settings-hint', style: 'margin-top:8px' }, `本月共 ${total} 筆 · 改「日期」欄即搬到別天;有手算 IR 的日子,改分項不動當日收入總額`));
+}
+
+// === 當天 procedure 編輯 modal(月表編輯模式點日期欄開啟)===
+// 直接改該天現有 procedure(改天/刪/改 preset·病歷號·金額)+ 新增;共用 mp* day-aware helpers
+function showDayProcModal(date) {
+  const mount = $('modal-mount');
+  const presets = state.data.settings.presets || [];
+  const overlay = el('div', { class: 'modal-overlay' });
+  const listWrap = el('div', { class: 'dayproc-list' });
+  const totalEl = el('span', { class: 'stat-money' }, '0');
+  const close = () => { state._dayProcModalRender = null; overlay.remove(); };
+  const render = () => {
+    listWrap.innerHTML = '';
+    const day = state.data.days[date];
+    const procs = (day && day.procedures) || [];
+    const hasIR = day && typeof day.irRevenue === 'number';
+    let total = 0;
+    procs.forEach((rec, i) => {
+      const items = rec.items || [];
+      const amt = items.reduce((s, it) => s + Number(it.amount || 0), 0);
+      total += amt;
+      const detail = items.map(it => `${it.name} ${fmtMoney(it.amount)}`).join(' + ');
+      const known = rec.presetId && presets.some(p => p.id === rec.presetId);
+      const dateInput = el('input', { class: 'mp-date', type: 'date', value: date, title: '改天:改這裡把此筆搬到別天' });
+      dateInput.onchange = (e) => mpMoveDay(date, i, e.target.value);
+      const presetSel = el('select', { class: 'proc-item-preset-sel', title: '重選 preset(重新展開原子項)',
+        onchange: (e) => mpChangePreset(date, i, e.target.value) });
+      if (!known) presetSel.appendChild(el('option', { value: '' }, `⚠️ ${rec.presetName || '未指派'} ▾`));
+      for (const p of presets) {
+        const o = el('option', { value: p.id }, p.name);
+        if (p.id === rec.presetId) o.selected = true;
+        presetSel.appendChild(o);
+      }
+      listWrap.appendChild(el('div', { class: 'mp-row' },
+        dateInput,
+        el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
+          oninput: (e) => mpMedRec(date, i, e.target.value) }),
+        el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail' }, detail)),
+        el('input', { class: 'proc-item-amount-input mp-amt', type: 'number', min: '0', inputmode: 'numeric', value: String(amt),
+          title: hasIR ? '改金額(此日有手算 IR 總額,分項改不影響當日收入總額)' : '改金額(按比例分回原子項)',
+          onfocus: countSelectFocus, onchange: (e) => mpAmount(date, i, e.target.value) }),
+        el('button', { class: 'btn-del', title: '刪除', onclick: () => mpRemove(date, i) }, '×')
+      ));
+    });
+    if (!procs.length) listWrap.appendChild(el('div', { style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '這天目前沒有 procedure'));
+    totalEl.textContent = fmtMoney(total);
+  };
+  state._dayProcModalRender = render;
+  // 新增列:preset 下拉 + 數量 + 病歷號 + 加入
+  const addSel = el('select', { class: 'proc-item-preset-sel' });
+  addSel.appendChild(el('option', { value: '' }, '＋ 選 preset 新增…'));
+  for (const p of presets) addSel.appendChild(el('option', { value: p.id }, p.name));
+  const addQty = el('input', { type: 'number', min: '1', value: '1', class: 'mp-amt', title: '數量', style: 'width:52px' });
+  const addMed = el('input', { type: 'text', class: 'proc-item-medrec mp-medrec', placeholder: '病歷號' });
+  const addBtn = el('button', { class: 'btn-secondary', onclick: () => {
+    const preset = presets.find(p => p.id === addSel.value);
+    if (!preset) { toast('請先選 preset', ''); return; }
+    const qty = Math.max(1, Number(addQty.value) || 1);
+    const day = getDay(date);
+    if (!day.procedures) day.procedures = [];
+    for (let n = 0; n < qty; n++) day.procedures.push({
+      presetId: preset.id, presetName: preset.name, medRecord: (addMed.value || '').trim(),
+      items: (preset.items || []).map(it => {
+        const atom = state.data.settings.atomicItems.find(a => a.id === it.atomicId);
+        return { atomicId: it.atomicId, name: atom?.name || it.atomicId, amount: Number(it.amount || 0) };
+      }),
+      time: new Date().toISOString(),
+    });
+    day.updatedAt = new Date().toISOString();
+    storage.save(state.data);
+    addSel.value = ''; addQty.value = '1'; addMed.value = '';
+    mpRefresh();
+  } }, '加入');
+  const modal = el('div', { class: 'modal paste-modal' },
+    el('h3', null, `${date} Procedure`),
+    el('div', { class: 'dayproc-toolbar' },
+      el('button', { class: 'btn-secondary', title: '貼上一整批 procedure(病歷號+preset名)到這天',
+        onclick: () => { close(); showImportModal('procedure', date); } }, '📥 貼上匯入'),
+      el('button', { class: 'mp-clearday', title: '清空這天全部 procedure', onclick: () => mpClearDay(date) }, '🗑 清空當日')
+    ),
+    listWrap,
+    el('div', { class: 'dayproc-add' }, addSel, addQty, addMed, addBtn),
+    el('div', { class: 'proc-total' }, el('span', null, '當日 procedure 合計'), totalEl),
+    el('div', { class: 'modal-actions' },
+      el('button', { class: 'btn-primary', onclick: close }, '完成')
+    )
+  );
+  render();
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  mount.appendChild(overlay);
 }
 
 // 歷月紀錄:每個類別跨所有月份的最多月 / 最少月 / 平均 / 本月
