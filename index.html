@@ -4099,8 +4099,20 @@ function renderMonth() {
       el('div', { class: 'income-field-sub' }, sublabel)
     );
   };
+  // 均日薪 = 我的 Total ÷ 有登錄的天數(含收入=0 的休假日,平假日都算);對齊 sheet「均日薪」列
+  // 「有登錄」= 匯入日(importedRevenue 為數字,含 0)或有收入/procedure 的手記日
+  const workedDays = days.reduce((n, date) => {
+    const day = state.data.days[date];
+    if (!day) return n;
+    const entered = typeof day.importedRevenue === 'number'
+      || getDayRevenue(day, state.data.settings) > 0
+      || (day.procedures && day.procedures.length > 0);
+    return n + (entered ? 1 : 0);
+  }, 0);
+  const avgDaily = workedDays > 0 ? Math.round(revMonth / workedDays) : 0;
   const incomeFields = [
     mkIncomeField('我的 Total', '自己算', revMonth, false, null),
+    mkIncomeField('均日薪', `Total ÷ ${workedDays} 天(有登錄,含平假日)`, avgDaily, false, null),
   ];
   // 澎湖兼職月份(2025-06~10)→ 多顯示「含澎湖」(本院 + PH)
   if (mm.phRevenue > 0) {
