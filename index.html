@@ -715,6 +715,44 @@ select.btn-secondary option {
   line-height: 1;
 }
 .proc-item .btn-del:hover { color: var(--danger); }
+/* === 月表 Procedure 逐筆清單 === */
+.mp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.mp-row .mp-day {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+  min-width: 22px;
+  text-align: right;
+}
+.mp-row .mp-date {
+  background: var(--bg-2, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 4px;
+  width: 130px;
+}
+.mp-row .mp-date:hover { border-color: var(--accent); }
+.mp-row .mp-medrec { width: 80px; flex: none; }
+.mp-row .mp-mid { flex: 1; min-width: 0; }
+.mp-row .mp-amt { width: 74px; text-align: right; }
+.mp-row .btn-del {
+  background: transparent; color: var(--ink-muted); border: none;
+  cursor: pointer; font-size: 16px; padding: 0 4px; line-height: 1;
+}
+.mp-row .btn-del:hover { color: var(--danger); }
+@media (max-width: 768px) {
+  .mp-row { flex-wrap: wrap; gap: 6px; }
+  .mp-row .mp-mid { flex-basis: 100%; order: 5; }
+}
 .proc-total {
   display: flex;
   justify-content: space-between;
@@ -1827,6 +1865,12 @@ body:not(.mini-mode) #view-mini { display: none; }
       <div class="proc-total" id="meeting-total"><span>月會議合計</span><span class="stat-money" id="meeting-total-amount">0</span></div>
     </details>
   </div>
+
+  <!-- 本月 Procedure 清單(可就地刪改/改天;預設收合)-->
+  <details class="panel collapsible-panel" id="panel-month-proclist" style="margin-top:14px">
+    <summary><h2>本月 Procedure 清單 <span style="font-weight:normal;font-size:9px;color:var(--ink-muted);letter-spacing:0.06em">逐筆改天 / 刪 / 改 preset·病歷號·金額</span></h2></summary>
+    <div id="month-proclist"></div>
+  </details>
 
   <!-- 歷月紀錄(放最下、預設收合)-->
   <details class="panel collapsible-panel" id="panel-month-records" style="margin-top:14px">
@@ -4051,6 +4095,7 @@ function renderMonth() {
   ));
 
   renderMonthProcBreakdown();
+  renderMonthProcList();
   renderMonthRecords();
   renderScheduleBlock();
   renderMeetingPanel();
@@ -4202,6 +4247,120 @@ function renderMonthProcBreakdown() {
   if (sorted.length === 0) {
     t.appendChild(el('tr', null, el('td', { colspan: '4', style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '本月尚無 procedure 紀錄')));
   }
+}
+
+// === 本月 Procedure 逐筆清單(可就地改天 / 刪 / 改 preset·病歷號·金額)===
+// day-aware helper:month view 各筆綁 (date, i),不動 today view 那組(綁 currentDate)
+function mpRefresh() { renderMonthProcList(); renderMonth(); renderStatsPanel(); }
+function mpRemove(date, i) {
+  const day = state.data.days[date];
+  if (!day || !day.procedures) return;
+  const rec = day.procedures[i];
+  if (!confirm(`刪除 ${date} 這筆「${rec?.presetName || '?'}」${rec?.medRecord ? '(' + rec.medRecord + ')' : ''}?`)) return;
+  day.procedures.splice(i, 1);
+  day.updatedAt = new Date().toISOString();
+  storage.save(state.data);
+  mpRefresh();
+}
+function mpMoveDay(date, i, newDate) {
+  if (!newDate || newDate === date) return;
+  const day = state.data.days[date];
+  if (!day || !day.procedures || !day.procedures[i]) return;
+  const [rec] = day.procedures.splice(i, 1);
+  const tgt = getDay(newDate);
+  if (!tgt.procedures) tgt.procedures = [];
+  tgt.procedures.push(rec);
+  day.updatedAt = tgt.updatedAt = new Date().toISOString();
+  storage.save(state.data);
+  const moved = newDate.startsWith(state.currentMonth + '-') ? `已搬到 ${newDate}` : `已搬到 ${newDate}(不在本月,清單看不到)`;
+  toast('✓ ' + moved, 'success');
+  mpRefresh();
+}
+function mpChangePreset(date, i, presetId) {
+  const day = state.data.days[date];
+  const rec = day?.procedures?.[i];
+  if (!rec) return;
+  const preset = (state.data.settings.presets || []).find(p => p.id === presetId);
+  if (!preset) return;
+  rec.presetId = preset.id;
+  rec.presetName = preset.name;
+  rec.items = (preset.items || []).map(it => {
+    const atom = state.data.settings.atomicItems.find(a => a.id === it.atomicId);
+    return { atomicId: it.atomicId, name: atom?.name || it.atomicId, amount: Number(it.amount || 0) };
+  });
+  day.updatedAt = new Date().toISOString();
+  storage.save(state.data);
+  mpRefresh();
+}
+function mpMedRec(date, i, val) {
+  const rec = state.data.days[date]?.procedures?.[i];
+  if (!rec) return;
+  rec.medRecord = val;
+  state.data.days[date].updatedAt = new Date().toISOString();
+  clearTimeout(state.saveDebounce);
+  state.saveDebounce = setTimeout(() => storage.save(state.data), 200);
+}
+function mpAmount(date, i, val) {
+  const rec = state.data.days[date]?.procedures?.[i];
+  if (!rec) return;
+  const newTotal = Math.max(0, Number(val) || 0);
+  const items = rec.items || (rec.items = []);
+  const oldTotal = items.reduce((s, it) => s + Number(it.amount || 0), 0);
+  if (items.length === 0) items.push({ atomicId: rec.presetId || '', name: rec.presetName || '', amount: newTotal });
+  else if (oldTotal > 0) {
+    const f = newTotal / oldTotal;
+    items.forEach(it => { it.amount = Math.round(Number(it.amount || 0) * f); });
+    const diff = newTotal - items.reduce((s, it) => s + Number(it.amount || 0), 0);
+    if (diff) items[0].amount = Math.max(0, Number(items[0].amount || 0) + diff);
+  } else items[0].amount = newTotal;
+  state.data.days[date].updatedAt = new Date().toISOString();
+  storage.save(state.data);
+  mpRefresh();
+}
+function renderMonthProcList() {
+  const wrap = $('month-proclist');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const month = state.currentMonth;
+  const presets = state.data.settings.presets || [];
+  const dates = Object.keys(state.data.days).filter(d => d.startsWith(month + '-') && (state.data.days[d].procedures || []).length).sort();
+  let total = 0;
+  for (const date of dates) {
+    const day = state.data.days[date];
+    const hasIR = typeof day.irRevenue === 'number';
+    for (const [i, rec] of (day.procedures || []).entries()) {
+      total++;
+      const items = rec.items || [];
+      const amt = items.reduce((s, it) => s + Number(it.amount || 0), 0);
+      const detail = items.map(it => `${it.name} ${fmtMoney(it.amount)}`).join(' + ');
+      const known = rec.presetId && presets.some(p => p.id === rec.presetId);
+      const dd = date.slice(8);
+      const dateInput = el('input', { class: 'mp-date', type: 'date', value: date, title: '改天:改這裡把此筆搬到別天' });
+      dateInput.min = month + '-01';
+      dateInput.onchange = (e) => mpMoveDay(date, i, e.target.value);
+      const presetSel = el('select', { class: 'proc-item-preset-sel', title: '重選 preset(重新展開原子項)',
+        onchange: (e) => mpChangePreset(date, i, e.target.value) });
+      if (!known) presetSel.appendChild(el('option', { value: '' }, `⚠️ ${rec.presetName || '未指派'} ▾`));
+      for (const p of presets) {
+        const o = el('option', { value: p.id }, p.name);
+        if (p.id === rec.presetId) o.selected = true;
+        presetSel.appendChild(o);
+      }
+      wrap.appendChild(el('div', { class: 'mp-row' },
+        el('span', { class: 'mp-day' }, dd),
+        dateInput,
+        el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
+          oninput: (e) => mpMedRec(date, i, e.target.value) }),
+        el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail' }, detail)),
+        el('input', { class: 'proc-item-amount-input mp-amt', type: 'number', min: '0', inputmode: 'numeric', value: String(amt),
+          title: hasIR ? '改金額(此日有手算 IR 總額,分項改不影響當日收入總額)' : '改金額(按比例分回原子項)',
+          onfocus: countSelectFocus, onchange: (e) => mpAmount(date, i, e.target.value) }),
+        el('button', { class: 'btn-del', title: '刪除', onclick: () => mpRemove(date, i) }, '×')
+      ));
+    }
+  }
+  if (!total) wrap.appendChild(el('div', { style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '本月尚無 procedure 紀錄'));
+  else wrap.appendChild(el('div', { class: 'settings-hint', style: 'margin-top:8px' }, `本月共 ${total} 筆 · 改「日期」欄即搬到別天;有手算 IR 的日子,改分項不動當日收入總額`));
 }
 
 // 歷月紀錄:每個類別跨所有月份的最多月 / 最少月 / 平均 / 本月
