@@ -1701,6 +1701,7 @@ body:not(.mini-mode) #view-mini { display: none; }
   <button class="icon-btn" id="open-mini" title="開啟迷你快輸視窗">🪟 迷你</button>
   <button class="icon-btn" id="theme-toggle" title="切換主題">🌓</button>
   <button class="icon-btn" id="export-day" title="複製當日計數為 sheet 一欄">📋 當日</button>
+  <button class="icon-btn" id="import-day" title="貼上 sheet 一欄計數到當前日期(空行不覆蓋)">📥 當日</button>
 </header>
 
 <div class="day-nav">
@@ -5141,6 +5142,7 @@ function showImportModal(initType, initDate) {
         else { const d = dateInput.value || dfltDate; const n = applyPastedProcedures(d, parsePastedProcedures(ta.value)); msg = `已匯入 ${n} 筆 procedure 到 ${d}`; }
         close();
         renderMeetingPanel();
+        if ($('view-today').classList.contains('active')) renderToday();
         if ($('view-month').classList.contains('active')) renderMonth();
         renderStatsPanel();
         toast(`✓ ${msg}`, 'success');
@@ -6307,6 +6309,7 @@ async function enterApp(user) {
   $('day-notes').oninput = (e) => { getDay(state.currentDate).notes = e.target.value; persist(); };
 
   $('export-day').onclick = exportDayTSV;
+  $('import-day').onclick = () => showImportModal('counts', state.currentDate);
   $('month-import').onclick = () => showImportModal();
   $('month-paste-sheet').onclick = () => showMonthSheetModal();
   // 月表 pivot:滾輪直接橫向捲動;捲到底/頭時放行給頁面直捲
