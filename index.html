@@ -2366,7 +2366,12 @@ function runMigrations(data) {
         items.push({ id: 'rf', name: 'RF', amount: 600, includeInStats: true, isMSK: true });
       }
       const correctMSK = new Set(['ct_nb','nb','arthro','bone','ctame','cstame','stame','rf']);
+      // #9:只重設「內建」atomic 的 isMSK。舊版無條件覆蓋所有項目,
+      // 一旦這個 migration 重跑(旗標沒同步到雲端時會發生),
+      // 使用者自建並手動勾選 MSK 的項目就被洗成 false。
+      const builtinIds = new Set(SEED.atomicItems.map(a => a.id));
       for (const a of items) {
+        if (!builtinIds.has(a.id)) continue;   // 使用者自建 → 不碰
         a.isMSK = correctMSK.has(a.id);
       }
     }
@@ -2780,7 +2785,7 @@ function setCount(day, key, val) {
     if (!target[parts[i]]) target[parts[i]] = {};
     target = target[parts[i]];
   }
-  target[parts.at(-1)] = Math.max(0, Number(val) || 0);
+  target[parts[parts.length - 1]] = Math.max(0, Number(val) || 0);   // #11:at() 需 Chrome 92+
 }
 // SYNC_REVIEW #7:getDay 有「建檔」副作用,只能給真的要寫入的路徑用。
 // 建立當下**不蓋 updatedAt** —— 憑空生出的空白天不該宣稱「我在 T 時刻編輯過」,
@@ -6264,8 +6269,9 @@ function exportDayTSV() {
   const lines = [];
   for (const item of order) {
     if (item.key === 'special.total') {
-      let s = 0;
-      for (const k of Object.keys(state.data.settings.unitPrices.special)) s += getCount(day, `special.${k}`);
+      // #4:v5 起 others 存在陣列裡,逐一 getCount 只撈得到 swal/hsg,
+      // 而那兩項下面又各自輸出一列 → 主列漏 others 且重複計數。改用陣列加總。
+      const s = specialOthersTotalCount(day);
       lines.push(s ? String(s) : '');
     } else {
       const v = getCount(day, item.key);
@@ -6296,7 +6302,7 @@ function exportMonthTSV() {
       let v = 0;
       if (day) {
         if (item.key === 'special.total') {
-          for (const k of Object.keys(state.data.settings.unitPrices.special)) v += getCount(day, `special.${k}`);
+          v = specialOthersTotalCount(day);   // 同 #4,見 exportDayTSV
         } else v = getCount(day, item.key);
       }
       total += v;
@@ -6409,7 +6415,7 @@ function setUnitPrice(key, val) {
     const parts = key.split('.');
     let target = state.data.settings.unitPrices;
     for (let i = 0; i < parts.length - 1; i++) target = target[parts[i]];
-    target[parts.at(-1)] = v;
+    target[parts[parts.length - 1]] = v;   // #11:at() 需 Chrome 92+
   }
   storage.save(state.data);
   renderStatsPanel();
@@ -6701,11 +6707,27 @@ function moveSheetOrder(i, dir) {
 }
 
 // ===== Init / wiring =====
-function applyTheme(mode) {
+// #5:boot 只套 DOM,不要存檔 —— 否則每次開啟 app 都會觸發一次寫入
+function applyTheme(mode, save = true) {
   if (mode === 'light') document.documentElement.setAttribute('data-theme', 'light');
   else document.documentElement.removeAttribute('data-theme');
   state.data.settings.theme = mode;
-  storage.save(state.data);
+  if (save) storage.save(state.data);
+}
+
+// #10:跨午夜自動跳日。只有「使用者本來就停在今天」才跳,
+// 刻意翻到過去某天查資料時不打擾。
+let sessionToday = null;
+function checkDateRollover() {
+  const now = todayISO();
+  if (!sessionToday || now === sessionToday) return;
+  const wasOnToday = state.currentDate === sessionToday;
+  sessionToday = now;
+  if (!wasOnToday) return;
+  state.currentDate = now;
+  state.currentMonth = isoToMonth(now);
+  renderAll();
+  toast(`✓ 已跨日,自動切到 ${now}`, 'success');
 }
 
 function setView(name) {
@@ -6844,7 +6866,13 @@ async function enterApp(user) {
 
   state.currentDate = todayISO();
   state.currentMonth = isoToMonth(state.currentDate);
-  applyTheme(state.data.settings.theme || 'dark');
+  sessionToday = state.currentDate;
+  // #10:currentDate 原本只在 enterApp 設一次 → 迷你視窗常駐過夜後,
+  // 「今天」還停在昨天,+1 會記到昨天(桌寵寫今天、web 寫昨天,同日分岔)
+  setInterval(checkDateRollover, 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkDateRollover(); });
+  window.addEventListener('focus', checkDateRollover);
+  applyTheme(state.data.settings.theme || 'dark', false);   // #5:boot 不存檔
   document.title = state.isMini ? '績效快輸' : '績效紀錄';
 
   if (state.isMini) {
@@ -6983,7 +7011,9 @@ async function enterApp(user) {
         const data = JSON.parse(r.result);
         if (!data.days || !data.settings) throw new Error('格式錯誤');
         if (!confirm('將取代目前所有資料,確定?')) return;
-        state.data = data;
+        // #8:必須過 _normalizeData —— 補回 Firebase 掉的空陣列、補預設欄位、
+        // 跑 migration 並蓋上旗標,否則之後會因缺欄位出錯或 migration 反覆重跑
+        state.data = _normalizeData(data);
         storage.saveFull(state.data);   // 真的要取代一切 → 全樹覆寫(Tier 1 例外場景)
         renderAll();
         toast('✓ 匯入完成', 'success');
