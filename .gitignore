@@ -12,7 +12,11 @@ serviceAccountKey.json
 *.jpeg
 待修改.txt
 design_handoff_ui_styles/
-scripts/
+scripts/*
+!scripts/tests/
+# ↑ scripts/ 底下只有 tests/ 納入版控(純邏輯測試、零病歷號、不連 Firebase);
+#   金鑰 / backups / 含病歷號的匯入 JSON 一律排除。
+#   注意:必須寫 scripts/* 而非 scripts/ —— 父目錄被整個排除時,! 例外不會生效。
 CLAUDE.md
 DECISION_LOG.md
 SYNC_REVIEW_*.md
