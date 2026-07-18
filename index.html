@@ -4,9 +4,23 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title> </title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+<!-- 外部資源:先握手,省掉 DNS + TLS 往返 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
 
+<!-- 字型改「非阻擋」載入。原本寫在 CSS 裡的 @import 是串連且擋渲染的:
+     index.html → 解析 CSS → 才發現 @import → 連 fonts.googleapis.com
+     → 拿到 CSS → 才發現字型檔 → 再連 fonts.gstatic.com → 才畫得出畫面。
+     任一段慢或被擋(醫院網路對 Google 網域常不穩)畫面就一片空白。
+     media="print" + onload 切回 all = 不擋首次繪製;字型都有 fallback
+     (monospace / serif),先用系統字體再無縫換上。 -->
+<link rel="stylesheet" media="print" onload="this.media='all'"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<noscript><link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"></noscript>
+
+<style>
 :root {
   --bg-page:   #0e0f12;
   --bg-panel:  #15171b;
@@ -2016,7 +2030,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.19c';
+const APP_VERSION = '2026.07.19d';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -7084,30 +7098,31 @@ async function retryCloudLoad(attempt = 1) {
   }, delay);
 }
 
-async function enterApp(user) {
-  currentUser = user;
-  userPath = `users/${user.uid}/worknum`;
-  userDataRef = ref(fbDB, userPath);
-  // 通過 auth → 顯示 app
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('app-root').style.display = '';
-
-  // === 載入資料(SYNC_REVIEW #2:三分支,error 絕不上推)===
+// 取雲端資料並與「已經畫在畫面上的本機快取」對帳。
+// 在 enterApp 最後才啟動 → 開機與事件綁定完全不受網路速度影響。
+async function loadCloudAndReconcile() {
   const res = await storage.loadFromFirebase();
   if (res.status === 'ok') {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(res.data));
-    state.data = res.data;
-    lastSynced = res.rawSnap;   // 基準=雲端原始形態;normalize/migration 的改動之後會被 diff 推上去
-    cloudReady = true;
+    if (offlineEdits) {
+      // 快取先行到雲端抵達之間(通常 <1s)使用者已動過資料 → 不盲目覆蓋。
+      // 同 SYNC_REVIEW #2 的取捨:寧可請使用者重整,也不弄丟任何一邊。
+      lastSynced = res.rawSnap;
+      cloudReady = true;
+      showCloudWarning('⚠️ 已取得雲端資料,但這段期間你已修改本機。請重新整理以雲端為準(本機修改需重新輸入)');
+    } else {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(res.data));
+      state.data = res.data;
+      lastSynced = res.rawSnap;   // 基準=雲端原始形態;normalize/migration 的改動之後會被 diff 推上去
+      cloudReady = true;
+      renderAll();                // 快取與雲端不同時才看得出變化
+    }
   } else if (res.status === 'empty') {
     // 雲端確定是空的 → 可以安全建立初始節點(不可能蓋到別人的資料)
-    state.data = storage.load();
-    lastSynced = res.rawSnap;   // 空基準 → 首次 save 會把本地全部 diff 上去
+    lastSynced = res.rawSnap;     // 空基準 → 首次 save 會把本地全部 diff 上去
     cloudReady = true;
     storage.save(state.data);
   } else {
     // 讀取失敗(離線/權限/逾時)→ 不知道雲端長怎樣,一律唯讀本機 + 背景重試
-    state.data = storage.load();
     cloudReady = false;
     showCloudWarning('⚠️ 讀不到雲端資料:目前僅存本機、不會上傳,正在重試…');
     retryCloudLoad();
@@ -7120,6 +7135,21 @@ async function enterApp(user) {
     if (!snap.exists()) return;
     applyIncoming(snap.val());
   });
+}
+
+async function enterApp(user) {
+  currentUser = user;
+  userPath = `users/${user.uid}/worknum`;
+  userDataRef = ref(fbDB, userPath);
+  // 通過 auth → 顯示 app
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-root').style.display = '';
+
+  // === 快取先行:立刻用 localStorage 畫出畫面,不等雲端 ===
+  // 舊版在這裡 await 整棵樹才渲染 → 網路一慢就盯著空白畫面(醫院網路常見)。
+  // localStorage 就是上次同步的完整副本,先拿來用;雲端資料稍後由
+  // loadCloudAndReconcile() 補上(在本函式最後才啟動,不擋開機與事件綁定)。
+  state.data = storage.load();
 
   state.currentDate = todayISO();
   state.currentMonth = isoToMonth(state.currentDate);
@@ -7328,6 +7358,9 @@ async function enterApp(user) {
     renderAll();
     toast('✓ 已重設 catalog', 'success');
   };
+
+  // 畫面已出來、事件也綁好了,最後才去要雲端資料 —— 不 await,網路慢也不擋操作
+  loadCloudAndReconcile();
 }
 
 try { init(); }
