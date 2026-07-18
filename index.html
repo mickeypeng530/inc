@@ -2016,7 +2016,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.18c';
+const APP_VERSION = '2026.07.18d';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2980,6 +2980,48 @@ function getDayType(date, day) {
   if (day?.overtimeType === '平日' || day?.overtimeType === '假日') return day.overtimeType;
   const dow = new Date(date + 'T00:00:00').getDay();
   return (dow === 0 || dow === 6) ? '假日' : '平日';
+}
+// === 加班條(月表底部「加班統計」列)===
+// 滿格 = max(目標, 實際)。舊版 fill 卡在 100%,但每個月都超標 → 條子永遠滿格、
+// 150% 與 209% 長得一樣,等於沒有資訊。現在目標位置畫刻度線,線右邊是「超出量」
+// 用另一色 —— 超標是提醒不是警報,呈現的是「超了多少」這個量,不是永遠亮的紅燈。
+function otBarEl(label, actual, target) {
+  const pct = target > 0 ? Math.round(actual / target * 100) : 0;
+  const scale = Math.max(target, actual) || 1;
+  const basePct = Math.min(actual, target) / scale * 100;      // 達標段
+  const overPct = Math.max(0, actual - target) / scale * 100;  // 超出段
+  const tickPct = target / scale * 100;
+  const over = actual > target;
+  return el('div', { class: 'ot-merged-item' },
+    el('span', { class: 'ot-merged-label' }, label),
+    el('div', { class: 'ot-bar' },
+      el('div', { class: 'ot-bar-fill', style: `width:${basePct}%` }),
+      over ? el('div', { class: 'ot-bar-over', style: `left:${tickPct}%;width:${overPct}%` }) : null,
+      el('div', { class: 'ot-bar-tick', style: `left:${tickPct}%`, title: `目標 ${target} hr` }),
+      el('span', { class: 'ot-bar-label' },
+        `${actual} / ${target} hr · ${pct}%` + (over ? `(超 ${Math.round((actual - target) * 10) / 10}h)` : ''))
+    )
+  );
+}
+function buildOtMerged(month) {
+  const s = calcMonthlyOvertime(month);
+  const t = state.data.settings.overtimeTargets || { weekday: 46, holiday: 16 };
+  return el('div', { class: 'ot-merged' },
+    otBarEl('平日', s.weekday, t.weekday),
+    otBarEl('假日', s.holiday, t.holiday));
+}
+// 只重畫「加班統計」這一列 —— 月表格子 oninput 時要即時反映,但不能整個 renderMonth
+// (會把正在輸入的格子焦點打掉)。舊版只在 onblur 才重畫,所以打字當下看到的是舊狀態。
+function refreshOtSummary(month) {
+  const cell = document.querySelector('.pivot-ot-summary .pivot-ot-summary-cell');
+  if (!cell) return;
+  cell.innerHTML = '';
+  cell.appendChild(buildOtMerged(month));
+  const s = calcMonthlyOvertime(month);
+  const tot = document.querySelector('.pivot-ot-summary .col-total');
+  if (tot) tot.textContent = String(s.total);
+  const rowTot = document.querySelector('.pivot-ot-row .col-total');
+  if (rowTot) rowTot.textContent = s.total ? String(s.total) : '0';
 }
 function calcMonthlyOvertime(month) {
   const [y, m] = month.split('-').map(Number);
@@ -3962,6 +4004,7 @@ function setMonthCellOvertime(date, val) {
   const day = getDay(date);
   day.overtimeHours = Number(val) || 0;
   day.updatedAt = new Date().toISOString();
+  refreshOtSummary(state.currentMonth);   // 即時更新加班條(不動焦點)
   scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
 }
 // 編輯模式:改每日總收入 → 存 importedRevenue override(空字串=清除,回到計算值)
@@ -4322,7 +4365,7 @@ function renderMonth() {
     if (v) otMonth += v;
     return { date, val: v, hasDay: !!day };
   });
-  const otTr = el('tr', { class: 'pivot-bottom-row' },
+  const otTr = el('tr', { class: 'pivot-bottom-row pivot-ot-row' },
     el('td', { class: 'row-label' }, '加班刷卡'),
     el('td', { class: 'col-total' }, otMonth ? String(otMonth) : '0')
   );
@@ -4343,41 +4386,11 @@ function renderMonth() {
   }
   t.appendChild(otTr);
 
-  // 加班統計 — 平日/假日合併成一列
-  const otStats = calcMonthlyOvertime(month);
-  const targets = state.data.settings.overtimeTargets || { weekday: 46, holiday: 16 };
-  const colspan = daysInMonth;
-  // 加班條:滿格 = max(目標, 實際)。舊版 fill 卡在 100%,但每個月都超標
-  // → 條子永遠滿格、150% 與 209% 長得一樣,等於沒有資訊。
-  // 現在目標位置畫刻度線,線右邊是「超出量」用另一色 —— 超標是提醒不是警報,
-  // 所以呈現的是「超了多少」這個量,而不是一個永遠亮著的紅燈。
-  const otBar = (label, actual, target) => {
-    const pct = target > 0 ? Math.round(actual / target * 100) : 0;
-    const scale = Math.max(target, actual) || 1;
-    const basePct = Math.min(actual, target) / scale * 100;   // 達標段
-    const overPct = Math.max(0, actual - target) / scale * 100; // 超出段
-    const tickPct = target / scale * 100;
-    const over = actual > target;
-    return el('div', { class: 'ot-merged-item' },
-      el('span', { class: 'ot-merged-label' }, label),
-      el('div', { class: 'ot-bar' },
-        el('div', { class: 'ot-bar-fill', style: `width:${basePct}%` }),
-        over ? el('div', { class: 'ot-bar-over', style: `left:${tickPct}%;width:${overPct}%` }) : null,
-        el('div', { class: 'ot-bar-tick', style: `left:${tickPct}%`, title: `目標 ${target} hr` }),
-        el('span', { class: 'ot-bar-label' },
-          `${actual} / ${target} hr · ${pct}%` + (over ? `(超 ${Math.round((actual - target) * 10) / 10}h)` : ''))
-      )
-    );
-  };
+  // 加班統計 — 平日/假日合併成一列(內容由 buildOtMerged 產生,供輸入時單獨更新)
   t.appendChild(el('tr', { class: 'pivot-bottom-row pivot-ot-summary' },
     el('td', { class: 'row-label' }, '加班統計'),
-    el('td', { class: 'col-total' }, String(otStats.total)),
-    el('td', { colspan: String(colspan), class: 'pivot-ot-summary-cell' },
-      el('div', { class: 'ot-merged' },
-        otBar('平日', otStats.weekday, targets.weekday),
-        otBar('假日', otStats.holiday, targets.holiday)
-      )
-    )
+    el('td', { class: 'col-total' }, String(calcMonthlyOvertime(month).total)),
+    el('td', { colspan: String(daysInMonth), class: 'pivot-ot-summary-cell' }, buildOtMerged(month))
   ));
 
   // 月收入摘要 — 我的Total(自動)/ 績效總額 / 最後稅前薪水
@@ -7140,7 +7153,11 @@ async function enterApp(user) {
 
   $('preset-add').onclick = addPresetToToday;
 
-  $('overtime-hours').oninput = (e) => { getDay(state.currentDate).overtimeHours = Number(e.target.value)||0; persist(); renderStatsPanel(); };
+  $('overtime-hours').oninput = (e) => {
+    getDay(state.currentDate).overtimeHours = Number(e.target.value) || 0;
+    persist(); renderStatsPanel();
+    refreshOtSummary(state.currentMonth);   // 月表那條也同步(背景已渲染的話)
+  };
   // 清空用 delete,不塞 undefined(見 SYNC_REVIEW #1)
   $('overtime-type').onchange = (e) => {
     const d = getDay(state.currentDate);
