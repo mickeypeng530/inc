@@ -2005,6 +2005,7 @@ const fbAuth = getAuth(fbApp);
 const fbDB = getDatabase(fbApp);
 let currentUser = null;
 let userDataRef = null;
+let userPath = null;       // Tier 2 要對個別 days/{date} 讀取,需要路徑字串
 let suppressNextOnValue = false;  // 避免本機 save 觸發 onValue 又重抓蓋掉自己
 // SYNC_REVIEW #2:在「成功讀到雲端狀態」之前,禁止任何全樹寫入。
 // 否則離線/載入失敗時,本機(可能空白或過期)會被整包 set 上去蓋掉雲端全部歷史;
@@ -2496,6 +2497,83 @@ function diffUpdates(prev, next) {
   }
   return u;
 }
+// ===== Tier 2:days 覆寫前的衝突守門 =====
+// 三方合併(base=本機上次看到的雲端形態 / local=本機現值 / cloud=雲端現值):
+//   某個欄位「本機沒動過」→ 採用雲端(可能是桌寵剛寫的)
+//   某個欄位「本機動過」  → 以本機為準
+// 陣列(procedures/meetings/special.others…)視為不可分割的整體,不逐 index 合併 ——
+// 逐 index 合併在「刪除中間一筆」時會產生錯誤結果。
+function merge3(base, local, cloud) {
+  const isPlainObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  if (!isPlainObj(local) || !isPlainObj(cloud)) {
+    return JSON.stringify(local) !== JSON.stringify(base) ? local : cloud;
+  }
+  const out = {};
+  const keys = new Set([...Object.keys(base || {}), ...Object.keys(local), ...Object.keys(cloud)]);
+  for (const k of keys) {
+    const b = base ? base[k] : undefined, l = local[k], c = cloud[k];
+    if (JSON.stringify(l) === JSON.stringify(b)) {
+      if (c !== undefined) out[k] = c;      // 本機沒動 → 跟隨雲端(含雲端刪除)
+    } else {
+      if (l !== undefined) out[k] = l;      // 本機有動 → 本機優先(含本機刪除)
+    }
+  }
+  return out;
+}
+// 對 payload 內每個 days/{date},先讀雲端該天確認有沒有被別人改過。
+// 相同 → 直接寫;不同 → 三方合併後再寫。讀取失敗 → 從 payload 移除該天(寧可不寫也不盲蓋)。
+// 回傳實際合併過的天,呼叫端要把結果回寫本地讓兩邊收斂。
+async function guardDayUpdates(updates) {
+  const merged = new Map();
+  const dayPaths = Object.keys(updates).filter(k => k.startsWith('days/') && updates[k] !== null);
+  if (!dayPaths.length || !userPath) return merged;
+  await Promise.all(dayPaths.map(async (p) => {
+    const date = p.slice(5);
+    let cloudDay;
+    try {
+      const s = await get(ref(fbDB, `${userPath}/days/${date}`));
+      cloudDay = s.exists() ? s.val() : null;
+    } catch (e) {
+      console.error('Tier2:讀不到雲端該天,略過不寫以免盲蓋', date, e);
+      delete updates[p];
+      return;
+    }
+    const baseStr = (lastSynced && lastSynced.days[date]) || 'null';
+    if (JSON.stringify(cloudDay ?? null) === baseStr) return;   // 沒人動過 → 照原樣寫
+    const m = merge3(JSON.parse(baseStr), updates[p], cloudDay || {});
+    m.updatedAt = new Date().toISOString();
+    updates[p] = m;
+    merged.set(date, m);
+  }));
+  return merged;
+}
+// 髒路徑寫入(經 Tier 2 守門)
+async function _writeDirty(updates, nextSnap) {
+  const mySeq = ++syncSeq;
+  try {
+    const merged = await guardDayUpdates(updates);
+    // 期間已有更新的存檔接手 → 放棄本次(對方的 payload 是本次的超集,因為基準尚未推進)
+    if (mySeq !== syncSeq) return;
+    if (!Object.keys(updates).length) return;
+    suppressNextOnValue = true;
+    await update(userDataRef, updates);
+    if (mySeq !== syncSeq) return;
+    // 合併結果回寫本地 + 基準,讓本機/雲端收斂(否則下次 diff 會再把舊值推上去)
+    if (merged.size) {
+      for (const [date, m] of merged) {
+        state.data.days[date] = m;
+        nextSnap.days[date] = JSON.stringify(m);
+      }
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data)); } catch (e) {}
+      console.info(`Tier2:${merged.size} 天與雲端合併(對方較新的欄位已保留)`);
+      renderAll();
+    }
+    lastSynced = nextSnap;
+  } catch (e) {
+    suppressNextOnValue = false;
+    console.error('Firebase update failed', e);
+  }
+}
 // 全樹覆寫(僅限:匯入 JSON 整包覆蓋 / reset)
 function _writeFull(clean, nextSnap) {
   suppressNextOnValue = true;
@@ -2566,16 +2644,7 @@ const storage = {
     if (!lastSynced) { _writeFull(clean, next); return; }   // 沒有基準 → 保守走全樹
     const updates = diffUpdates(lastSynced, next);
     if (!Object.keys(updates).length) return;               // 真的沒變 → 不寫
-    suppressNextOnValue = true;
-    const mySeq = ++syncSeq;
-    try {
-      update(userDataRef, updates)
-        .then(() => { if (mySeq === syncSeq) lastSynced = next; })
-        .catch(e => { suppressNextOnValue = false; console.error('Firebase update failed', e); });
-    } catch (e) {
-      suppressNextOnValue = false;
-      console.error('Firebase update threw (sync)', e);
-    }
+    _writeDirty(updates, next);                             // Tier 2 守門後才寫
   },
   // 全樹覆寫:只給「匯入 JSON 整包覆蓋」這種真的要取代一切的情境
   saveFull(data) {
@@ -6702,7 +6771,8 @@ async function retryCloudLoad(attempt = 1) {
 
 async function enterApp(user) {
   currentUser = user;
-  userDataRef = ref(fbDB, `users/${user.uid}/worknum`);
+  userPath = `users/${user.uid}/worknum`;
+  userDataRef = ref(fbDB, userPath);
   // 通過 auth → 顯示 app
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-root').style.display = '';
