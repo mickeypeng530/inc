@@ -72,6 +72,17 @@ header h1 {
   letter-spacing: 0.01em;
   white-space: nowrap;
 }
+/* 版號:確認瀏覽器有沒有拿到最新部署(Ctrl+F5 後看這裡) */
+.app-version {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  color: var(--ink-muted);
+  letter-spacing: 0.04em;
+  margin-left: -8px;
+  align-self: center;
+  white-space: nowrap;
+}
+body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示 */
 .tabs {
   display: flex;
   gap: 0;
@@ -1749,6 +1760,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 
 <header>
   <h1>績效紀錄</h1>
+  <span class="app-version" id="app-version" title="部署版號 — Ctrl+F5 後版號有變 = 已拿到最新版"></span>
   <nav class="tabs">
     <button class="tab active" data-view="today">今日</button>
     <button class="tab" data-view="month">月表</button>
@@ -1981,6 +1993,13 @@ body:not(.mini-mode) #view-mini { display: none; }
 
 <script type="module">
 'use strict';
+
+// ===== 版號 =====
+// 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
+// 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
+const APP_VERSION = '2026.07.18';
+// 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
+document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
 // ===== Firebase Setup =====
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
