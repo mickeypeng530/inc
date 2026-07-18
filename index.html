@@ -2016,7 +2016,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.18d';
+const APP_VERSION = '2026.07.19';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5356,12 +5356,30 @@ function renderStats() {
       { name: 'IR', values: rows.map(r => r.ir), color: '#58a6ff' },
     ], 720, 210);
 
-  // === P2-1 指數化(基期=第一個已結帳月=100)===
+  // === P2-1 指數化 ===
+  // 基期以「該序列自己第一個 >0 的月」為準,不是統一用第一個已結帳月。
+  // 原因:2023-12 當時還沒開始做 MSK,mskIR=0 → 舊版 (base>0) 判斷不成立,
+  // growth() fallback 回傳 0 顯示「+0%」(其實是算不出來),而 idxOf 全回 null
+  // → 綠色 MSK IR 折線 31 個點一個都畫不出來,圖例卻還在,等於騙人。
   const baseRow = closed[0] || rows[0];
-  const idxOf = (key) => rows.map(r => (baseRow[key] > 0 && r[key] != null) ? r[key] / baseRow[key] * 100 : null);
-  const growth = (key) => { const b = baseRow[key], l = last[key]; return (b > 0 && l != null) ? Math.round((l / b - 1) * 100) : 0; };
-  html += chartPanel(`收入指數化(${baseRow.month}=100)`,
-    `Total <b>+${growth('total')}%</b> · 閱片 <b>+${growth('reading')}%</b> · IR <b style="color:#58a6ff">+${growth('ir')}%</b> · MSK IR <b style="color:#3fb950">+${growth('mskIR')}%</b> 　看成長率差異`,
+  const baseOf = (key) => {
+    const r = rows.find(x => x[key] > 0);
+    return r ? { month: r.month, val: r[key] } : null;
+  };
+  const idxOf = (key) => {
+    const b = baseOf(key);
+    return b ? rows.map(r => (r[key] != null ? r[key] / b.val * 100 : null)) : rows.map(() => null);
+  };
+  // 回傳 '+183%' / '-2%' / '—';基期與圖表基期不同時附註「(自 YYYY-MM)」
+  const growthTxt = (key) => {
+    const b = baseOf(key);
+    if (!b || last[key] == null) return '—';
+    const g = Math.round((last[key] / b.val - 1) * 100);
+    const sign = g > 0 ? '+' : '';   // 負數自帶 '-',不要印成 '+-2%'
+    return `${sign}${g}%` + (b.month !== baseRow.month ? `<span style="opacity:.7;font-weight:normal">(自 ${b.month})</span>` : '');
+  };
+  html += chartPanel(`收入指數化(各序列首個有值月=100)`,
+    `Total <b>${growthTxt('total')}</b> · 閱片 <b>${growthTxt('reading')}</b> · IR <b style="color:#58a6ff">${growthTxt('ir')}</b> · MSK IR <b style="color:#3fb950">${growthTxt('mskIR')}</b> 　看成長率差異(基期不同者不可直接比高低)`,
     'idx', labels, [
       { name: 'Total', values: idxOf('total'), color: 'var(--accent)', fmt: 'num' },
       { name: '閱片', values: idxOf('reading'), color: 'var(--ink-2)', fmt: 'num' },
