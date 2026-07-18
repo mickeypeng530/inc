@@ -1371,6 +1371,20 @@ select.btn-secondary option {
   opacity: 0.65;
   transition: width 0.2s;
 }
+/* 超出目標的那一段 —— 提醒用,刻意不做成警報色(每個月都超,紅燈會被無視) */
+.ot-bar-over {
+  position: absolute; top: 0; bottom: 0;
+  background: var(--danger);
+  opacity: 0.38;
+  transition: width 0.2s, left 0.2s;
+}
+/* 目標刻度線:你跨過的那條線 */
+.ot-bar-tick {
+  position: absolute; top: -1px; bottom: -1px;
+  width: 1px;
+  background: var(--ink-1);
+  opacity: 0.55;
+}
 .ot-bar-label {
   position: relative;
   display: block;
@@ -2002,7 +2016,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.18b';
+const APP_VERSION = '2026.07.18c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -4333,27 +4347,35 @@ function renderMonth() {
   const otStats = calcMonthlyOvertime(month);
   const targets = state.data.settings.overtimeTargets || { weekday: 46, holiday: 16 };
   const colspan = daysInMonth;
-  const wdPct = targets.weekday > 0 ? Math.round(otStats.weekday / targets.weekday * 100) : 0;
-  const hdPct = targets.holiday > 0 ? Math.round(otStats.holiday / targets.holiday * 100) : 0;
+  // 加班條:滿格 = max(目標, 實際)。舊版 fill 卡在 100%,但每個月都超標
+  // → 條子永遠滿格、150% 與 209% 長得一樣,等於沒有資訊。
+  // 現在目標位置畫刻度線,線右邊是「超出量」用另一色 —— 超標是提醒不是警報,
+  // 所以呈現的是「超了多少」這個量,而不是一個永遠亮著的紅燈。
+  const otBar = (label, actual, target) => {
+    const pct = target > 0 ? Math.round(actual / target * 100) : 0;
+    const scale = Math.max(target, actual) || 1;
+    const basePct = Math.min(actual, target) / scale * 100;   // 達標段
+    const overPct = Math.max(0, actual - target) / scale * 100; // 超出段
+    const tickPct = target / scale * 100;
+    const over = actual > target;
+    return el('div', { class: 'ot-merged-item' },
+      el('span', { class: 'ot-merged-label' }, label),
+      el('div', { class: 'ot-bar' },
+        el('div', { class: 'ot-bar-fill', style: `width:${basePct}%` }),
+        over ? el('div', { class: 'ot-bar-over', style: `left:${tickPct}%;width:${overPct}%` }) : null,
+        el('div', { class: 'ot-bar-tick', style: `left:${tickPct}%`, title: `目標 ${target} hr` }),
+        el('span', { class: 'ot-bar-label' },
+          `${actual} / ${target} hr · ${pct}%` + (over ? `(超 ${Math.round((actual - target) * 10) / 10}h)` : ''))
+      )
+    );
+  };
   t.appendChild(el('tr', { class: 'pivot-bottom-row pivot-ot-summary' },
     el('td', { class: 'row-label' }, '加班統計'),
     el('td', { class: 'col-total' }, String(otStats.total)),
     el('td', { colspan: String(colspan), class: 'pivot-ot-summary-cell' },
       el('div', { class: 'ot-merged' },
-        el('div', { class: 'ot-merged-item' },
-          el('span', { class: 'ot-merged-label' }, '平日'),
-          el('div', { class: 'ot-bar' },
-            el('div', { class: 'ot-bar-fill', style: `width:${Math.min(100, wdPct)}%` }),
-            el('span', { class: 'ot-bar-label' }, `${otStats.weekday} / ${targets.weekday} hr · ${wdPct}%`)
-          )
-        ),
-        el('div', { class: 'ot-merged-item' },
-          el('span', { class: 'ot-merged-label' }, '假日'),
-          el('div', { class: 'ot-bar' },
-            el('div', { class: 'ot-bar-fill', style: `width:${Math.min(100, hdPct)}%` }),
-            el('span', { class: 'ot-bar-label' }, `${otStats.holiday} / ${targets.holiday} hr · ${hdPct}%`)
-          )
-        )
+        otBar('平日', otStats.weekday, targets.weekday),
+        otBar('假日', otStats.holiday, targets.holiday)
       )
     )
   ));
