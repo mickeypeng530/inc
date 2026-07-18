@@ -1761,7 +1761,7 @@ body:not(.mini-mode) #view-mini { display: none; }
   <button class="icon-btn" id="open-mini" title="開啟迷你快輸視窗">🪟 迷你</button>
   <button class="icon-btn" id="theme-toggle" title="切換主題">🌓</button>
   <button class="icon-btn" id="export-day" title="複製當日計數為 sheet 一欄">📋 當日</button>
-  <button class="icon-btn" id="import-day" title="貼上 sheet 一欄計數到當前日期(空行不覆蓋)">📥 當日</button>
+  <button class="icon-btn" id="import-day" title="貼上 sheet 該天整欄:計數/收入/IR/Procedure/加班一次帶進來">📥 當日</button>
 </header>
 
 <div class="day-nav">
@@ -5533,6 +5533,81 @@ function applyPastedCounts(date, parsed) {
   day.updatedAt = new Date().toISOString();
   storage.save(state.data);
 }
+
+// === 單日整欄貼上:Excel 某一天那一欄整條複製,一次帶進所有東西 ===
+// sheet 該欄的結構是固定的,所以用「detail 列」當錨點,不需要 A 欄標籤:
+//   [row1 日期?] 計數 ×N(依 Sheet 列順序) → detail1 → 日Total → 日IR → detail2 → 加班
+// detail 出現兩次(row16/row19)且後者是超集(3D / 資源共享 只寫在後面那格)
+// → 一律取 detail2,procedure 才不會重複、addon 才不會漏。
+function parsePastedDayColumn(text, date) {
+  const order = state.data.settings.sheetOrder.filter(o => o.enabled);
+  const grid = msTsvToGrid(text);
+  const cells = grid.map(r => String(r[0] ?? ''));
+  while (cells.length && !cells[cells.length - 1].trim()) cells.pop();   // 砍尾端空列
+  const isDetail = (s) => s.trim() !== '' && msNum(s) == null;
+
+  // --- 找計數區結束位置 ---
+  let tailStart = cells.findIndex(isDetail);
+  if (tailStart < 0) tailStart = Math.min(cells.length, order.length + (cells.length === order.length + 6 ? 1 : 0));
+  let countCells = cells.slice(0, tailStart);
+  const warnings = [];
+  // 若含 row1 的日期編號(比 Sheet 列順序多一列且首值=當天日)→ 捨去
+  let droppedDayHeader = false;
+  if (countCells.length === order.length + 1 && Number(countCells[0]) === Number(date.slice(8))) {
+    countCells = countCells.slice(1);
+    droppedDayHeader = true;
+  }
+  if (countCells.length !== order.length) {
+    warnings.push(`計數區有 ${countCells.length} 列,但「Sheet 列順序」設定了 ${order.length} 項 —— 請核對下方對應表是否錯位`);
+  }
+  const counts = order.map((item, i) => {
+    const raw = String(countCells[i] ?? '').trim().replace(/[^\d.\-]/g, '');
+    return { key: item.key, label: item.label, value: raw === '' ? null : (Number(raw) || 0) };
+  });
+
+  // --- tail 依 sheet 固定位置取(空列也要佔位,不能過濾)---
+  const tail = cells.slice(tailStart);
+  const detail1 = tail[0] ?? '';
+  const detail2 = tail[3] ?? '';
+  const importedRevenue = msNum(tail[1]);
+  const irRevenue = msNum(tail[2]);
+  const overtimeHours = msNum(tail[4]);
+  const detailUsed = isDetail(detail2) ? detail2 : (isDetail(detail1) ? detail1 : '');
+  const det = detailUsed ? parseDetailCell(detailUsed, date) : { procedures: [], addons: [], unmatched: [] };
+  if (isDetail(detail1) && isDetail(detail2) && detail1.trim() !== detail2.trim()) {
+    warnings.push('兩格 detail 內容不同 → 採用後面那格(3D / 資源共享 寫在後面)');
+  }
+  if (tail.length > 5) warnings.push(`尾端多出 ${tail.length - 5} 列未使用`);
+
+  return {
+    counts, procedures: det.procedures, addons: det.addons, unmatched: det.unmatched,
+    importedRevenue, irRevenue, overtimeHours,
+    warnings, droppedDayHeader, filledCounts: counts.filter(c => c.value != null).length,
+  };
+}
+// 套用:整天覆蓋(procedure/addon 直接取代,避免重貼同一天造成重複)
+function applyPastedDayColumn(date, parsed) {
+  const day = getDay(date);
+  for (const p of parsed.counts) {
+    if (p.value == null) continue;                 // 空行不覆蓋
+    if (p.key === 'special.total') {
+      const others = ensureSpecialOthers(day);
+      others.length = 0;
+      if (p.value > 0) {
+        const price = state.data.settings.unitPrices.special?.eso_tbe || 231;
+        others.push({ id: 'paste_' + Date.now(), catalogId: 'legacy_other', amount: price, count: p.value });
+      }
+    } else setCount(day, p.key, p.value);
+  }
+  day.procedures = parsed.procedures;              // 取代而非附加 → 重貼同一天不會變兩倍
+  if (parsed.addons.length) day.addons = parsed.addons; else delete day.addons;
+  if (parsed.importedRevenue != null) day.importedRevenue = parsed.importedRevenue;
+  if (parsed.irRevenue != null) day.irRevenue = parsed.irRevenue; else delete day.irRevenue;
+  if (parsed.overtimeHours != null) day.overtimeHours = parsed.overtimeHours;
+  touchDay(date);
+  storage.save(state.data);
+}
+
 // --- Procedure 批次貼上(進指定日;每行「病歷號 preset名」)---
 function parsePastedProcedures(text) {
   const presets = state.data.settings.presets || [];
@@ -5619,7 +5694,7 @@ function applyPastedMeetings(month, parsed) {
 function showImportModal(initType, initDate) {
   const month = state.currentMonth;
   const mount = $('modal-mount');
-  let type = initType || 'counts';
+  let type = initType || 'day';   // 單日整欄最完整,當預設
   const dfltDate = initDate || (todayISO().startsWith(month) ? todayISO() : month + '-01');
   const dateInput = el('input', { type: 'date', class: 'paste-date', value: dfltDate });
   const dateRow = el('div', { class: 'paste-date-row', style: 'display:flex;align-items:center;gap:8px;margin:2px 0 8px' },
@@ -5628,20 +5703,54 @@ function showImportModal(initType, initDate) {
   const ta = el('textarea', { class: 'paste-textarea', rows: '12' });
   const preview = el('div', { class: 'paste-preview' });
   const PH = {
+    day: '到 Excel 選取該天那一整欄(從日期或 CT 那列,一路選到加班列)→ 複製 → 貼這裡\n一次帶進:計數 / 日 Total / 日 IR / Procedure(含病歷號)/ 3D·資源共享 / 加班',
     counts: '從 sheet 複製一整欄計數,貼這裡\n(每行一個數字,空行=該項留空,順序依設定→Sheet 列順序)',
     meeting: '每行:日期(可多個,空格分隔) ⇥ 角色 ⇥ 會議名 ⇥ 當月總額\n例:6 13 20 27 ⇥ 主講 ⇥ 骨科手術案例討論 ⇥ 12000',
     procedure: '每行:病歷號 preset名\n例:\n1874176 Arthro\n339804 CT NB',
   };
   const HINT = {
+    day: '整天覆蓋指定日期(procedure/addon 取代而非附加,重貼不會變兩倍)。detail 出現兩次時取後面那格 —— 3D / 資源共享 寫在後面。',
     counts: '貼到指定日期。順序依「設定 → Sheet 列順序」;空行不覆蓋、有值覆蓋當日。',
     meeting: `貼到目前月(${month})。每場金額=當月總額÷場次;⚠️新=目錄沒有的會議名;重複直接新增。`,
     procedure: '貼到指定日期。每行第一個數字=病歷號,其餘=preset 名;比對 preset 展開原子項。⚠️=對不到 preset(略過)。',
   };
   const tabsWrap = el('div', { class: 'import-tabs' });
-  const TYPES = [['counts', '計數'], ['meeting', '會議'], ['procedure', 'Procedure']];
+  const TYPES = [['day', '單日整欄'], ['counts', '計數'], ['meeting', '會議'], ['procedure', 'Procedure']];
   const renderPrev = () => {
     preview.innerHTML = '';
     const tbl = el('table', { class: 'settings-table' });
+    if (type === 'day') {
+      if (!ta.value.trim()) { preview.appendChild(el('div', { class: 'paste-count-hint' }, '貼上 Excel 該天那一欄(從日期或 CT 那列,一路選到加班列)')); return; }
+      const d = dateInput.value || dfltDate;
+      const p = parsePastedDayColumn(ta.value, d);
+      for (const w of p.warnings) preview.appendChild(el('div', { class: 'paste-count-hint', style: 'color:var(--warn,#da3)' }, '⚠️ ' + w));
+      const procTxt = p.procedures.length
+        ? p.procedures.map(x => `${x.medRecord || '—'} ${x.presetName}`).join('、') : '(無)';
+      const addonTxt = p.addons.length
+        ? p.addons.map(a => `${a.type === 'd3' ? '3D' : '資源共享'}×${a.count}`).join('、') : '(無)';
+      tbl.appendChild(el('tr', null, el('th', null, '項目'), el('th', null, '將寫入')));
+      const row = (k, v, hl) => tbl.appendChild(el('tr', null,
+        el('td', null, k),
+        el('td', { style: hl ? 'color:var(--accent);font-weight:600' : 'color:var(--ink-muted)' }, v)));
+      row('計數', `${p.filledCounts} / ${p.counts.length} 項`, p.filledCounts > 0);
+      row('日 Total(收入)', p.importedRevenue != null ? fmtMoney(p.importedRevenue) : '—(未解析到)', p.importedRevenue != null);
+      row('日 IR', p.irRevenue != null ? fmtMoney(p.irRevenue) : '—', p.irRevenue != null);
+      row('加班時數', p.overtimeHours != null ? p.overtimeHours + ' hr' : '—(未解析到)', p.overtimeHours != null);
+      row(`Procedure(${p.procedures.length} 筆)`, procTxt, p.procedures.length > 0);
+      row('Addon', addonTxt, p.addons.length > 0);
+      preview.appendChild(el('div', { class: 'paste-count-hint' },
+        `將整天覆蓋 ${d}${p.droppedDayHeader ? ' · 已略過首列日期編號' : ''}`));
+      preview.appendChild(tbl);
+      // 計數逐項對應(讓使用者確認沒錯位)
+      const ct = el('table', { class: 'settings-table', style: 'margin-top:8px' });
+      ct.appendChild(el('tr', null, el('th', null, '#'), el('th', null, '項目'), el('th', null, '值')));
+      p.counts.forEach((c, i) => ct.appendChild(el('tr', null,
+        el('td', { style: 'color:var(--ink-muted)' }, String(i + 1)), el('td', null, c.label),
+        el('td', { style: c.value != null ? 'color:var(--accent);font-weight:600' : 'color:var(--ink-muted)' }, c.value != null ? String(c.value) : '—'))));
+      preview.appendChild(ct);
+      if (p.unmatched.length) preview.appendChild(el('div', { class: 'paste-count-hint', style: 'color:var(--warn,#da3)' }, `⚠️ ${p.unmatched.length} 行術式沒對到(略過):` + p.unmatched.join(';')));
+      return;
+    }
     if (type === 'counts') {
       const parsed = parsePastedCounts(ta.value);
       const filled = parsed.filter(p => p.value != null).length;
@@ -5679,6 +5788,7 @@ function showImportModal(initType, initDate) {
   };
   for (const [k, lbl] of TYPES) tabsWrap.appendChild(el('button', { class: 'btn-secondary', 'data-t': k, onclick: () => setType(k) }, lbl));
   ta.addEventListener('input', renderPrev);
+  dateInput.addEventListener('change', renderPrev);   // 單日整欄:日期影響「首列是否為日期編號」的判定
   const overlay = el('div', { class: 'modal-overlay' });
   const close = () => overlay.remove();
   const modal = el('div', { class: 'modal paste-modal' },
@@ -5689,7 +5799,15 @@ function showImportModal(initType, initDate) {
       el('button', { class: 'btn-secondary', onclick: close }, '取消'),
       el('button', { class: 'btn-primary', onclick: () => {
         let msg;
-        if (type === 'counts') { const d = dateInput.value || dfltDate; applyPastedCounts(d, parsePastedCounts(ta.value)); msg = `已貼上計數到 ${d}`; }
+        if (type === 'day') {
+          const d = dateInput.value || dfltDate;
+          const p = parsePastedDayColumn(ta.value, d);
+          applyPastedDayColumn(d, p);
+          msg = `已整天覆蓋 ${d}(計數 ${p.filledCounts} 項 · procedure ${p.procedures.length} 筆`
+            + (p.importedRevenue != null ? ` · 收入 ${fmtMoney(p.importedRevenue)}` : '')
+            + (p.overtimeHours != null ? ` · 加班 ${p.overtimeHours}h` : '') + ')';
+        }
+        else if (type === 'counts') { const d = dateInput.value || dfltDate; applyPastedCounts(d, parsePastedCounts(ta.value)); msg = `已貼上計數到 ${d}`; }
         else if (type === 'meeting') { const n = applyPastedMeetings(month, parsePastedMeetings(ta.value, month)); msg = `已新增 ${n} 場會議到 ${month}`; }
         else { const d = dateInput.value || dfltDate; const n = applyPastedProcedures(d, parsePastedProcedures(ta.value)); msg = `已匯入 ${n} 筆 procedure 到 ${d}`; }
         close();
@@ -5793,6 +5911,62 @@ const MS_DISPLAY_NAME = {
 };
 const MS_ADDON_PRICE = { d3: 600, source: 100 };
 const MS_MEDREC_LINE = /^([A-Z]?\d{4,})\s+\S/;
+
+// 3D / 資源共享 這類「非 IR 的加價項」→ 不是 procedure,獨立存 day.addons
+function msDetectAddon(line) {
+  let t = String(line || '').trim();
+  if (!t) return null;
+  const m = t.match(/^[A-Z]?\d{4,}\s+(.+)$/);   // 剝掉前綴病歷號(若有)
+  if (m) t = m[1].trim();
+  let s = t.toLowerCase();
+  let cnt = 1;
+  const cm = s.match(/\*\s*(\d+)\s*$/);          // 「資源共享*4」
+  if (cm) { cnt = Number(cm[1]); s = s.slice(0, cm.index).trim(); }
+  if (s === '3d') return ['d3', cnt];
+  if (['source', 'sourse', 'src', '資源共享', 'res_share'].includes(s)) return ['source', cnt];
+  return null;
+}
+// 解析一格 detail(多行:每行「病歷號 術式」或 addon)。
+// 「📄 貼整月」與「單日整欄」共用,兩邊邏輯不會漂移。
+function parseDetailCell(text, dateKey) {
+  const procedures = [], addons = [], unmatched = [];
+  for (const raw of String(text || '').split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const ad = msDetectAddon(line);
+    if (ad) { addons.push({ type: ad[0], count: ad[1], amount: MS_ADDON_PRICE[ad[0]], _import: true }); continue; }
+    let medrec = '', body = line;
+    const m = line.match(/^([A-Z]?\d{4,})\s*(.*)$/);
+    if (m) { medrec = m[1]; body = (m[2] || '').trim(); }
+    else {
+      const m2 = line.match(/\b([A-Z]?\d{4,})\b/);   // 病歷號寫在後面
+      if (m2) { medrec = m2[1]; body = (line.slice(0, m2.index) + line.slice(m2.index + m2[1].length)).trim(); }
+    }
+    const lower = body.toLowerCase();
+    let aid = null, matchedKw = null;
+    for (const [kw, mapped] of MS_PROC_ALIAS) {
+      if (kw.length <= 2 ? new RegExp('\\b' + kw + '\\b').test(lower) : lower.includes(kw)) { aid = mapped; matchedKw = kw; break; }
+    }
+    if (!aid) { if (body) unmatched.push(`${dateKey}: ${line}`); continue; }
+    if (aid === 'arthro' && /\bnb\b/.test(lower)) aid = 'nb';      // NB+arthro 記 1 筆 NB
+    if (aid === 'drain_sub' && dateKey >= '2025-12-01') {
+      aid = lower.replace(/\s/g, '').includes('(pcn)') ? 'dr_pcn' : 'dr_ptcd';   // DR 借碼計價
+    }
+    let cnt = 1;
+    const mStar = body.match(/\*\s*(\d+)\b/);
+    if (mStar) cnt = Number(mStar[1]);
+    else if (matchedKw && /^[a-z ]+$/.test(matchedKw)) {
+      const sm = lower.match(new RegExp(matchedKw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\d+)\\b'));
+      if (sm) { const n = Number(sm[1]); if (n >= 2 && n <= 20) cnt = n; }
+    }
+    const price = MS_COMBO_PRICE[aid] || MS_PRICE_DEFAULT[aid] || 0;
+    const disp = MS_DISPLAY_NAME[aid] || (aid.length <= 5 ? aid.toUpperCase() : aid);
+    for (let i = 0; i < cnt; i++) {
+      procedures.push({ presetId: aid, presetName: disp, medRecord: medrec, items: [{ atomicId: aid, name: disp, amount: price }], time: '', note: body, _import: true });
+    }
+  }
+  return { procedures, addons, unmatched };
+}
 
 // 主解析:text=整張分頁 TSV;month='YYYY-MM';meetingCatalog=settings.meetingCatalog
 // 回傳 { days, monthlyMeta, report }
@@ -6006,65 +6180,17 @@ function parseMonthSheetTSV(text, month, meetingCatalog) {
     // 同分取較後列(row19 通常比 row16 完整:多 3D/資源共享/漏筆)
     if (rich > bestRich || (detailRow != null && rich > 0 && rich === bestRich)) { bestRich = rich; detailRow = r; }
   }
-  const detectAddon = (line) => {
-    let t = line.trim();
-    if (!t) return null;
-    const m = t.match(/^[A-Z]?\d{4,}\s+(.+)$/);
-    if (m) t = m[1].trim();
-    let s = t.toLowerCase();
-    let cnt = 1;
-    const cm = s.match(/\*\s*(\d+)\s*$/);
-    if (cm) { cnt = Number(cm[1]); s = s.slice(0, cm.index).trim(); }
-    if (s === '3d') return ['d3', cnt];
-    if (['source', 'sourse', 'src', '資源共享', 'res_share'].includes(s)) return ['source', cnt];
-    return null;
-  };
   let procTotal = 0;
   if (detailRow != null) {
     for (const [c, dn] of Object.entries(dayCols)) {
       const v = cell(detailRow, Number(c));
       if (typeof v !== 'string' || !v.trim()) continue;
       const d = ensure(dn);
-      for (const raw of v.split('\n')) {
-        const line = raw.trim();
-        if (!line) continue;
-        const ad = detectAddon(line);
-        if (ad) {
-          if (!d.addons) d.addons = [];
-          d.addons.push({ type: ad[0], count: ad[1], amount: MS_ADDON_PRICE[ad[0]], _import: true });
-          continue;
-        }
-        let medrec = '', text = line;
-        let m = line.match(/^([A-Z]?\d{4,})\s*(.*)$/);
-        if (m) { medrec = m[1]; text = (m[2] || '').trim(); }
-        else {
-          const m2 = line.match(/\b([A-Z]?\d{4,})\b/);
-          if (m2) { medrec = m2[1]; text = (line.slice(0, m2.index) + line.slice(m2.index + m2[1].length)).trim(); }
-        }
-        const lower = text.toLowerCase();
-        let aid = null, matchedKw = null;
-        for (const [kw, mapped] of MS_PROC_ALIAS) {
-          if (kw.length <= 2 ? new RegExp('\\b' + kw + '\\b').test(lower) : lower.includes(kw)) { aid = mapped; matchedKw = kw; break; }
-        }
-        if (!aid) { if (text) report.unmatched.push(`${dnumKey(dn)}: ${line}`); continue; }
-        if (aid === 'arthro' && /\bnb\b/.test(lower)) aid = 'nb';  // NB+arthro 記 1 筆 NB
-        if (aid === 'drain_sub' && dnumKey(dn) >= '2025-12-01') {
-          aid = lower.replace(/\s/g, '').includes('(pcn)') ? 'dr_pcn' : 'dr_ptcd';  // DR 借碼計價
-        }
-        let cnt = 1;
-        const mStar = text.match(/\*\s*(\d+)\b/);
-        if (mStar) cnt = Number(mStar[1]);
-        else if (matchedKw && /^[a-z ]+$/.test(matchedKw)) {
-          const sm = lower.match(new RegExp(matchedKw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\d+)\\b'));
-          if (sm) { const n = Number(sm[1]); if (n >= 2 && n <= 20) cnt = n; }
-        }
-        const price = MS_COMBO_PRICE[aid] || MS_PRICE_DEFAULT[aid] || 0;
-        const disp = MS_DISPLAY_NAME[aid] || (aid.length <= 5 ? aid.toUpperCase() : aid);
-        for (let i = 0; i < cnt; i++) {
-          d.procedures.push({ presetId: aid, presetName: disp, medRecord: medrec, items: [{ atomicId: aid, name: disp, amount: price }], time: '', note: text, _import: true });
-          procTotal++;
-        }
-      }
+      const r = parseDetailCell(v, dnumKey(dn));
+      if (r.addons.length) d.addons = (d.addons || []).concat(r.addons);
+      d.procedures.push(...r.procedures);
+      procTotal += r.procedures.length;
+      report.unmatched.push(...r.unmatched);
     }
   }
 
@@ -6941,7 +7067,7 @@ async function enterApp(user) {
   $('day-notes').oninput = (e) => { getDay(state.currentDate).notes = e.target.value; persist(); };
 
   $('export-day').onclick = exportDayTSV;
-  $('import-day').onclick = () => showImportModal('counts', state.currentDate);
+  $('import-day').onclick = () => showImportModal('day', state.currentDate);
   $('month-import').onclick = () => showImportModal();
   $('month-paste-sheet').onclick = () => showMonthSheetModal();
   // 月表 pivot:滾輪直接橫向捲動;捲到底/頭時放行給頁面直捲
