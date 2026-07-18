@@ -2608,11 +2608,30 @@ function setCount(day, key, val) {
   }
   target[parts.at(-1)] = Math.max(0, Number(val) || 0);
 }
+// SYNC_REVIEW #7:getDay 有「建檔」副作用,只能給真的要寫入的路徑用。
+// 建立當下**不蓋 updatedAt** —— 憑空生出的空白天不該宣稱「我在 T 時刻編輯過」,
+// 否則 Tier 1/2 的衝突判定會誤判本地較新,拿空 counts 蓋掉桌寵剛寫的資料。
+// 真正的編輯一律由 touchDay()/persist() 蓋 updatedAt。
 function getDay(date) {
   if (!state.data.days[date]) {
-    state.data.days[date] = { counts: {}, procedures: [], meetings: [], overtimeHours: 0, schedule: {}, notes: '', updatedAt: new Date().toISOString() };
+    state.data.days[date] = { counts: {}, procedures: [], meetings: [], overtimeHours: 0, schedule: {}, notes: '' };
   }
   return state.data.days[date];
+}
+// 唯讀存取:不建檔、不留痕跡。render / export 一律走這支。
+// 回傳共用凍結空物件 —— 誤用寫入會直接 throw(strict mode),不會靜默污染別天
+const EMPTY_DAY = Object.freeze({
+  counts: Object.freeze({}), procedures: Object.freeze([]), meetings: Object.freeze([]),
+  addons: Object.freeze([]), overtimeHours: 0, schedule: Object.freeze({}), notes: '',
+});
+function peekDay(date) {
+  return state.data.days[date] || EMPTY_DAY;
+}
+// 標記某天「真的被使用者改過」:唯一該蓋 updatedAt 的地方(Tier 1/2 衝突判定靠它)
+function touchDay(date) {
+  const d = getDay(date);
+  d.updatedAt = new Date().toISOString();
+  return d;
 }
 function persist() {
   clearTimeout(state.saveDebounce);
@@ -2760,7 +2779,7 @@ function renderAll() {
 }
 
 function renderMini() {
-  const day = getDay(state.currentDate);
+  const day = peekDay(state.currentDate);   // 唯讀:純瀏覽不建檔(#7)
   const layout = state.data.settings.miniLayout || [];
   const layoutSet = new Set(layout);
 
@@ -2866,7 +2885,7 @@ function renderDayLabel() {
 
 // --- Today: counts panel ---
 function renderCountsPanel() {
-  const day = getDay(state.currentDate);
+  const day = peekDay(state.currentDate);   // 唯讀:純瀏覽不建檔(#7)
   const settings = state.data.settings;
   const c = $('counts-container');
   c.innerHTML = '';
@@ -3081,7 +3100,7 @@ function countKeyNav(e) {
 
 // --- Today: procedures panel ---
 function renderProceduresPanel() {
-  const day = getDay(state.currentDate);
+  const day = peekDay(state.currentDate);   // 唯讀:純瀏覽不建檔(#7)
   const sel = $('preset-select');
   sel.innerHTML = '';
   for (const p of (state.data.settings.presets || [])) {
@@ -3269,12 +3288,15 @@ function setMeetingDates(month, catalogId, datesStr) {
     const date = `${month}-${String(d).padStart(2,'0')}`;
     const dayRec = state.data.days[date];
     if (!dayRec) continue;
+    const before = (dayRec.meetings || []).length;
     dayRec.meetings = (dayRec.meetings || []).filter(mtg => mtg.catalogId !== catalogId);
+    // 真的刪到才蓋 updatedAt —— 沒動到的天不可留痕跡(#7)
+    if (dayRec.meetings.length !== before) touchDay(date);
   }
   if (info) {
     for (const d of dates) {
       const date = `${month}-${String(d).padStart(2,'0')}`;
-      const dayRec = getDay(date);
+      const dayRec = touchDay(date);   // #7/#12:改動要蓋 updatedAt,否則衝突判定會被回滾
       if (!dayRec.meetings) dayRec.meetings = [];
       dayRec.meetings.push({ catalogId: info.id, role: info.role, name: info.name, amount: info.amount });
     }
@@ -3400,7 +3422,7 @@ function renderMeetingPanel() {
 
 // --- Today: stats panel ---
 function renderStatsPanel() {
-  const day = getDay(state.currentDate);
+  const day = peekDay(state.currentDate);   // 唯讀:純瀏覽不建檔(#7)
   const settings = state.data.settings;
 
   const baseR = calcBaseRevenue(day, settings);
@@ -5401,7 +5423,7 @@ function applyPastedMeetings(month, parsed) {
   let added = 0;
   for (const r of parsed.rows) {
     for (const d of r.dates) {
-      const day = getDay(`${month}-${String(d).padStart(2, '0')}`);
+      const day = touchDay(`${month}-${String(d).padStart(2, '0')}`);   // #7/#12:蓋 updatedAt
       if (!day.meetings) day.meetings = [];
       day.meetings.push({ catalogId: r.catalogId, role: r.role, name: r.name, amount: r.per });
       added++;
@@ -6059,7 +6081,7 @@ function showMonthSheetModal() {
 
 // --- TSV export ---
 function exportDayTSV() {
-  const day = getDay(state.currentDate);
+  const day = peekDay(state.currentDate);   // 唯讀:純瀏覽不建檔(#7)
   const order = state.data.settings.sheetOrder.filter(o => o.enabled);
   const lines = [];
   for (const item of order) {
