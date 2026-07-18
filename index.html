@@ -2016,7 +2016,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.19b';
+const APP_VERSION = '2026.07.19c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5357,12 +5357,21 @@ function renderStats() {
     ], 720, 210);
 
   // === P2-1 指數化 ===
-  // 基期以「該序列自己第一個 >0 的月」為準,不是統一用第一個已結帳月。
-  // 原因:2023-12 當時還沒開始做 MSK,mskIR=0 → 舊版 (base>0) 判斷不成立,
-  // growth() fallback 回傳 0 顯示「+0%」(其實是算不出來),而 idxOf 全回 null
-  // → 綠色 MSK IR 折線 31 個點一個都畫不出來,圖例卻還在,等於騙人。
-  const baseRow = closed[0] || rows[0];
+  // 基期選 2025-01 的理由(2026-07-19 檢討後改):
+  //   ① 原本用第一個已結帳月 2023-12,但那時還沒開始做 MSK(mskIR=0)→ 分母為零,
+  //      成長率算不出來被 fallback 成「+0%」,且該序列 31 個點全 null、折線根本畫不出來,
+  //      圖例卻還在 —— 這張圖標題寫「看成長率差異」卻少一條線,等於騙人。
+  //   ② 2023-12 本身 total 比鄰近月中位數低 17%(只有 24 個有效天,草創期),
+  //      當分母會把所有成長率灌水。
+  //   ③ 2024-04(開門診)雖然四項都有值,但那月 mskIR 只有 3320(前後是 5420/13567),
+  //      當分母得到 +1108%,會把 Y 軸撐爆、其他三條壓成平線。
+  //   ④ 2025-01 四項都是穩定數值 → 四條線可直接互相比較,這才是本圖的用途。
+  // 基期之前的月份照樣畫(數值低於/高於 100),歷史軌跡不會消失。
+  const IDX_BASE_MONTH = '2025-01';
+  const idxBaseRow = rows.find(r => r.month === IDX_BASE_MONTH);
+  // 防呆:基期月該序列為 0/缺值 → 退回它自己第一個有值月,並在說明標注
   const baseOf = (key) => {
+    if (idxBaseRow && idxBaseRow[key] > 0) return { month: idxBaseRow.month, val: idxBaseRow[key] };
     const r = rows.find(x => x[key] > 0);
     return r ? { month: r.month, val: r[key] } : null;
   };
@@ -5370,16 +5379,24 @@ function renderStats() {
     const b = baseOf(key);
     return b ? rows.map(r => (r[key] != null ? r[key] / b.val * 100 : null)) : rows.map(() => null);
   };
-  // 回傳 '+183%' / '-2%' / '—';基期與圖表基期不同時附註「(自 YYYY-MM)」
+  // 成長率終點用「最後一個已結帳月」,不用 rows 最後一筆 —— 當月還沒過完(perfTotal
+  // 未填 = isOpen),拿它當終點會被不完整資料拖成假谷底(下方 histClosed 也是同樣考量)。
+  // 折線本身仍畫到當月,末點以空心標示進行中。
+  const idxLast = closed.length ? closed[closed.length - 1] : last;
+  // 回傳 '+109%' / '-2%' / '—';基期與圖表基期不同時附註「(自 YYYY-MM)」
   const growthTxt = (key) => {
     const b = baseOf(key);
-    if (!b || last[key] == null) return '—';
-    const g = Math.round((last[key] / b.val - 1) * 100);
+    if (!b || idxLast[key] == null) return '—';
+    const g = Math.round((idxLast[key] / b.val - 1) * 100);
     const sign = g > 0 ? '+' : '';   // 負數自帶 '-',不要印成 '+-2%'
-    return `${sign}${g}%` + (b.month !== baseRow.month ? `<span style="opacity:.7;font-weight:normal">(自 ${b.month})</span>` : '');
+    return `${sign}${g}%` + (b.month !== IDX_BASE_MONTH ? `<span style="opacity:.7;font-weight:normal">(自 ${b.month})</span>` : '');
   };
-  html += chartPanel(`收入指數化(各序列首個有值月=100)`,
-    `Total <b>${growthTxt('total')}</b> · 閱片 <b>${growthTxt('reading')}</b> · IR <b style="color:#58a6ff">${growthTxt('ir')}</b> · MSK IR <b style="color:#3fb950">${growthTxt('mskIR')}</b> 　看成長率差異(基期不同者不可直接比高低)`,
+  const idxFellBack = ['total', 'reading', 'ir', 'mskIR'].some(k => { const b = baseOf(k); return b && b.month !== IDX_BASE_MONTH; });
+  html += chartPanel(`收入指數化(${IDX_BASE_MONTH} = 100)`,
+    `Total <b>${growthTxt('total')}</b> · 閱片 <b>${growthTxt('reading')}</b> · IR <b style="color:#58a6ff">${growthTxt('ir')}</b> · MSK IR <b style="color:#3fb950">${growthTxt('mskIR')}</b>`
+      + ` 　以 <b>${IDX_BASE_MONTH}</b> 為基期(=100)算到 <b>${idxLast.month}</b>(最後一個已結帳月),各項可直接互相比較`
+      + `;${IDX_BASE_MONTH} 之前的月份仍照實顯示`
+      + (idxFellBack ? ';標「自 YYYY-MM」者該月無值,改以自身首個有值月為基期,不可與其他線比高低' : ''),
     'idx', labels, [
       { name: 'Total', values: idxOf('total'), color: 'var(--accent)', fmt: 'num' },
       { name: '閱片', values: idxOf('reading'), color: 'var(--ink-2)', fmt: 'num' },
