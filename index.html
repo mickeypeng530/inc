@@ -2479,18 +2479,42 @@ const storage = {
   },
   // save:localStorage 同步(瞬間)+ Firebase 非同步(背景)
   save(data) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
+    // 保險絲(SYNC_REVIEW #1):RTDB set() 遇巢狀 undefined / 非法 key 會「同步 throw」,
+    // .catch() 接不到 → 呼叫端 stack 炸掉 + suppress 旗標卡在 true 吞掉下次遠端事件,
+    // 該 session 之後所有雲端寫入靜默全滅。
+    //   a) JSON round-trip 當 sanitizer(stringify 本來就要跑,天生剝掉 undefined)
+    //   b) try/catch 包同步 throw,失敗時復原 suppressNextOnValue
+    let json;
+    try { json = JSON.stringify(data); }
+    catch (e) { console.error('save: JSON.stringify 失敗,略過本次存檔', e); return; }
+    try { localStorage.setItem(STORAGE_KEY, json); } catch (e) {}
     bcChannel?.postMessage({ type: 'data-update' });
     if (userDataRef) {
       suppressNextOnValue = true;
-      set(userDataRef, data).catch(e => console.error('Firebase save failed', e));
+      try {
+        set(userDataRef, JSON.parse(json)).catch(e => {
+          suppressNextOnValue = false;
+          console.error('Firebase save failed', e);
+        });
+      } catch (e) {
+        suppressNextOnValue = false;
+        console.error('Firebase save threw (sync)', e);
+      }
     }
   },
   reset() {
     localStorage.removeItem(STORAGE_KEY);
     if (userDataRef) {
       suppressNextOnValue = true;
-      set(userDataRef, null).catch(e => console.error('Firebase reset failed', e));
+      try {
+        set(userDataRef, null).catch(e => {
+          suppressNextOnValue = false;
+          console.error('Firebase reset failed', e);
+        });
+      } catch (e) {
+        suppressNextOnValue = false;
+        console.error('Firebase reset threw (sync)', e);
+      }
     }
   }
 };
@@ -4088,7 +4112,11 @@ function renderMonth() {
       ? el('input', { class: 'income-field-input', type: 'number', value: value != null ? String(value) : '',
           placeholder: '—',
           oninput: (e) => {
-            ensureMM()[key] = e.target.value === '' ? undefined : Number(e.target.value) || 0;
+            // 清空要 delete,不能塞 undefined:RTDB set() 遇巢狀 undefined 會同步 throw,
+            // catch 接不到 → 該 session 後續雲端寫入全滅(見 SYNC_REVIEW #1)
+            const mmObj = ensureMM();
+            if (e.target.value === '') delete mmObj[key];
+            else mmObj[key] = Number(e.target.value) || 0;
             clearTimeout(state.mmDebounce);
             state.mmDebounce = setTimeout(() => storage.save(state.data), 300);
           } })
@@ -6185,7 +6213,11 @@ function renderSettingsAtomics() {
   ));
   const arr = state.data.settings.atomicItems;
   for (const [i, a] of arr.entries()) {
-    const select = el('select', { onchange: (e) => { a.countsAs = e.target.value || undefined; storage.save(state.data); renderMonthProcBreakdown(); } });
+    const select = el('select', { onchange: (e) => {
+      // 清空用 delete,不塞 undefined(見 SYNC_REVIEW #1)
+      if (e.target.value) a.countsAs = e.target.value; else delete a.countsAs;
+      storage.save(state.data); renderMonthProcBreakdown();
+    } });
     select.appendChild(el('option', { value: '' }, '(本身)'));
     for (const other of arr) {
       if (other.id === a.id) continue;
@@ -6609,7 +6641,12 @@ async function enterApp(user) {
   $('preset-add').onclick = addPresetToToday;
 
   $('overtime-hours').oninput = (e) => { getDay(state.currentDate).overtimeHours = Number(e.target.value)||0; persist(); renderStatsPanel(); };
-  $('overtime-type').onchange = (e) => { const d = getDay(state.currentDate); d.overtimeType = e.target.value || undefined; persist(); };
+  // 清空用 delete,不塞 undefined(見 SYNC_REVIEW #1)
+  $('overtime-type').onchange = (e) => {
+    const d = getDay(state.currentDate);
+    if (e.target.value) d.overtimeType = e.target.value; else delete d.overtimeType;
+    persist();
+  };
   $('day-notes').oninput = (e) => { getDay(state.currentDate).notes = e.target.value; persist(); };
 
   $('export-day').onclick = exportDayTSV;
