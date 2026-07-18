@@ -751,6 +751,11 @@ select.btn-secondary option {
 .mp-clearday:hover { border-color: var(--danger); color: var(--danger); }
 .dayproc-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .dayproc-toolbar .mp-clearday { margin-left: auto; }
+.dayproc-typesel {
+  background: var(--bg-page); color: var(--ink-1);
+  border: 1px solid var(--border); border-radius: var(--r);
+  padding: 3px 6px; font-size: 12px;
+}
 .dayproc-list { max-height: 46vh; overflow-y: auto; }
 .dayproc-add {
   display: flex; gap: 8px; align-items: center;
@@ -1997,7 +2002,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.18';
+const APP_VERSION = '2026.07.18b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -4011,18 +4016,27 @@ function renderMonth() {
   t.innerHTML = '';
   t.className = 'pivot-table' + (state.monthEditMode ? ' edit-mode' : '');
 
-  // 週 class helper:週一左邊 = 週界線(切在 日|一 中間);週六日 = 週末底色
+  // 週 class helper:週一左邊 = 週界線(切在 日|一 中間)
+  // 底色依「實際日型」而非只看星期幾 —— 手動標成假日的平日也要橘,否則畫面與
+  // 加班桶的計算不一致(15 小時跑去假日桶,月表上卻看不出來)
   const WD_CHAR = ['日','一','二','三','四','五','六'];
   const weekClsCache = {};
   function weekCls(dateStr) {
-    if (weekClsCache[dateStr] !== undefined) return weekClsCache[dateStr];
+    const type = getDayType(dateStr, state.data.days[dateStr]);
+    const ck = dateStr + '|' + type;   // 日型會被改 → 併入 cache key
+    if (weekClsCache[ck] !== undefined) return weekClsCache[ck];
     const dow = new Date(dateStr + 'T00:00:00').getDay();
     let c = '';
     if (dow === 1) c += ' pivot-week-start';
-    if (dow === 0 || dow === 6) c += ' pivot-weekend';
-    weekClsCache[dateStr] = c;
+    if (type === '假日') c += ' pivot-weekend';
+    weekClsCache[ck] = c;
     return c;
   }
+  // 是否被手動指定(與星期幾推斷的結果無關,只要有設就算)
+  const isDayTypeOverride = (dateStr) => {
+    const t = state.data.days[dateStr]?.overtimeType;
+    return t === '平日' || t === '假日';
+  };
 
   // Header row: 月份 | (空) | 1...N(含星期小字)
   const headRow = el('tr', null,
@@ -4033,12 +4047,15 @@ function renderMonth() {
     const dateStr = `${month}-${String(d).padStart(2,'0')}`;
     const dow = new Date(dateStr + 'T00:00:00').getDay();
     const editable = state.monthEditMode;
+    const ovr = isDayTypeOverride(dateStr);
+    const dType = getDayType(dateStr, state.data.days[dateStr]);
     headRow.appendChild(el('th', {
       class: weekCls(dateStr).trim() + (editable ? ' pivot-day-paste' : ''),
-      title: editable ? `編輯 ${dateStr} 的 procedure(改天/刪/改/新增)` : '',
+      title: (ovr ? `手動標記為${dType}` : '')
+        + (editable ? (ovr ? ' · ' : '') + `編輯 ${dateStr}(日型 / procedure)` : ''),
       onclick: editable ? () => showDayProcModal(dateStr) : null
     },
-      el('div', null, String(d)),
+      el('div', null, String(d) + (ovr ? '•' : '')),
       el('div', { class: 'pivot-wd' + (dow === 0 || dow === 6 ? ' wd-end' : '') }, WD_CHAR[dow])
     ));
   }
@@ -4755,8 +4772,33 @@ function showDayProcModal(date) {
     addSel.value = ''; addQty.value = '1'; addMed.value = '';
     mpRefresh();
   } }, '加入');
+  // 日型(平日/假日)—— 決定加班時數進哪個桶(平日目標 46h / 假日 16h)。
+  // 放在月表這邊改:今日 tab 是當下輸入用,回頭補改或提早設定應該在看得到整月的地方做。
+  const dowChar = '日一二三四五六'[new Date(date + 'T00:00:00').getDay()];
+  const typeSel = el('select', { class: 'dayproc-typesel', title: '加班時數要算進平日桶還是假日桶' },
+    el('option', { value: '' }, `自動(週${dowChar})`),
+    el('option', { value: '平日' }, '平日'),
+    el('option', { value: '假日' }, '假日'));
+  typeSel.value = state.data.days[date]?.overtimeType || '';
+  const typeNow = el('span', { class: 'settings-hint' });
+  const syncTypeHint = () => {
+    typeNow.textContent = '→ 目前算「' + getDayType(date, state.data.days[date]) + '」';
+  };
+  syncTypeHint();
+  typeSel.onchange = (e) => {
+    const d = getDay(date);
+    if (e.target.value) d.overtimeType = e.target.value;
+    else delete d.overtimeType;   // 清空用 delete,不塞 undefined(#1)
+    touchDay(date);
+    storage.save(state.data);
+    syncTypeHint();
+    mpRefresh();                  // 月表底色/• 標記跟著更新
+  };
   const modal = el('div', { class: 'modal paste-modal' },
-    el('h3', null, `${date} Procedure`),
+    el('h3', null, `${date}(週${dowChar})`),
+    el('div', { class: 'dayproc-toolbar' },
+      el('span', { class: 'settings-hint' }, '日型'), typeSel, typeNow
+    ),
     el('div', { class: 'dayproc-toolbar' },
       el('button', { class: 'btn-secondary', title: '貼上一整批 procedure(病歷號+preset名)到這天',
         onclick: () => { close(); showImportModal('procedure', date); } }, '📥 貼上匯入'),
