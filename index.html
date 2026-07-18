@@ -2016,7 +2016,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.19';
+const APP_VERSION = '2026.07.19b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -4443,7 +4443,7 @@ function renderMonth() {
   t.appendChild(el('tr', { class: 'pivot-bottom-row pivot-income-row' },
     el('td', { class: 'row-label' }, '月收入'),
     el('td', { class: 'col-total' }, ''),
-    el('td', { colspan: String(colspan), class: 'pivot-income-cell' },
+    el('td', { colspan: String(daysInMonth), class: 'pivot-income-cell' },
       el('div', { class: 'income-summary' }, ...incomeFields)
     )
   ));
@@ -7136,7 +7136,10 @@ async function enterApp(user) {
     });
   }
 
-  renderAll();
+  // 初次渲染包 try/catch:任何一個 render 出錯都不該讓下面的事件綁定停擺
+  // (曾發生:renderMonth 因 ReferenceError throw → tab 監聽從未掛上 → 整個 app 點不動)
+  try { renderAll(); }
+  catch (e) { console.error('初次渲染失敗(事件仍會綁定)', e); toast('⚠️ 畫面渲染出錯,詳見 Console', ''); }
   bootDone = true;   // 此後的 storage.save 才算使用者編輯(boot 期間 applyTheme 等不算)
 
   for (const btn of document.querySelectorAll('.tab')) btn.addEventListener('click', () => setView(btn.dataset.view));

@@ -28,6 +28,23 @@ node scripts/tests/run_all.js
 | `test_peekday.js` | `peekDay` 純瀏覽不建檔、無 updatedAt、計算回 0、誤寫在 strict mode 會 throw |
 | `test_batch2.js` | #4 special 匯出口徑、#9 migration 不洗自訂 isMSK、#10 跨午夜跳日、#5/#8/#11 |
 
+## 開機冒煙測試(需瀏覽器,不在 run_all 內)
+
+```
+node scripts/tests/gen_smoke.js        # 產生 _smoke.html，用瀏覽器打開看右上角 PASS/FAIL
+node scripts/tests/gen_smoke.js <ref>  # 用某個 commit 的版本對照
+```
+
+把 Firebase import 換成 stub,**用真實備份資料跑完整個 `enterApp`**(含 `renderAll` →
+`renderMonth`/`renderToday`/`renderSettings`),再點過四個 tab,檢查有無 runtime error。
+
+**為什麼需要它**:上面那些測試都只抽「個別函式」來跑,抓不到「整個 render 流程在真實
+資料下 throw」。實際發生過 —— `renderMonth` 因 `colspan is not defined` 中斷 →
+`enterApp` 後面的 tab 事件綁定從未執行 → **整個 app 點不動**,而語法檢查與全部單元測試
+都是綠的。改動 render 流程後請跑這支。
+
+⚠️ 產出的 `_smoke*.html` **內嵌整份備份(含病歷號)**,已在 `.gitignore`,看完請刪除。
+
 ## 注意
 
 - 測試只讀 `index.html`,**不連真的 Firebase、不讀任何含病歷號的檔案**,不會動到雲端資料。

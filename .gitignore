@@ -24,6 +24,10 @@ registry_plan.md
 registry_design.html
 database.rules.json
 # 防呆:含病歷號的 parser 暫存/輸出 + Worknum 匯出絕不上 repo
+# _smoke*.html = 冒煙測試頁,內嵌整份備份資料(含病歷號)→ 絕不可 commit
+_smoke*.html
+_test_*.html
+_repro_*.html
 scratchpad_*.txt
 scratchpad/
 *_parsed.json
