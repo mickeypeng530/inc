@@ -2006,7 +2006,8 @@ const fbDB = getDatabase(fbApp);
 let currentUser = null;
 let userDataRef = null;
 let userPath = null;       // Tier 2 要對個別 days/{date} 讀取,需要路徑字串
-let suppressNextOnValue = false;  // 避免本機 save 觸發 onValue 又重抓蓋掉自己
+// (已移除 suppressNextOnValue:單旗標會把桌寵的更新一起吞掉;自己的回音改由
+//  applyIncoming 的內容比對擋掉,見 SYNC_REVIEW #3 / 報告第 11 點)
 // SYNC_REVIEW #2:在「成功讀到雲端狀態」之前,禁止任何全樹寫入。
 // 否則離線/載入失敗時,本機(可能空白或過期)會被整包 set 上去蓋掉雲端全部歷史;
 // 且 Firebase SDK 會把離線寫入排隊、連線恢復後自動 flush,光擋 initial push 不夠。
@@ -2555,7 +2556,6 @@ async function _writeDirty(updates, nextSnap) {
     // 期間已有更新的存檔接手 → 放棄本次(對方的 payload 是本次的超集,因為基準尚未推進)
     if (mySeq !== syncSeq) return;
     if (!Object.keys(updates).length) return;
-    suppressNextOnValue = true;
     await update(userDataRef, updates);
     if (mySeq !== syncSeq) return;
     // 合併結果回寫本地 + 基準,讓本機/雲端收斂(否則下次 diff 會再把舊值推上去)
@@ -2570,20 +2570,17 @@ async function _writeDirty(updates, nextSnap) {
     }
     lastSynced = nextSnap;
   } catch (e) {
-    suppressNextOnValue = false;
     console.error('Firebase update failed', e);
   }
 }
 // 全樹覆寫(僅限:匯入 JSON 整包覆蓋 / reset)
 function _writeFull(clean, nextSnap) {
-  suppressNextOnValue = true;
   const mySeq = ++syncSeq;
   try {
     set(userDataRef, clean)
       .then(() => { if (mySeq === syncSeq) lastSynced = nextSnap; })
-      .catch(e => { suppressNextOnValue = false; console.error('Firebase save failed', e); });
+      .catch(e => console.error('Firebase save failed', e));
   } catch (e) {
-    suppressNextOnValue = false;
     console.error('Firebase save threw (sync)', e);
   }
 }
@@ -2621,11 +2618,10 @@ const storage = {
   },
   // save:localStorage 同步(瞬間)+ Firebase 非同步(背景)
   save(data) {
-    // 保險絲(SYNC_REVIEW #1):RTDB set() 遇巢狀 undefined / 非法 key 會「同步 throw」,
-    // .catch() 接不到 → 呼叫端 stack 炸掉 + suppress 旗標卡在 true 吞掉下次遠端事件,
-    // 該 session 之後所有雲端寫入靜默全滅。
-    //   a) JSON round-trip 當 sanitizer(stringify 本來就要跑,天生剝掉 undefined)
-    //   b) try/catch 包同步 throw,失敗時復原 suppressNextOnValue
+    // 保險絲(SYNC_REVIEW #1):RTDB set()/update() 遇巢狀 undefined / 非法 key 會
+    // 「同步 throw」,.catch() 接不到 → 呼叫端 stack 炸掉,該 session 之後所有雲端
+    // 寫入靜默全滅。JSON round-trip 當 sanitizer(stringify 本來就要跑,天生剝掉
+    // undefined),寫入端另有 try/catch 包同步 throw。
     let json;
     try { json = JSON.stringify(data); }
     catch (e) { console.error('save: JSON.stringify 失敗,略過本次存檔', e); return; }
@@ -2662,14 +2658,9 @@ const storage = {
     localStorage.removeItem(STORAGE_KEY);
     lastSynced = null;   // 基準失效
     if (userDataRef) {
-      suppressNextOnValue = true;
       try {
-        set(userDataRef, null).catch(e => {
-          suppressNextOnValue = false;
-          console.error('Firebase reset failed', e);
-        });
+        set(userDataRef, null).catch(e => console.error('Firebase reset failed', e));
       } catch (e) {
-        suppressNextOnValue = false;
         console.error('Firebase reset threw (sync)', e);
       }
     }
@@ -2691,9 +2682,50 @@ const state = {
 };
 
 const bcChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('worknum') : null;
-function syncFromStorage() {
-  state.data = storage.load();
+// SYNC_REVIEW #3:外來更新(雲端 onValue / 其他分頁 BC / storage 事件)不可以整包
+// 替換 state.data —— 那會讓各 debounce 裡尚未存檔的編輯蒸發,並打斷正在輸入的欄位。
+// 作法:① 先 flush 未存編輯 ② 逐天三方合併(與 Tier 2 寫入端同一套規則)
+//       ③ 合併結果與現況相同就完全不重繪(自己的回音走這條,不再需要 suppress 旗標)
+function applyIncoming(raw) {
+  if (!raw || !state.data) return;
+  flushPendingSaves();
+  const incomingSnap = snapshotOf(raw);
+  const cloud = _normalizeData(raw);
+  const base = lastSynced;
+  const next = { ...cloud };
+  // top-level(settings/pending/monthlyMeta…):本機動過的保留,否則跟隨對方
+  for (const k of Object.keys(state.data)) {
+    if (k === 'days') continue;
+    const bStr = (base && base.top[k]) ?? 'null';
+    if (JSON.stringify(state.data[k] ?? null) !== bStr) next[k] = state.data[k];
+  }
+  // days:逐天判斷
+  next.days = {};
+  const dates = new Set([...Object.keys(state.data.days || {}), ...Object.keys(cloud.days || {})]);
+  for (const d of dates) {
+    const bStr = (base && base.days[d]) ?? 'null';
+    const l = state.data.days?.[d];
+    const c = cloud.days?.[d];
+    if (JSON.stringify(l ?? null) === bStr) {          // 本機沒動過 → 採用對方
+      if (c !== undefined) next.days[d] = c;
+    } else if (c === undefined) {                       // 對方沒有這天 → 保留本機
+      next.days[d] = l;
+    } else {                                            // 兩邊都動過 → 三方合併
+      next.days[d] = merge3(JSON.parse(bStr), l, c);
+    }
+  }
+  lastSynced = incomingSnap;
+  const nextStr = JSON.stringify(next);
+  if (nextStr === JSON.stringify(state.data)) return;   // 內容沒變 → 不重繪(避免打斷輸入)
+  state.data = next;
+  try { localStorage.setItem(STORAGE_KEY, nextStr); } catch (e) {}
   renderAll();
+}
+function syncFromStorage() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return;
+  try { applyIncoming(JSON.parse(raw)); }
+  catch (e) { console.error('syncFromStorage 解析失敗', e); }
 }
 bcChannel?.addEventListener('message', (e) => {
   if (e.data?.type === 'data-update') syncFromStorage();
@@ -2775,12 +2807,28 @@ function touchDay(date) {
   d.updatedAt = new Date().toISOString();
   return d;
 }
+// ===== debounce 註冊表(SYNC_REVIEW #3)=====
+// 遠端更新到達時,必須先把「排隊中但還沒 fire 的存檔」執行完,否則那些編輯會隨
+// state.data 被替換而蒸發。所有延遲存檔一律走 scheduleSave,才收得齊。
+const _pendingFlush = new Map();
+function scheduleSave(key, fn, ms) {
+  clearTimeout(state[key]);
+  _pendingFlush.set(key, fn);
+  state[key] = setTimeout(() => { _pendingFlush.delete(key); fn(); }, ms);
+}
+function flushPendingSaves() {
+  if (!_pendingFlush.size) return;
+  for (const [key, fn] of [..._pendingFlush]) {
+    clearTimeout(state[key]);
+    _pendingFlush.delete(key);
+    try { fn(); } catch (e) { console.error('flush 失敗', key, e); }
+  }
+}
 function persist() {
-  clearTimeout(state.saveDebounce);
-  state.saveDebounce = setTimeout(() => {
-    state.data.days[state.currentDate].updatedAt = new Date().toISOString();
-    storage.save(state.data);
-  }, 350);
+  // updatedAt 在「呼叫當下」就蓋:一來 350ms 內切日不會蓋錯天(#6),
+  // 二來 debounce 被 flush 或取消時時間戳也不會遺失
+  touchDay(state.currentDate);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 350);
 }
 function toast(msg, type = '') {
   const t = $('toast');
@@ -3196,8 +3244,7 @@ function updateSpecialOther(idx, field, value) {
   if (!others[idx]) return;
   others[idx][field] = value;
   day.updatedAt = new Date().toISOString();
-  clearTimeout(state.saveDebounce);
-  state.saveDebounce = setTimeout(() => storage.save(state.data), 100);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 100);
   renderStatsPanel();
 }
 function updateSpecialOtherFields(idx, fields) {
@@ -3206,8 +3253,7 @@ function updateSpecialOtherFields(idx, fields) {
   if (!others[idx]) return;
   Object.assign(others[idx], fields);
   day.updatedAt = new Date().toISOString();
-  clearTimeout(state.saveDebounce);
-  state.saveDebounce = setTimeout(() => storage.save(state.data), 100);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 100);
   renderCountsPanel();  // 重 render 讓 Other 頂列 × N $XXX 跟著更新
   renderStatsPanel();
 }
@@ -3298,8 +3344,7 @@ function updateProcMedRec(i, val) {
   if (!day.procedures || !day.procedures[i]) return;
   day.procedures[i].medRecord = val;
   day.updatedAt = new Date().toISOString();
-  clearTimeout(state.saveDebounce);
-  state.saveDebounce = setTimeout(() => storage.save(state.data), 200);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 200);
 }
 // 改某筆 procedure 金額:按比例分回原子項(保留 atomic / MSK 判定)
 function updateProcAmount(i, val) {
@@ -3745,8 +3790,7 @@ function renderScheduleBlock() {
       if (!state.data.monthlyMeta) state.data.monthlyMeta = {};
       if (!state.data.monthlyMeta[cur]) state.data.monthlyMeta[cur] = {};
       state.data.monthlyMeta[cur].dutyNote = e.target.value;
-      clearTimeout(state.noteDebounce);
-      state.noteDebounce = setTimeout(() => storage.save(state.data), 350);
+      scheduleSave('noteDebounce', () => storage.save(state.data), 350);
     };
   }
 
@@ -3792,8 +3836,7 @@ function renderScheduleMonthBlock(month) {
   });
   noteInput.addEventListener('input', (e) => {
     ensureMeta().noDutyOverviewNote = e.target.value;
-    clearTimeout(state.noteDebounce);
-    state.noteDebounce = setTimeout(() => storage.save(state.data), 350);
+    scheduleSave('noteDebounce', () => storage.save(state.data), 350);
   });
 
   body.appendChild(el('div', { class: 'schedule-overview-row' },
@@ -3829,8 +3872,7 @@ function updateScheduleEvent(idx, field, value, rerender) {
   const e = state.data.scheduleEvents[idx];
   if (!e) return;
   e[field] = value;
-  clearTimeout(state.schedDebounce);
-  state.schedDebounce = setTimeout(() => {
+  scheduleSave('schedDebounce', () => {
     storage.save(state.data);
     if (field === 'dates') renderScheduleBlock();   // 更新統整
   }, 250);
@@ -3871,15 +3913,13 @@ function setMonthCellCount(date, key, val) {
   const day = getDay(date);
   setCount(day, key, val);
   day.updatedAt = new Date().toISOString();
-  clearTimeout(state.monthSaveDebounce);
-  state.monthSaveDebounce = setTimeout(() => storage.save(state.data), 200);
+  scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
 }
 function setMonthCellOvertime(date, val) {
   const day = getDay(date);
   day.overtimeHours = Number(val) || 0;
   day.updatedAt = new Date().toISOString();
-  clearTimeout(state.monthSaveDebounce);
-  state.monthSaveDebounce = setTimeout(() => storage.save(state.data), 200);
+  scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
 }
 // 編輯模式:改每日總收入 → 存 importedRevenue override(空字串=清除,回到計算值)
 function setMonthCellRevenue(date, val) {
@@ -3887,8 +3927,7 @@ function setMonthCellRevenue(date, val) {
   if (val === '' || val == null) delete day.importedRevenue;
   else day.importedRevenue = Number(val) || 0;
   day.updatedAt = new Date().toISOString();
-  clearTimeout(state.monthSaveDebounce);
-  state.monthSaveDebounce = setTimeout(() => storage.save(state.data), 200);
+  scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
 }
 // 編輯模式:改每日 procedure 金額 → 存 irRevenue override
 function setMonthCellIR(date, val) {
@@ -3896,8 +3935,7 @@ function setMonthCellIR(date, val) {
   if (val === '' || val == null) delete day.irRevenue;
   else day.irRevenue = Number(val) || 0;
   day.updatedAt = new Date().toISOString();
-  clearTimeout(state.monthSaveDebounce);
-  state.monthSaveDebounce = setTimeout(() => storage.save(state.data), 200);
+  scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
 }
 
 function renderMonth() {
@@ -4296,8 +4334,7 @@ function renderMonth() {
             const mmObj = ensureMM();
             if (e.target.value === '') delete mmObj[key];
             else mmObj[key] = Number(e.target.value) || 0;
-            clearTimeout(state.mmDebounce);
-            state.mmDebounce = setTimeout(() => storage.save(state.data), 300);
+            scheduleSave('mmDebounce', () => storage.save(state.data), 300);
           } })
       : el('div', { class: 'income-field-val' }, fmtMoney(value || 0));
     return el('div', { class: 'income-field' },
@@ -4541,8 +4578,7 @@ function mpMedRec(date, i, val) {
   if (!rec) return;
   rec.medRecord = val;
   state.data.days[date].updatedAt = new Date().toISOString();
-  clearTimeout(state.saveDebounce);
-  state.saveDebounce = setTimeout(() => storage.save(state.data), 200);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 200);
 }
 function mpClearDay(date) {
   const day = state.data.days[date];
@@ -6799,17 +6835,11 @@ async function enterApp(user) {
   }
 
   // === 監聽 Firebase 遠端變動(跨裝置同步)===
+  // 不再用 suppressNextOnValue 過濾自己的回音:單旗標會連桌寵的更新一起吞掉,
+  // 而回音經 applyIncoming 合併後內容相同,本來就不會觸發重繪(#3 / 報告第 11 點)
   onValue(userDataRef, (snap) => {
-    if (suppressNextOnValue) { suppressNextOnValue = false; return; }
     if (!snap.exists()) return;
-    const remote = snap.val();
-    const localRaw = localStorage.getItem(STORAGE_KEY);
-    // 雲端已變成 remote → 基準跟著更新,否則下次 diff 會拿舊基準把過期資料重推上去
-    lastSynced = snapshotOf(remote);
-    if (JSON.stringify(remote) === localRaw) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
-    state.data = _normalizeData(remote);
-    renderAll();
+    applyIncoming(snap.val());
   });
 
   state.currentDate = todayISO();
