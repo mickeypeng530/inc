@@ -2006,6 +2006,12 @@ const fbDB = getDatabase(fbApp);
 let currentUser = null;
 let userDataRef = null;
 let suppressNextOnValue = false;  // 避免本機 save 觸發 onValue 又重抓蓋掉自己
+// SYNC_REVIEW #2:在「成功讀到雲端狀態」之前,禁止任何全樹寫入。
+// 否則離線/載入失敗時,本機(可能空白或過期)會被整包 set 上去蓋掉雲端全部歷史;
+// 且 Firebase SDK 會把離線寫入排隊、連線恢復後自動 flush,光擋 initial push 不夠。
+let cloudReady = false;
+let bootDone = false;      // boot 期間的自動存檔(如 applyTheme)不算「離線編輯」
+let offlineEdits = false;  // 讀不到雲端時使用者有無實際修改 → 決定重試成功後可否直接採用雲端
 
 // ===== Seed data (從現有 sheet 抽出) =====
 const SEED = {
@@ -2466,15 +2472,18 @@ const storage = {
     }
   },
   // 非同步:從 Firebase 拉(初次 boot 用)
+  // SYNC_REVIEW #2:必須區分「雲端真的空」與「讀取失敗」——舊版兩者都回 null,
+  // 呼叫端一律當成「雲端空的」而整包上推,離線開 app 就會蓋掉雲端全部歷史。
+  // 回傳 { status: 'ok' | 'empty' | 'error', data }
   async loadFromFirebase() {
-    if (!userDataRef) return null;
+    if (!userDataRef) return { status: 'error', data: null };
     try {
       const snap = await get(userDataRef);
-      if (!snap.exists()) return null;
-      return _normalizeData(snap.val());
+      if (!snap.exists()) return { status: 'empty', data: null };
+      return { status: 'ok', data: _normalizeData(snap.val()) };
     } catch (e) {
       console.error('Firebase load failed', e);
-      return null;
+      return { status: 'error', data: null };
     }
   },
   // save:localStorage 同步(瞬間)+ Firebase 非同步(背景)
@@ -2489,6 +2498,12 @@ const storage = {
     catch (e) { console.error('save: JSON.stringify 失敗,略過本次存檔', e); return; }
     try { localStorage.setItem(STORAGE_KEY, json); } catch (e) {}
     bcChannel?.postMessage({ type: 'data-update' });
+    // SYNC_REVIEW #2:還沒成功讀到雲端 → 只存本機,絕不整包上推(離線寫入會被 SDK
+    // 排隊,連線恢復後 flush 就會用空白/過期資料蓋掉雲端)
+    if (userDataRef && !cloudReady) {
+      if (bootDone) offlineEdits = true;
+      return;
+    }
     if (userDataRef) {
       suppressNextOnValue = true;
       try {
@@ -6547,6 +6562,48 @@ function init() {
     await enterApp(user);
   });
 }
+// === 雲端連線警告條(SYNC_REVIEW #2)===
+// 讀不到雲端時,使用者必須知道「現在的修改沒有上傳」,否則會以為已同步而在別台裝置覆蓋
+function showCloudWarning(msg) {
+  let b = document.getElementById('cloud-warn');
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'cloud-warn';
+    b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;'
+      + 'background:#7a2d2d;color:#fff;font-size:12px;padding:6px 12px;text-align:center;'
+      + 'font-family:var(--font-mono),monospace;line-height:1.5';
+    document.body.appendChild(b);
+  }
+  b.textContent = msg;
+  b.style.display = '';
+}
+function hideCloudWarning() {
+  const b = document.getElementById('cloud-warn');
+  if (b) b.style.display = 'none';
+}
+// 背景重試讀雲端;成功後才解除全樹寫入封鎖
+async function retryCloudLoad(attempt = 1) {
+  const delay = Math.min(30000, 3000 * attempt);   // 3s,6s,9s… 上限 30s
+  setTimeout(async () => {
+    const res = await storage.loadFromFirebase();
+    if (res.status === 'error') { retryCloudLoad(attempt + 1); return; }
+    if (offlineEdits) {
+      // 本機有離線修改:此時採用雲端會蓋掉它、直接上推又會蓋掉雲端 →
+      // 交給使用者決定(資料都還在 localStorage,重整後以雲端為準)
+      showCloudWarning('⚠️ 已連上雲端,但本機有離線修改尚未上傳。請重新整理頁面以雲端為準(本機修改需重新輸入)');
+      return;
+    }
+    if (res.status === 'ok') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(res.data));
+      state.data = res.data;
+      renderAll();
+    }
+    cloudReady = true;
+    hideCloudWarning();
+    toast('✓ 已連上雲端,恢復同步', 'success');
+  }, delay);
+}
+
 async function enterApp(user) {
   currentUser = user;
   userDataRef = ref(fbDB, `users/${user.uid}/worknum`);
@@ -6554,18 +6611,29 @@ async function enterApp(user) {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-root').style.display = '';
 
-  // === 載入資料:Firebase 優先;若 Firebase 空,把本地 localStorage 推上去當初始 ===
-  const fbData = await storage.loadFromFirebase();
-  if (fbData) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(fbData));
-    state.data = fbData;
-  } else {
-    state.data = storage.load();  // 從 localStorage
-    if (Object.keys(state.data.days).length || state.data.settings) {
-      // 第一次上 Firebase:把本地推上去
+  // === 載入資料(SYNC_REVIEW #2:三分支,error 絕不上推)===
+  const res = await storage.loadFromFirebase();
+  if (res.status === 'ok') {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(res.data));
+    state.data = res.data;
+    cloudReady = true;
+  } else if (res.status === 'empty') {
+    // 雲端確定是空的 → 可以安全建立初始節點(不可能蓋到別人的資料)
+    state.data = storage.load();
+    cloudReady = true;
+    if (Object.keys(state.data.days).length) {
       suppressNextOnValue = true;
-      set(userDataRef, state.data).catch(e => console.error('initial push failed', e));
+      try {
+        set(userDataRef, JSON.parse(JSON.stringify(state.data)))
+          .catch(e => { suppressNextOnValue = false; console.error('initial push failed', e); });
+      } catch (e) { suppressNextOnValue = false; console.error('initial push threw', e); }
     }
+  } else {
+    // 讀取失敗(離線/權限/逾時)→ 不知道雲端長怎樣,一律唯讀本機 + 背景重試
+    state.data = storage.load();
+    cloudReady = false;
+    showCloudWarning('⚠️ 讀不到雲端資料:目前僅存本機、不會上傳,正在重試…');
+    retryCloudLoad();
   }
 
   // === 監聽 Firebase 遠端變動(跨裝置同步)===
@@ -6607,6 +6675,7 @@ async function enterApp(user) {
   }
 
   renderAll();
+  bootDone = true;   // 此後的 storage.save 才算使用者編輯(boot 期間 applyTheme 等不算)
 
   for (const btn of document.querySelectorAll('.tab')) btn.addEventListener('click', () => setView(btn.dataset.view));
   $('day-prev').onclick = () => { state.currentDate = shiftDate(state.currentDate, -1); state.currentMonth = isoToMonth(state.currentDate); renderAll(); };
