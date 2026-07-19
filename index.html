@@ -2030,7 +2030,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.19d';
+const APP_VERSION = '2026.07.19e';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2600,6 +2600,7 @@ async function guardDayUpdates(updates) {
     if (JSON.stringify(cloudDay ?? null) === baseStr) return;   // 沒人動過 → 照原樣寫
     const m = merge3(JSON.parse(baseStr), updates[p], cloudDay || {});
     m.updatedAt = new Date().toISOString();
+    stampRevenue(m);   // 合併後內容變了 → revenue 重算再寫,雲端不會留下過期的衍生值
     updates[p] = m;
     merged.set(date, m);
   }));
@@ -2770,6 +2771,9 @@ function applyIncoming(raw) {
     } else {                                            // 兩邊都動過 → 三方合併
       next.days[d] = merge3(JSON.parse(bStr), l, c);
     }
+    // revenue 是衍生值:外部寫入端(桌寵)只改 counts 不會更新它,留著會顯示過期金額。
+    // 依合併後的內容重算 —— 冪等,自己的回音重算結果相同,不會觸發多餘重繪。
+    if (next.days[d]) stampRevenue(next.days[d]);
   }
   lastSynced = incomingSnap;
   const nextStr = JSON.stringify(next);
@@ -2858,11 +2862,23 @@ const EMPTY_DAY = Object.freeze({
 function peekDay(date) {
   return state.data.days[date] || EMPTY_DAY;
 }
-// 標記某天「真的被使用者改過」:唯一該蓋 updatedAt 的地方(Tier 1/2 衝突判定靠它)
+// 標記某天「真的被使用者改過」:唯一該蓋 updatedAt 的地方(Tier 1/2 衝突判定靠它)。
+// 同時把當日收入算好存進 day.revenue —— 外部讀取端(桌寵)不必複製一份計費公式,
+// 也不必去讀 settings.unitPrices;直接讀 days/{date}/revenue 就好。
 function touchDay(date) {
   const d = getDay(date);
   d.updatedAt = new Date().toISOString();
+  stampRevenue(d);
   return d;
+}
+// 寫入 day.revenue 快照。刻意用「即時計算」而不是 getDayRevenue —— 後者會優先讀
+// day.revenue,拿它來算會把舊快照原封不動寫回去。
+function stampRevenue(day) {
+  if (!day) return;
+  if (typeof day.importedRevenue === 'number') { day.revenue = Math.round(day.importedRevenue); return; }
+  const s = state.data && state.data.settings;
+  if (!s || !s.unitPrices) return;   // 設定尚未就緒 → 不寫殘缺值,等下次編輯再蓋
+  day.revenue = Math.round(calcBaseRevenue(day, s) + getDayProcRevenue(day) + calcAddonRevenue(day));
 }
 // ===== debounce 註冊表(SYNC_REVIEW #3)=====
 // 遠端更新到達時,必須先把「排隊中但還沒 fire 的存檔」執行完,否則那些編輯會隨
@@ -2981,8 +2997,13 @@ function calcOvertimeRevenue(day, settings) {
   return (Number(day.overtimeHours)||0) * (Number(settings.overtimeRate)||0);
 }
 // 當日總收入:歷史匯入日優先用 sheet 原始值(importedRevenue);否則 base + IR(2025-12+ 有手算 irRevenue 則優先,與月 IR 同源)+ addon
+// 優先序:匯入權威值 → 編輯當下存下的快照 → 即時計算
+// 用快照的用意:改單價表只影響「之後才編輯到的日子」,不會回頭改動歷史 ——
+// 與 procedure 金額(items[].amount 存快照)行為一致。快照由 touchDay 維護,
+// 每次真正的編輯都會重算,所以畫面不會落後。
 function getDayRevenue(day, settings) {
   if (day && typeof day.importedRevenue === 'number') return day.importedRevenue;
+  if (day && typeof day.revenue === 'number') return day.revenue;
   return calcBaseRevenue(day, settings) + getDayProcRevenue(day) + calcAddonRevenue(day);
 }
 function isImportedDay(day) {
@@ -3150,14 +3171,14 @@ function addPresetMini(presetId) {
     }),
     time: new Date().toISOString(),
   });
-  day.updatedAt = new Date().toISOString();
+  touchDay(state.currentDate);
   storage.save(state.data);
   renderMini();
 }
 function removeProcMini(i) {
   const day = getDay(state.currentDate);
   if (day.procedures) day.procedures.splice(i, 1);
-  day.updatedAt = new Date().toISOString();
+  touchDay(state.currentDate);
   storage.save(state.data);
   renderMini();
 }
@@ -3316,7 +3337,7 @@ function renderCountsPanel() {
 function bumpCount(key, delta) {
   const day = getDay(state.currentDate);
   setCount(day, key, getCount(day, key) + delta);
-  day.updatedAt = new Date().toISOString();
+  touchDay(state.currentDate);
   storage.save(state.data);  // 立刻 save → broadcast,別的視窗同步
   if (state.isMini) renderMini();
   else { renderCountsPanel(); renderStatsPanel(); }
@@ -3332,7 +3353,7 @@ function addSpecialOtherFull(catalogId, amount, count) {
     amount: Number(amount) || 0,
     count: Number(count) || 1,
   });
-  day.updatedAt = new Date().toISOString();
+  touchDay(state.currentDate);
   storage.save(state.data);
   renderCountsPanel();
   renderStatsPanel();
@@ -3342,7 +3363,7 @@ function updateSpecialOther(idx, field, value) {
   const others = ensureSpecialOthers(day);
   if (!others[idx]) return;
   others[idx][field] = value;
-  day.updatedAt = new Date().toISOString();
+  touchDay(state.currentDate);
   scheduleSave('saveDebounce', () => storage.save(state.data), 100);
   renderStatsPanel();
 }
@@ -3351,7 +3372,7 @@ function updateSpecialOtherFields(idx, fields) {
   const others = ensureSpecialOthers(day);
   if (!others[idx]) return;
   Object.assign(others[idx], fields);
-  day.updatedAt = new Date().toISOString();
+  touchDay(state.currentDate);
   scheduleSave('saveDebounce', () => storage.save(state.data), 100);
   renderCountsPanel();  // 重 render 讓 Other 頂列 × N $XXX 跟著更新
   renderStatsPanel();
@@ -3360,7 +3381,7 @@ function removeSpecialOther(idx) {
   const day = getDay(state.currentDate);
   const others = ensureSpecialOthers(day);
   others.splice(idx, 1);
-  day.updatedAt = new Date().toISOString();
+  touchDay(state.currentDate);
   storage.save(state.data);
   renderCountsPanel();
   renderStatsPanel();
@@ -3368,7 +3389,7 @@ function removeSpecialOther(idx) {
 function setCountAndRender(key, val) {
   const day = getDay(state.currentDate);
   setCount(day, key, val);
-  day.updatedAt = new Date().toISOString();
+  touchDay(state.currentDate);
   storage.save(state.data);   // 立刻 save → BC 廣播
   if (state.isMini) renderMini();
   else renderStatsPanel();
@@ -3442,7 +3463,7 @@ function updateProcMedRec(i, val) {
   const day = getDay(state.currentDate);
   if (!day.procedures || !day.procedures[i]) return;
   day.procedures[i].medRecord = val;
-  day.updatedAt = new Date().toISOString();
+  touchDay(state.currentDate);
   scheduleSave('saveDebounce', () => storage.save(state.data), 200);
 }
 // 改某筆 procedure 金額:按比例分回原子項(保留 atomic / MSK 判定)
@@ -3463,7 +3484,7 @@ function updateProcAmount(i, val) {
   } else {
     items[0].amount = newTotal;
   }
-  day.updatedAt = new Date().toISOString();
+  touchDay(state.currentDate);
   storage.save(state.data);
   renderProceduresPanel();
   renderStatsPanel();
@@ -3481,7 +3502,7 @@ function changeProcPreset(i, presetId) {
     const atom = state.data.settings.atomicItems.find(a => a.id === it.atomicId);
     return { atomicId: it.atomicId, name: atom?.name || it.atomicId, amount: Number(it.amount || 0) };
   });
-  day.updatedAt = new Date().toISOString();
+  touchDay(state.currentDate);
   storage.save(state.data);
   renderProceduresPanel();
   renderStatsPanel();
@@ -4011,13 +4032,13 @@ function monthSubLabel(month, child) {
 function setMonthCellCount(date, key, val) {
   const day = getDay(date);
   setCount(day, key, val);
-  day.updatedAt = new Date().toISOString();
+  touchDay(date);
   scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
 }
 function setMonthCellOvertime(date, val) {
   const day = getDay(date);
   day.overtimeHours = Number(val) || 0;
-  day.updatedAt = new Date().toISOString();
+  touchDay(date);
   refreshOtSummary(state.currentMonth);   // 即時更新加班條(不動焦點)
   scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
 }
@@ -4026,7 +4047,7 @@ function setMonthCellRevenue(date, val) {
   const day = getDay(date);
   if (val === '' || val == null) delete day.importedRevenue;
   else day.importedRevenue = Number(val) || 0;
-  day.updatedAt = new Date().toISOString();
+  touchDay(date);
   scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
 }
 // 編輯模式:改每日 procedure 金額 → 存 irRevenue override
@@ -4034,7 +4055,7 @@ function setMonthCellIR(date, val) {
   const day = getDay(date);
   if (val === '' || val == null) delete day.irRevenue;
   else day.irRevenue = Number(val) || 0;
-  day.updatedAt = new Date().toISOString();
+  touchDay(date);
   scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
 }
 
@@ -4434,15 +4455,10 @@ function renderMonth() {
     );
   };
   // 均日薪 = 我的 Total ÷ 有登錄的天數(含收入=0 的休假日,平假日都算);對齊 sheet「均日薪」列
-  // 「有登錄」= 匯入日(importedRevenue 為數字,含 0)或有收入/procedure 的手記日
-  const workedDays = days.reduce((n, date) => {
-    const day = state.data.days[date];
-    if (!day) return n;
-    const entered = typeof day.importedRevenue === 'number'
-      || getDayRevenue(day, state.data.settings) > 0
-      || (day.procedures && day.procedures.length > 0);
-    return n + (entered ? 1 : 0);
-  }, 0);
+  // 「有登錄」= 這天有紀錄就算。舊版還要求「有 importedRevenue 或收入>0 或有 procedure」,
+  // 於是週末/國定假日/請假這種「有紀錄但全空」的日子被漏掉 → 除數偏小、均日薪偏高。
+  // (匯入的休假日有 importedRevenue:0 會被算到,手記的休假日卻不會,兩者不一致。)
+  const workedDays = days.reduce((n, date) => n + (state.data.days[date] ? 1 : 0), 0);
   const avgDaily = workedDays > 0 ? Math.round(revMonth / workedDays) : 0;
   const incomeFields = [
     mkIncomeField('我的 Total', '自己算', revMonth, false, null),
@@ -4629,7 +4645,7 @@ function mpRemove(date, i) {
   const rec = day.procedures[i];
   if (!confirm(`刪除 ${date} 這筆「${rec?.presetName || '?'}」${rec?.medRecord ? '(' + rec.medRecord + ')' : ''}?`)) return;
   day.procedures.splice(i, 1);
-  day.updatedAt = new Date().toISOString();
+  touchDay(date);
   storage.save(state.data);
   mpRefresh();
 }
@@ -4641,7 +4657,7 @@ function mpMoveDay(date, i, newDate) {
   const tgt = getDay(newDate);
   if (!tgt.procedures) tgt.procedures = [];
   tgt.procedures.push(rec);
-  day.updatedAt = tgt.updatedAt = new Date().toISOString();
+  touchDay(date); touchDay(newDate);   // 來源日與目標日都算改動過
   storage.save(state.data);
   const moved = newDate.startsWith(state.currentMonth + '-') ? `已搬到 ${newDate}` : `已搬到 ${newDate}(不在本月,清單看不到)`;
   toast('✓ ' + moved, 'success');
@@ -4659,7 +4675,7 @@ function mpChangePreset(date, i, presetId) {
     const atom = state.data.settings.atomicItems.find(a => a.id === it.atomicId);
     return { atomicId: it.atomicId, name: atom?.name || it.atomicId, amount: Number(it.amount || 0) };
   });
-  day.updatedAt = new Date().toISOString();
+  touchDay(date);
   storage.save(state.data);
   mpRefresh();
 }
@@ -4667,7 +4683,7 @@ function mpMedRec(date, i, val) {
   const rec = state.data.days[date]?.procedures?.[i];
   if (!rec) return;
   rec.medRecord = val;
-  state.data.days[date].updatedAt = new Date().toISOString();
+  touchDay(date);
   scheduleSave('saveDebounce', () => storage.save(state.data), 200);
 }
 function mpClearDay(date) {
@@ -4676,7 +4692,7 @@ function mpClearDay(date) {
   if (!n) return;
   if (!confirm(`清空 ${date} 全部 ${n} 筆 procedure?(貼錯天可先清空,再用「📥 匯入」貼到正確的天)`)) return;
   day.procedures = [];
-  day.updatedAt = new Date().toISOString();
+  touchDay(date);
   storage.save(state.data);
   toast(`✓ 已清空 ${date} 的 ${n} 筆 procedure`, 'success');
   mpRefresh();
@@ -4694,7 +4710,7 @@ function mpAmount(date, i, val) {
     const diff = newTotal - items.reduce((s, it) => s + Number(it.amount || 0), 0);
     if (diff) items[0].amount = Math.max(0, Number(items[0].amount || 0) + diff);
   } else items[0].amount = newTotal;
-  state.data.days[date].updatedAt = new Date().toISOString();
+  touchDay(date);
   storage.save(state.data);
   mpRefresh();
 }
@@ -4816,7 +4832,7 @@ function showDayProcModal(date) {
       }),
       time: new Date().toISOString(),
     });
-    day.updatedAt = new Date().toISOString();
+    touchDay(date);
     storage.save(state.data);
     addSel.value = ''; addQty.value = '1'; addMed.value = '';
     mpRefresh();
@@ -5675,7 +5691,7 @@ function applyPastedCounts(date, parsed) {
       setCount(day, p.key, p.value);
     }
   }
-  day.updatedAt = new Date().toISOString();
+  touchDay(date);
   storage.save(state.data);
 }
 
@@ -5792,7 +5808,7 @@ function applyPastedProcedures(date, parsed) {
     });
     added++;
   }
-  day.updatedAt = new Date().toISOString();
+  touchDay(date);
   storage.save(state.data);
   return added;
 }
@@ -6515,7 +6531,11 @@ function showMonthSheetModal() {
         const overlap = keys.filter(k => state.data.days[k]);
         if (!confirm(`將寫入 ${month} 共 ${keys.length} 天(覆蓋已存在 ${overlap.length} 天)${lastParsed.monthlyMeta ? ' + monthlyMeta' : ''},sheet 沒資料的日子不動。確定?`)) return;
         const now = new Date().toISOString();
-        for (const k of keys) { lastParsed.days[k].updatedAt = now; state.data.days[k] = lastParsed.days[k]; }
+        for (const k of keys) {
+          lastParsed.days[k].updatedAt = now;
+          state.data.days[k] = lastParsed.days[k];
+          stampRevenue(state.data.days[k]);   // 整天覆蓋不走 touchDay,revenue 要自己蓋
+        }
         if (lastParsed.monthlyMeta) {
           if (!state.data.monthlyMeta) state.data.monthlyMeta = {};
           state.data.monthlyMeta[month] = { ...state.data.monthlyMeta[month], ...lastParsed.monthlyMeta };
@@ -7336,7 +7356,7 @@ async function enterApp(user) {
           + (overlap.length ? `(其中 ${overlap.length} 天已存在會被覆蓋)` : '')
           + ',settings/catalog 不變。確定?';
         if (!confirm(msg)) return;
-        for (const d of dateKeys) state.data.days[d] = days[d];
+        for (const d of dateKeys) { state.data.days[d] = days[d]; stampRevenue(state.data.days[d]); }
         if (data.monthlyMeta) {
           if (!state.data.monthlyMeta) state.data.monthlyMeta = {};
           for (const m of Object.keys(data.monthlyMeta)) {

@@ -42,6 +42,14 @@ const get = async (r) => {
 const update = async (r, u) => { __calls.update.push(JSON.parse(JSON.stringify(u))); Object.assign(__applied, u); };
 const set = async (r, d) => { __calls.set.push(d); };
 const renderAll = () => { __rendered.n++; };
+${fn('getCount')}
+${fn('getSpecialOthers')}
+${fn('specialOthersTotalRev')}
+${fn('calcProcRevenue')}
+${fn('getDayProcRevenue')}
+${fn('calcAddonRevenue')}
+${fn('calcBaseRevenue')}
+${fn('stampRevenue')}
 ${fn('snapshotOf')}
 ${fn('diffUpdates')}
 ${fn('merge3')}

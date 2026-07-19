@@ -28,7 +28,11 @@ const bkDir = path.join(ROOT, 'scripts', 'backups');
 const bk = fs.readdirSync(bkDir).filter(f => /^worknum-.*\.json$/.test(f)).sort().pop();
 if (!bk) { console.error('✗ 找不到 scripts/backups/worknum-*.json'); process.exit(1); }
 const backup = JSON.parse(fs.readFileSync(path.join(bkDir, bk), 'utf8'));
-const wn = backup.users[Object.keys(backup.users)[0]].worknum;
+// 備份有兩種格式:RTDB dump(users/{uid}/worknum 包層)與 app「匯出 JSON」(直接就是資料)
+const wn = backup.users
+  ? backup.users[Object.keys(backup.users)[0]].worknum
+  : backup;
+if (!wn || !wn.days) { console.error('✗ 備份格式無法辨識:' + bk); process.exit(1); }
 
 const STUBS = `
 const __DATA = window.__WORKNUM_FIXTURE;

@@ -24,6 +24,14 @@ const renderAll=()=>{ __rendered.n++; };
 const _normalizeData=(d)=>{ d.days=d.days||{}; d.settings=d.settings||{}; return d; };
 let lastSynced=null;
 const _pendingFlush = new Map();
+${fn('getCount')}
+${fn('getSpecialOthers')}
+${fn('specialOthersTotalRev')}
+${fn('calcProcRevenue')}
+${fn('getDayProcRevenue')}
+${fn('calcAddonRevenue')}
+${fn('calcBaseRevenue')}
+${fn('stampRevenue')}
 ${fn('snapshotOf')}
 ${fn('merge3')}
 ${fn('scheduleSave')}
