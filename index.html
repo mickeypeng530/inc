@@ -2030,7 +2030,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.19e';
+const APP_VERSION = '2026.07.20';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2227,8 +2227,7 @@ const PENDING_SCHEMA = [
   { group: 'CT', items: [
     { key: 'ct_opd',   label: 'OPD',   priceKey: 'ct.opd' },
     { key: 'ct_ldct',  label: 'LDCT',  priceKey: 'ct.ldct_health' },
-    { key: 'ct_adm',   label: 'ADM',   priceKey: 'ct.er_adm_self' },
-    { key: 'ct_er_ld', label: 'ER LD', priceKey: 'ct.er_adm_self' },
+    { key: 'ct_adm',   label: 'ADM/ER LD', priceKey: 'ct.er_adm_self' },
   ]},
   { group: 'Special', items: [
     { key: 'hsg',  label: 'HSG',     priceKey: 'special.hsg' },
@@ -2252,6 +2251,19 @@ const PENDING_DEFAULT = (() => {
   for (const g of PENDING_SCHEMA) for (const it of g.items) o[it.key] = 0;
   return o;
 })();
+// 計數 key → 待打 key。計數增加 = 那份報告打完了,待打自動扣掉;計數改少會加回去(打錯改回來會自己復原)。
+// X-ray 目前沒在記錄待打 → 刻意不列,不連動。
+const COUNT_TO_PENDING = {
+  'ct.opd':           'ct_opd',
+  'ct.ldct_health':   'ct_ldct',
+  'ct.er_adm_self':   'ct_adm',   // ADM 與 ER LD 單價相同,待打合成同一格
+  'mr.opd':           'mr_opd',
+  'mr.er_adm_health': 'mr_adm',
+  'bmd':              'bmd',
+  'special.hsg':      'hsg',
+  'special.ivp':      'ivp',
+  'special.swal':     'swal',
+};
 
 // Counts schema
 const COUNTS_SCHEMA = [
@@ -2504,6 +2516,11 @@ function _normalizeData(data) {
   data.settings = { ...deepClone(SEED), ...(data.settings || {}) };
   data.days = data.days || {};
   data.pending = { ...PENDING_DEFAULT, ...(data.pending || {}) };
+  // 待打 CT ADM 與 ER LD 單價相同 → 2026-07 合成一格,舊值併回 ct_adm
+  if (data.pending.ct_er_ld !== undefined) {
+    data.pending.ct_adm = (Number(data.pending.ct_adm) || 0) + (Number(data.pending.ct_er_ld) || 0);
+    delete data.pending.ct_er_ld;
+  }
   data.scheduleEvents = data.scheduleEvents || [];
   data.monthlyMeta = data.monthlyMeta || {};
   // Firebase RTDB 不存空 array → 讀回來變 undefined,補回 []
@@ -3336,11 +3353,13 @@ function renderCountsPanel() {
 
 function bumpCount(key, delta) {
   const day = getDay(state.currentDate);
-  setCount(day, key, getCount(day, key) + delta);
+  const before = getCount(day, key);
+  setCount(day, key, before + delta);
+  syncPendingFromCount(key, getCount(day, key) - before);  // 用實際變化量(setCount 會夾 0)
   touchDay(state.currentDate);
   storage.save(state.data);  // 立刻 save → broadcast,別的視窗同步
   if (state.isMini) renderMini();
-  else { renderCountsPanel(); renderStatsPanel(); }
+  else { renderCountsPanel(); renderStatsPanel(); refreshPendingPanel(); }
 }
 
 // Special.others CRUD
@@ -3388,11 +3407,13 @@ function removeSpecialOther(idx) {
 }
 function setCountAndRender(key, val) {
   const day = getDay(state.currentDate);
+  const before = getCount(day, key);
   setCount(day, key, val);
+  syncPendingFromCount(key, getCount(day, key) - before);
   touchDay(state.currentDate);
   storage.save(state.data);   // 立刻 save → BC 廣播
   if (state.isMini) renderMini();
-  else renderStatsPanel();
+  else { renderStatsPanel(); refreshPendingPanel(); }
 }
 // Sheet 式鍵盤流:focus 自動全選 + Enter/↓ 跳下一計數欄、↑ 跳上一欄
 function countSelectFocus(e) { e.target.select(); }
@@ -3803,40 +3824,37 @@ function renderToday() {
 }
 
 // --- Pending reports (待打) ---
+// 重繪拆兩層:renderPendingPanel() 建 DOM(切 view 時),refreshPendingPanel() 只改數字。
+// **打字時絕不能重建 DOM** —— 舊版 oninput 直接 renderPendingPanel(),每敲一鍵就把正在
+// 輸入的 input 一起砍掉、焦點消失,結果只剩 ±1 按鈕能用。同計數欄的 setCountAndRender 原則。
+let _pendingRefs = null;
+
 function renderPendingPanel() {
   const grid = $('pending-grid');
   if (!grid) return;
-  const settings = state.data.settings;
-  const pending = state.data.pending || PENDING_DEFAULT;
   grid.innerHTML = '';
-
-  let totalCount = 0, totalMoney = 0;
+  _pendingRefs = { inputs: new Map(), stats: new Map(), sumCount: null, sumMoney: null };
 
   for (const grp of PENDING_SCHEMA) {
-    // 群組件數/金額 sum
-    let grpCount = 0, grpMoney = 0;
-    for (const it of grp.items) {
-      const v = Number(pending[it.key] || 0);
-      grpCount += v;
-      grpMoney += v * getUnitPriceForKey(it.priceKey, settings);
-    }
-    totalCount += grpCount;
-    totalMoney += grpMoney;
-
+    const stat = el('span', { class: 'pending-group-stat' });
+    _pendingRefs.stats.set(grp.group, stat);
     const block = el('div', { class: 'pending-group' },
       el('div', { class: 'pending-group-title' },
         el('span', { class: 'pending-group-name' }, grp.group),
-        grpCount > 0 ? el('span', { class: 'pending-group-stat' }, ` ${grpCount} · ${fmtMoney(grpMoney)}`) : null
+        stat
       )
     );
     for (const it of grp.items) {
-      const v = Number(pending[it.key] || 0);
+      const input = el('input', { class: 'pending-input', type: 'number', min: '0',
+        oninput: (e) => setPendingFromInput(it.key, e.target.value),
+        onfocus: (e) => e.target.select(),
+        onblur: () => refreshPendingPanel() });   // 失焦才把 '' 之類的中間態寫回正規值
+      _pendingRefs.inputs.set(it.key, input);
       block.appendChild(el('div', { class: 'pending-row' },
         el('span', { class: 'pending-label' }, it.label || grp.group),
         el('div', { class: 'pending-controls' },
           el('button', { class: 'btn-step', onclick: () => bumpPending(it.key, -1) }, '−'),
-          el('input', { class: 'pending-input', type: 'number', value: String(v), min: '0',
-            oninput: (e) => setPendingAndRender(it.key, e.target.value) }),
+          input,
           el('button', { class: 'btn-step', onclick: () => bumpPending(it.key, +1) }, '＋')
         )
       ));
@@ -3845,25 +3863,65 @@ function renderPendingPanel() {
   }
 
   // Total summary cell
+  _pendingRefs.sumCount = el('span', { class: 'pending-sum-count' });
+  _pendingRefs.sumMoney = el('span', { class: 'pending-sum-money' });
   grid.appendChild(el('div', { class: 'pending-summary' },
     el('span', { class: 'pending-sum-label' }, '總計件數'),
-    el('span', { class: 'pending-sum-count' }, String(totalCount)),
+    _pendingRefs.sumCount,
     el('span', { class: 'pending-sum-label', style: 'margin-left:14px' }, '預期收入'),
-    el('span', { class: 'pending-sum-money' }, fmtMoney(totalMoney))
+    _pendingRefs.sumMoney
   ));
+
+  refreshPendingPanel();
 }
 
-function bumpPending(key, delta) {
-  if (!state.data.pending) state.data.pending = { ...PENDING_DEFAULT };
-  state.data.pending[key] = Math.max(0, (Number(state.data.pending[key]) || 0) + delta);
-  storage.save(state.data);  // 立刻 save → broadcast
-  renderPendingPanel();
+// 只更新數字:input 值(**跳過使用者正在編輯的那格**)、群組小計、總計
+function refreshPendingPanel() {
+  if (!_pendingRefs || !_pendingRefs.sumCount?.isConnected) return;
+  const settings = state.data.settings;
+  const pending = state.data.pending || PENDING_DEFAULT;
+  let totalCount = 0, totalMoney = 0;
+
+  for (const grp of PENDING_SCHEMA) {
+    let grpCount = 0, grpMoney = 0;
+    for (const it of grp.items) {
+      const v = Number(pending[it.key] || 0);
+      grpCount += v;
+      grpMoney += v * getUnitPriceForKey(it.priceKey, settings);
+      const input = _pendingRefs.inputs.get(it.key);
+      if (input && input !== document.activeElement) input.value = String(v);
+    }
+    totalCount += grpCount;
+    totalMoney += grpMoney;
+    const stat = _pendingRefs.stats.get(grp.group);
+    if (stat) stat.textContent = grpCount > 0 ? ` ${grpCount} · ${fmtMoney(grpMoney)}` : '';
+  }
+
+  _pendingRefs.sumCount.textContent = String(totalCount);
+  _pendingRefs.sumMoney.textContent = fmtMoney(totalMoney);
 }
-function setPendingAndRender(key, val) {
+
+function setPending(key, val) {
   if (!state.data.pending) state.data.pending = { ...PENDING_DEFAULT };
-  state.data.pending[key] = Math.max(0, Number(val) || 0);
-  storage.save(state.data);
-  renderPendingPanel();
+  state.data.pending[key] = Math.max(0, Math.round(Number(val) || 0));
+  storage.save(state.data);  // 立刻 save → broadcast
+}
+function setPendingFromInput(key, raw) {
+  setPending(key, raw === '' ? 0 : raw);
+  refreshPendingPanel();
+}
+function bumpPending(key, delta) {
+  setPending(key, (Number(state.data.pending?.[key]) || 0) + delta);
+  refreshPendingPanel();
+}
+
+// 計數變動 → 待打自動加減:打完一份(計數 +1)待打就 −1;
+// 計數改少會加回去,所以按錯 / 打錯字改回來會自己復原。X-ray 不在 COUNT_TO_PENDING → 不連動。
+function syncPendingFromCount(countKey, delta) {
+  const pk = COUNT_TO_PENDING[countKey];
+  if (!pk || !delta) return;
+  if (!state.data.pending) state.data.pending = { ...PENDING_DEFAULT };
+  state.data.pending[pk] = Math.max(0, (Number(state.data.pending[pk]) || 0) - delta);
 }
 
 // --- Schedule events (不值班預約) ---
