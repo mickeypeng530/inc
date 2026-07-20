@@ -2030,7 +2030,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.20';
+const APP_VERSION = '2026.07.20c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3411,7 +3411,10 @@ function setCountAndRender(key, val) {
   setCount(day, key, val);
   syncPendingFromCount(key, getCount(day, key) - before);
   touchDay(state.currentDate);
-  storage.save(state.data);   // 立刻 save → BC 廣播
+  // 同待打欄的理由:每敲一鍵即存 → 中間值的 onValue 回音會在下一鍵之後才到,
+  // applyIncoming 判定「本機沒動過」而採用雲端舊值 → 數字倒退 + renderAll 吃掉焦點。
+  // debounce 收斂成一次寫入;共用 'saveDebounce' key 讓相鄰編輯一起 coalesce。
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
   if (state.isMini) renderMini();
   else { renderStatsPanel(); refreshPendingPanel(); }
 }
@@ -3904,7 +3907,14 @@ function refreshPendingPanel() {
 function setPending(key, val) {
   if (!state.data.pending) state.data.pending = { ...PENDING_DEFAULT };
   state.data.pending[key] = Math.max(0, Math.round(Number(val) || 0));
-  storage.save(state.data);  // 立刻 save → broadcast
+  // **不可每敲一鍵就 storage.save()**:每次寫雲端都會有 onValue 回音,而中間值(打「38」
+  // 的那個「3」)的回音若在下一鍵之後才到,applyIncoming 會因為 lastSynced 已被較新的
+  // 寫入推進、判定「本機沒動過」而採用雲端舊值 → 值倒退成 3 + renderAll() 把正在輸入的
+  // 格子整個重建、焦點消失(要再點一次才能打第二個字)。debounce 收斂成一次寫入。
+  // 必須走 scheduleSave:遠端更新到達時 flushPendingSaves 才收得到,不會漏存(#3)。
+  // 共用 'saveDebounce' key(不是自己一支):待打與計數的相鄰編輯 coalesce 成一次寫入,
+  // 兩支各自計時反而會產生兩次重疊的雲端寫入 → 又生出中間值回音。
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
 }
 function setPendingFromInput(key, raw) {
   setPending(key, raw === '' ? 0 : raw);
@@ -7237,6 +7247,10 @@ async function enterApp(user) {
   setInterval(checkDateRollover, 60000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) checkDateRollover(); });
   window.addEventListener('focus', checkDateRollover);
+  // 關視窗/切走時把還在 debounce 排隊的存檔沖掉 —— 否則打完字 400ms 內關掉迷你視窗
+  // 那筆就沒了(localStorage 是同步寫入,趕得及;雲端來不及也沒關係,下次開機會 diff 上去)。
+  window.addEventListener('pagehide', flushPendingSaves);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) flushPendingSaves(); });
   applyTheme(state.data.settings.theme || 'dark', false);   // #5:boot 不存檔
   document.title = state.isMini ? '績效快輸' : '績效紀錄';
 
