@@ -249,7 +249,7 @@ console.log('\n[9] 自己的回音(counts 沒有增量)不可以扣');
 }
 
 // ============================================================
-console.log('\n[10] 未映射的計數(X-ray)不扣;計數減少也不加回去');
+console.log('\n[10] 未映射的計數(X-ray)不扣;計數減少要把待打加回去');
 // ------------------------------------------------------------
 {
   const mk = (xray, ct) => ({
@@ -261,7 +261,45 @@ console.log('\n[10] 未映射的計數(X-ray)不扣;計數減少也不加回去'
   api.setBase(api.snapshotOf(data));
   api.applyIncoming(mk(4, 3));   // xray +3(未映射)、ct.opd -2(減少)
   check('X-ray 待打不動', api.getData().pending.xray_now === 9, '實際 = ' + api.getData().pending.xray_now);
-  check('計數減少不會把待打加回去', api.getData().pending.ct_opd === 5, '實際 = ' + api.getData().pending.ct_opd);
+  check('計數減少 2 → 待打加回 2', api.getData().pending.ct_opd === 7, '實際 = ' + api.getData().pending.ct_opd);
+}
+
+// ============================================================
+console.log('\n[12] 桌寵按錯改回來:+1 再 -1,待打要回到原點');
+// ------------------------------------------------------------
+{
+  const mk = (opd, pend) => ({
+    days: { [TODAY]: { counts: { ct: { opd } }, procedures: [], meetings: [], updatedAt: 't' + opd } },
+    pending: { ct_opd: pend }, settings: {},
+  });
+  const data = mk(4, 6);
+  api.setData(clone(data));
+  api.setBase(api.snapshotOf(data));
+
+  api.applyIncoming(mk(5, 6));   // 桌寵 +1 → 待打 6→5
+  check('+1 後待打 = 5', api.getData().pending.ct_opd === 5, '實際 = ' + api.getData().pending.ct_opd);
+
+  api.setBase(api.snapshotOf(api.getData()));
+  api.applyIncoming({            // 桌寵 -1(按錯改回來),pending 維持它看到的值
+    days: { [TODAY]: { counts: { ct: { opd: 4 } }, procedures: [], meetings: [], updatedAt: 't4b' } },
+    pending: { ct_opd: 5 }, settings: {},
+  });
+  check('-1 後待打回到 6', api.getData().pending.ct_opd === 6, '實際 = ' + api.getData().pending.ct_opd);
+}
+
+// ============================================================
+console.log('\n[13] 待打夾在 0:計數增加超過 backlog 不會變負');
+// ------------------------------------------------------------
+{
+  const mk = (opd) => ({
+    days: { [TODAY]: { counts: { ct: { opd } }, procedures: [], meetings: [], updatedAt: 't' + opd } },
+    pending: { ct_opd: 1 }, settings: {},
+  });
+  const data = mk(0);
+  api.setData(clone(data));
+  api.setBase(api.snapshotOf(data));
+  api.applyIncoming(mk(5));      // 一口氣 +5,backlog 只有 1
+  check('停在 0 不變負', api.getData().pending.ct_opd === 0, '實際 = ' + api.getData().pending.ct_opd);
 }
 
 // ============================================================

@@ -2030,7 +2030,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.21b';
+const APP_VERSION = '2026.07.21c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2847,10 +2847,11 @@ function applyIncoming(raw) {
     const dayAfter = next.days?.[_today];
     if (dayAfter) {
       const dayBefore = state.data.days?.[_today];
+      // 雙向:計數增加扣待打、計數減少加回去 —— 與本機 ±1 同語意(桌寵按錯改回來會自己復原)
       const deltas = [];
       for (const [ck, pk] of Object.entries(COUNT_TO_PENDING)) {
         const d = getCount(dayAfter, ck) - getCount(dayBefore, ck);
-        if (d > 0) deltas.push([pk, d]);
+        if (d !== 0) deltas.push([pk, d]);
       }
       if (deltas.length) {
         const p = { ...(next.pending || {}) };
