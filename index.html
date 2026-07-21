@@ -2030,7 +2030,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.21';
+const APP_VERSION = '2026.07.21b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2836,6 +2836,29 @@ function applyIncoming(raw) {
     // revenue 是衍生值:外部寫入端(桌寵)只改 counts 不會更新它,留著會顯示過期金額。
     // 依合併後的內容重算 —— 冪等,自己的回音重算結果相同,不會觸發多餘重繪。
     if (next.days[d]) stampRevenue(next.days[d]);
+  }
+  // 桌寵只寫 counts/revenue/updatedAt(接入契約),不碰 pending → 它打完報告待打不會自己減。
+  // 在這裡依「今天 counts 的增量」補扣。兩道防重複扣:
+  //   ① 這次 incoming 有動到 pending → 代表寫入端(web 自己的 ±1)已經扣過 → 跳過。
+  //      桌寵永遠不寫 pending,web 的 ±1 一定連 pending 一起寫,剛好可以區分。
+  //   ② 一律看「合併後 vs 本機現況」的實際增量 → 自己的回音增量為 0,不會重扣。
+  const _today = todayISO();
+  if (canonJSON(next.pending ?? null) === canonJSON(state.data.pending ?? null)) {
+    const dayAfter = next.days?.[_today];
+    if (dayAfter) {
+      const dayBefore = state.data.days?.[_today];
+      const deltas = [];
+      for (const [ck, pk] of Object.entries(COUNT_TO_PENDING)) {
+        const d = getCount(dayAfter, ck) - getCount(dayBefore, ck);
+        if (d > 0) deltas.push([pk, d]);
+      }
+      if (deltas.length) {
+        const p = { ...(next.pending || {}) };
+        for (const [pk, d] of deltas) p[pk] = Math.max(0, (Number(p[pk]) || 0) - d);
+        next.pending = p;
+        scheduleSave('saveDebounce', () => storage.save(state.data), 400);   // 扣完要推回雲端
+      }
+    }
   }
   lastSynced = incomingSnap;
   const nextStr = JSON.stringify(next);
