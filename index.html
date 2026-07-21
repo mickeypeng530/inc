@@ -2030,7 +2030,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.20c';
+const APP_VERSION = '2026.07.21';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2071,6 +2071,42 @@ let offlineEdits = false;  // 讀不到雲端時使用者有無實際修改 → 
 // 抓到並隨首次 update 一起上雲,不必再靠全樹 set 順便帶上去。
 let lastSynced = null;
 let syncSeq = 0;           // 只有最新一次寫入可以推進基準,避免亂序回填舊快照
+
+// ===== 過期回音閘門(打字時值被蓋回去的病根)=====
+// RTDB 每次寫入都會回一次 onValue。連打兩鍵送出兩次寫入時(「3」→「38」),較早那次的
+// 回音可能在 lastSynced 已被較新的寫入推進「之後」才到 —— 此刻本機 == 基準,applyIncoming
+// 的髒判定會誤判「本機沒動過」→ 採用回音裡的舊值 3,把正在輸入的內容蓋回去 + renderAll()
+// 重建格子、焦點消失。debounce 只能壓低機率(病歷號 7 位數就壓不住),不是解法。
+//
+// 對策:記下每條路徑「我們自己送出過」的值。回音若帶著我們寫過、但**不是最新那次**的值,
+// 就是過期回音 → 保留本機、不採用。判定條件很窄,所以:
+//   · 真正的遠端變更(桌寵寫的值,我們沒送出過)→ 照常採用,不會被卡住
+//   · 任何非預期的值都會直接解除閘門 → 不可能永久 defer
+const sentValues = new Map();   // path('settings' | 'days/2026-07-21') -> [送出過的值](末項=最新)
+const SENT_CAP = 12;
+// key 排序後再 stringify:送出端是本機物件、回音端是 SDK 重建的物件,key 順序不保證相同
+function canonJSON(v) {
+  return JSON.stringify(v, (k, val) =>
+    (val && typeof val === 'object' && !Array.isArray(val))
+      ? Object.keys(val).sort().reduce((o, kk) => { o[kk] = val[kk]; return o; }, {})
+      : val);
+}
+function noteSent(path, val) {
+  const arr = sentValues.get(path) || [];
+  arr.push(canonJSON(val ?? null));
+  if (arr.length > SENT_CAP) arr.shift();
+  sentValues.set(path, arr);
+}
+// true = 這是過期回音,呼叫端應保留本機值
+function isStaleEcho(path, cloudVal) {
+  const arr = sentValues.get(path);
+  if (!arr || !arr.length) return false;
+  const s = canonJSON(cloudVal ?? null);
+  if (s === arr[arr.length - 1]) { sentValues.delete(path); return false; }  // 最新寫入落地 → 收工
+  if (arr.includes(s)) return true;                                          // 我們寫過的舊值 → 過期回音
+  sentValues.delete(path);                                                   // 沒送出過 = 真的遠端變更 → 放行
+  return false;
+}
 
 // ===== Seed data (從現有 sheet 抽出) =====
 const SEED = {
@@ -2631,6 +2667,9 @@ async function _writeDirty(updates, nextSnap) {
     // 期間已有更新的存檔接手 → 放棄本次(對方的 payload 是本次的超集,因為基準尚未推進)
     if (mySeq !== syncSeq) return;
     if (!Object.keys(updates).length) return;
+    // 送出前登記:回音回來時才分得出「這是我剛寫的舊值」還是「別人寫的新值」。
+    // 在 guardDayUpdates 之後才記 —— 守門可能已把 payload 換成合併結果,要記真正送出去的。
+    for (const [p, v] of Object.entries(updates)) noteSent(p, v);
     await update(userDataRef, updates);
     if (mySeq !== syncSeq) return;
     // 合併結果回寫本地 + 基準,讓本機/雲端收斂(否則下次 diff 會再把舊值推上去)
@@ -2651,6 +2690,7 @@ async function _writeDirty(updates, nextSnap) {
 // 全樹覆寫(僅限:匯入 JSON 整包覆蓋 / reset)
 function _writeFull(clean, nextSnap) {
   const mySeq = ++syncSeq;
+  sentValues.clear();   // 整棵樹被取代 → 之前登記的路徑值全部失效
   try {
     set(userDataRef, clean)
       .then(() => { if (mySeq === syncSeq) lastSynced = nextSnap; })
@@ -2771,6 +2811,9 @@ function applyIncoming(raw) {
   // top-level(settings/pending/monthlyMeta…):本機動過的保留,否則跟隨對方
   for (const k of Object.keys(state.data)) {
     if (k === 'days') continue;
+    // 過期回音(我們自己寫過的舊值)→ 一律保留本機,不能讓它把正在輸入的值蓋回去。
+    // 必須擺在髒判定之前:這條 race 的特徵就是「本機 == 基準」而騙過髒判定。
+    if (isStaleEcho(k, cloud[k])) { next[k] = state.data[k]; continue; }
     const bStr = (base && base.top[k]) ?? 'null';
     if (JSON.stringify(state.data[k] ?? null) !== bStr) next[k] = state.data[k];
   }
@@ -2781,7 +2824,9 @@ function applyIncoming(raw) {
     const bStr = (base && base.days[d]) ?? 'null';
     const l = state.data.days?.[d];
     const c = cloud.days?.[d];
-    if (JSON.stringify(l ?? null) === bStr) {          // 本機沒動過 → 採用對方
+    if (isStaleEcho('days/' + d, c)) {                  // 過期回音 → 保留本機(病歷號/計數打字中)
+      if (l !== undefined) next.days[d] = l;
+    } else if (JSON.stringify(l ?? null) === bStr) {   // 本機沒動過 → 採用對方
       if (c !== undefined) next.days[d] = c;
     } else if (c === undefined) {                       // 對方沒有這天 → 保留本機
       next.days[d] = l;
