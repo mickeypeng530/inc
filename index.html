@@ -2029,7 +2029,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.26e';
+const APP_VERSION = '2026.07.26f';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2381,6 +2381,10 @@ const SPECIAL_OTHER_CATALOG = [
   { id: 'intus',       name: 'Intus' },
 ];
 const SPECIAL_OTHER_CAT_MAP = Object.fromEntries(SPECIAL_OTHER_CATALOG.map(c => [c.id, c]));
+// 貼上/匯入時的佔位單價 —— sheet 的 Special 列只記數字不記種類(使用者確認),
+// 種類要事後在 Other 面板指定。不要用 unitPrices.special.eso_tbe 當佔位:
+// 它已改成 90,會讓佔位金額跟著漂(貼單日曾因此記成 90/件、貼整月卻是 231)。
+const LEGACY_SPECIAL_PRICE = 231;
 
 // Main preset meetings always shown in meeting panel
 const MAIN_PRESET_MEETINGS = {
@@ -3350,6 +3354,13 @@ function renderCountsPanel() {
                 amountInp.value = String(newPrice);
                 updateSpecialOtherFields(idx, { catalogId: newCat, amount: newPrice });
               } });
+            // 貼上/匯入來的 legacy_other 不在目錄裡 —— 不擺這個佔位選項的話,
+            // 瀏覽器會顯示第一個選項(ESO, TBE),未指定的筆就偽裝成已指定,找都找不到
+            if (!SPECIAL_OTHER_CAT_MAP[entry.catalogId]) {
+              const ph = el('option', { value: entry.catalogId || '' }, '⚠️ 未指定種類');
+              ph.selected = true;
+              sel.appendChild(ph);
+            }
             for (const cat of SPECIAL_OTHER_CATALOG) {
               const opt = el('option', { value: cat.id }, cat.name);
               if (cat.id === entry.catalogId) opt.selected = true;
@@ -5981,7 +5992,7 @@ function applyPastedCounts(date, parsed) {
       const others = ensureSpecialOthers(day);
       others.length = 0;
       if (p.value > 0) {
-        const price = state.data.settings.unitPrices.special?.eso_tbe || 231;
+        const price = LEGACY_SPECIAL_PRICE;   // 種類未知 → 佔位價,事後在 Other 面板指定
         others.push({ id: 'paste_' + Date.now(), catalogId: 'legacy_other', amount: price, count: p.value });
       }
     } else {
@@ -6087,7 +6098,7 @@ function applyPastedDayColumn(date, parsed) {
       const others = ensureSpecialOthers(day);
       others.length = 0;
       if (p.value > 0) {
-        const price = state.data.settings.unitPrices.special?.eso_tbe || 231;
+        const price = LEGACY_SPECIAL_PRICE;   // 種類未知 → 佔位價,事後在 Other 面板指定
         others.push({ id: 'paste_' + Date.now(), catalogId: 'legacy_other', amount: price, count: p.value });
       }
     } else setCount(day, p.key, p.value);
@@ -6278,6 +6289,9 @@ function showImportModal(initType, initDate) {
         el('td', { style: 'color:var(--ink-muted)' }, String(i + 1)), el('td', null, c.label),
         el('td', { style: c.value != null ? 'color:var(--accent);font-weight:600' : 'color:var(--ink-muted)' }, c.value != null ? String(c.value) : '—'))));
       preview.appendChild(ct);
+      const spc = p.counts.find(c => c.key === 'special.total');
+      if (spc && spc.value > 0) preview.appendChild(el('div', { class: 'paste-count-hint', style: 'color:var(--warn,#da3)' },
+        `⚠️ Special ${spc.value} 件會以佔位單價 $${LEGACY_SPECIAL_PRICE} 記入(sheet 沒記種類)— 貼完到今日 tab Special「Other」指定種類,特殊計費單價才正確`));
       if (p.unmatched.length) preview.appendChild(el('div', { class: 'paste-count-hint', style: 'color:var(--warn,#da3)' }, `⚠️ ${p.unmatched.length} 行術式沒對到(略過):` + p.unmatched.join(';')));
       return;
     }
@@ -6605,8 +6619,10 @@ function parseMonthSheetTSV(text, month, meetingCatalog) {
     if (!d.counts.special) d.counts.special = {};
     if (!d.counts.special.others) d.counts.special.others = [];
     const others = d.counts.special.others;
-    others.push({ id: `imp_${month}_${others.length}_${Math.round(cnt)}`, catalogId: 'legacy_other', amount: 231, count: Math.round(cnt) });
+    others.push({ id: `imp_${month}_${others.length}_${Math.round(cnt)}`, catalogId: 'legacy_other', amount: LEGACY_SPECIAL_PRICE, count: Math.round(cnt) });
+    spOtherTotal += Math.round(cnt);
   };
+  let spOtherTotal = 0;   // 佔位記入的 Special 件數 → 解析報告提醒使用者去指定種類
   const readRow = (r) => {
     const res = {};
     for (const [c, dn] of Object.entries(dayCols)) {
@@ -6842,6 +6858,9 @@ function parseMonthSheetTSV(text, month, meetingCatalog) {
   report.irSum = Object.values(days).reduce((s, d) => s + (d.irRevenue || 0), 0);
   report.irSheet = irSheet;
   report.otSum = Object.values(days).reduce((s, d) => s + (d.overtimeHours || 0), 0);
+  if (spOtherTotal > 0) report.warnings.push(
+    `Special ${spOtherTotal} 件以佔位單價 $${LEGACY_SPECIAL_PRICE} 記入(sheet 沒記種類)` +
+    ' — 匯入後到今日 tab Special「Other」逐筆指定種類,特殊計費(UGI/IVP/UGISB…)單價才會正確');
   report.procTotal = procTotal;
   report.mtgTotal = mtgTotal;
   report.addonDays = Object.values(days).filter(d => d.addons && d.addons.length).length;
