@@ -2029,7 +2029,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.26g';
+const APP_VERSION = '2026.07.26h';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -4469,6 +4469,9 @@ function renderMonth() {
 
       if (primary.isOtherAggregate) {
         // primary 是 aggregate(Special 樣式)→ 自製 row,daily=primary aggregate count
+        // ⚠️ Special 的 Other aggregate 是第一個 child = primary → 走的是「這條」群組列,
+        // 不是下面 sub-rows 的 isOtherAggregate 分支(child === primary 會 skip)。
+        // 編輯模式的點格開 modal 要掛在這裡 —— 掛錯分支就是「點了沒反應」。
         const primaryDaily = days.map(date => {
           const day = state.data.days[date];
           return day ? specialOthersTotalCount(day) : 0;
@@ -4478,7 +4481,15 @@ function renderMonth() {
           el('td', { class: 'col-total' }, groupMonthTotal ? String(groupMonthTotal) : '0')
         );
         for (let di = 0; di < primaryDaily.length; di++) {
-          tr.appendChild(el('td', { class: weekCls(days[di]).trim() }, primaryDaily[di] ? String(primaryDaily[di]) : ''));
+          const td = el('td', { class: weekCls(days[di]).trim() }, primaryDaily[di] ? String(primaryDaily[di]) : '');
+          if (state.monthEditMode) {
+            const dd = days[di];
+            td.classList.add('pivot-cell');
+            td.style.cursor = 'pointer';
+            td.title = '編輯這天的 Special(Other):指定種類 / 改數量';
+            td.onclick = () => showDaySpecialModal(dd);
+          }
+          tr.appendChild(td);
         }
         t.appendChild(tr);
       } else {
