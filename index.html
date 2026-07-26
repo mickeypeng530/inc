@@ -2029,7 +2029,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.26c';
+const APP_VERSION = '2026.07.26d';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5452,7 +5452,11 @@ function svgSparkline(values, color, w = 130, h = 26) {
 function procRankName(p) {
   const ids = [p.presetId, ...(p.items || []).map(it => it.atomicId)];
   if (ids.some(id => id === 'stame' || id === 'ctame' || id === 'cstame') || /tame/i.test(p.presetName || '')) return 'TAME';
-  return p.presetName || '?';
+  // sheet 匯入的簡寫(PICC 3134 一筆)與手動 preset(PICC+AV 1034+2100 兩筆)是同一件事
+  // (2026-07-26 使用者確認,PICC 一定含 AV)→ 排行/筆數歸一,不然歷史與新資料裂成兩列
+  const UNIFY = { 'PICC+AV': 'PICC', 'PCN+A-P': 'PCN', 'PTGBD+PTC': 'PTGBD' };
+  const nm = p.presetName || '?';
+  return UNIFY[nm] || nm;
 }
 function getProcStats() {
   const cum = {};   // name → { n, amt, msk }
@@ -5917,6 +5921,21 @@ function parsePastedDayColumn(text, date) {
   while (cells.length && !cells[cells.length - 1].trim()) cells.pop();   // 砍尾端空列
   const isDetail = (s) => s.trim() !== '' && msNum(s) == null;
 
+  // === 全部都是術式行 → 這是「補登當天術式」,不是整欄 ===
+  // Excel 的 detail 是「一格內含多行」(TSV 帶引號 → 仍是一格),但使用者手打就會變成多列。
+  // 舊版一律照整欄的固定位置解讀 → 第二行掉進「日Total」的位置被靜默丟掉(打 PICC+3D 只進得去 PICC)。
+  // 整欄貼上一定有計數區在前,所以「連一格數字都沒有」就不可能是整欄 —— 判定不會誤傷。
+  // 兩種形狀(一格多行 / 多列)都合併成同一格交給 parseDetailCell,逐行解析。
+  if (cells.length && cells.every(isDetail)) {
+    const det = parseDetailCell(cells.join('\n'), date);
+    return {
+      counts: order.map(item => ({ key: item.key, label: item.label, value: null })),   // 不動計數
+      procedures: det.procedures, addons: det.addons, unmatched: det.unmatched,
+      importedRevenue: null, irRevenue: null, overtimeHours: null,
+      warnings: [], droppedDayHeader: false, filledCounts: 0, detailOnly: true,
+    };
+  }
+
   // --- 找計數區結束位置 ---
   let tailStart = cells.findIndex(isDetail);
   if (tailStart < 0) tailStart = Math.min(cells.length, order.length + (cells.length === order.length + 6 ? 1 : 0));
@@ -5958,7 +5977,7 @@ function parsePastedDayColumn(text, date) {
     .map(([i, nm]) => `「${String(tail[i]).trim()}」(應為${nm})`);
   if (misplaced.length) {
     warnings.push(`這幾格不是數字,會被丟掉:${misplaced.join('、')}。`
-      + '若你是要手動補多筆 procedure / 3D,請改用月表點日期欄 →「📥 貼上匯入」(逐行解析、附加不覆蓋)。');
+      + '(整欄貼上是按位置解讀;若只是要補幾筆術式,直接貼術式清單就好,不要夾計數數字)');
   }
 
   return {
@@ -5967,9 +5986,18 @@ function parsePastedDayColumn(text, date) {
     warnings, droppedDayHeader, filledCounts: counts.filter(c => c.value != null).length,
   };
 }
-// 套用:整天覆蓋(procedure/addon 直接取代,避免重貼同一天造成重複)
+// 套用:整欄=整天覆蓋(取代,重貼不會變兩倍);純術式清單(detailOnly)=附加,
+// 只加貼進來的東西,計數/IR/加班/既有 procedure 全部不動。
 function applyPastedDayColumn(date, parsed) {
   const day = getDay(date);
+  if (parsed.detailOnly) {
+    if (!Array.isArray(day.procedures)) day.procedures = [];
+    day.procedures.push(...parsed.procedures.map(p => ({ ...p, time: new Date().toISOString() })));
+    if (parsed.addons.length) addAddonsToDay(day, parsed.addons.map(a => ({ type: a.type, count: a.count, amount: a.amount })));
+    touchDay(date);
+    storage.save(state.data);
+    return;
+  }
   for (const p of parsed.counts) {
     if (p.value == null) continue;                 // 空行不覆蓋
     if (p.key === 'special.total') {
@@ -6019,6 +6047,17 @@ function parsePastedProcedures(text) {
     // preset 本身就是加價包(如下拉裡的「3D」)→ 一樣轉 addon
     const pa = preset ? presetAsAddons(preset, 1) : null;
     if (pa) { rows.push({ medRecord, name, preset: null, matched: true, addon: pa[0] }); continue; }
+    // preset 名對不到 → 走 sheet 匯入的別名表(parseDetailCell):
+    // 「PICC」= PICC+AV 組合、「PCN」= PCN+A-P、「GB」= PTGBD… 使用者在 sheet 怎麼寫,這裡就怎麼認。
+    if (!preset) {
+      const det = parseDetailCell(line, '');
+      if (det.procedures.length) {
+        const disp = det.procedures[0].presetName + (det.procedures.length > 1 ? ` ×${det.procedures.length}` : '');
+        rows.push({ medRecord: det.procedures[0].medRecord || medRecord, name: disp,
+                    preset: null, matched: true, resolved: det.procedures });
+        continue;
+      }
+    }
     rows.push({ medRecord, name, preset: preset || null, matched: !!preset });
   }
   return { rows, errors };
@@ -6029,6 +6068,11 @@ function applyPastedProcedures(date, parsed) {
   let added = 0;
   for (const r of parsed.rows) {
     if (r.addon) { addAddonsToDay(day, [r.addon]); added++; continue; }   // 3D / 資源共享
+    if (r.resolved) {   // sheet 簡寫(PICC/PCN/GB…)已由 parseDetailCell 解成完整紀錄
+      for (const pr of r.resolved) day.procedures.push({ ...pr, time: new Date().toISOString() });
+      added += r.resolved.length;
+      continue;
+    }
     day.procedures.push({
       presetId: r.preset ? r.preset.id : '',
       presetName: r.preset ? r.preset.name : r.name,   // 對不到 → 保留貼上的名稱,待清單下拉指派
@@ -6096,16 +6140,16 @@ function showImportModal(initType, initDate) {
   const ta = el('textarea', { class: 'paste-textarea', rows: '12' });
   const preview = el('div', { class: 'paste-preview' });
   const PH = {
-    day: '到 Excel 選取該天那一整欄(從日期或 CT 那列,一路選到加班列)→ 複製 → 貼這裡\n一次帶進:計數 / 日 Total / 日 IR / Procedure(含病歷號)/ 3D·資源共享 / 加班',
+    day: '① 貼 Excel 該天整欄(從日期或 CT 那列到加班列)→ 整天帶進:計數/收入/IR/Procedure/加班\n② 或直接打術式清單(每行一筆,sheet 寫法照用):\n326514 PICC\n3D\n→ 自動附加到當天,不動其他資料',
     counts: '從 sheet 複製一整欄計數,貼這裡\n(每行一個數字,空行=該項留空,順序依設定→Sheet 列順序)',
     meeting: '每行:日期(可多個,空格分隔) ⇥ 角色 ⇥ 會議名 ⇥ 當月總額\n例:6 13 20 27 ⇥ 主講 ⇥ 骨科手術案例討論 ⇥ 12000',
     procedure: '每行:病歷號 preset名\n例:\n1874176 Arthro\n339804 CT NB',
   };
   const HINT = {
-    day: '整天覆蓋指定日期(procedure/addon 取代而非附加,重貼不會變兩倍)。detail 出現兩次時取後面那格 —— 3D / 資源共享 寫在後面。',
+    day: '貼整欄=整天覆蓋(重貼不會變兩倍);貼純術式清單=附加(計數/收入/既有紀錄不動)。sheet 簡寫直接認:PICC=PICC+AV、PCN=PCN+A-P、GB=PTGBD、3D/資源共享 進額外計費。',
     counts: '貼到指定日期。順序依「設定 → Sheet 列順序」;空行不覆蓋、有值覆蓋當日。',
     meeting: `貼到目前月(${month})。每場金額=當月總額÷場次;⚠️新=目錄沒有的會議名;重複直接新增。`,
-    procedure: '貼到指定日期。每行第一個數字=病歷號,其餘=preset 名;比對 preset 展開原子項。⚠️=對不到 preset(略過)。',
+    procedure: '貼到指定日期(附加)。每行「病歷號 術式」;preset 名或 sheet 簡寫都認(PICC=PICC+AV、PCN=PCN+A-P、GB=PTGBD、3D→額外計費)。⚠️=對不到(略過)。',
   };
   const tabsWrap = el('div', { class: 'import-tabs' });
   const TYPES = [['day', '單日整欄'], ['counts', '計數'], ['meeting', '會議'], ['procedure', 'Procedure']];
@@ -6125,6 +6169,16 @@ function showImportModal(initType, initDate) {
       const row = (k, v, hl) => tbl.appendChild(el('tr', null,
         el('td', null, k),
         el('td', { style: hl ? 'color:var(--accent);font-weight:600' : 'color:var(--ink-muted)' }, v)));
+      // 純術式清單 → 附加模式:只列要加的東西,不嚇人說要覆蓋整天
+      if (p.detailOnly) {
+        row(`Procedure(${p.procedures.length} 筆)`, procTxt, p.procedures.length > 0);
+        row('額外計費', addonTxt, p.addons.length > 0);
+        preview.appendChild(el('div', { class: 'paste-count-hint' },
+          `純術式清單 → 將「附加」到 ${d}(計數 / 收入 / 既有 procedure 全部不動)`));
+        preview.appendChild(tbl);
+        if (p.unmatched.length) preview.appendChild(el('div', { class: 'paste-count-hint', style: 'color:var(--warn,#da3)' }, `⚠️ ${p.unmatched.length} 行沒對到(略過):` + p.unmatched.join(';')));
+        return;
+      }
       row('計數', `${p.filledCounts} / ${p.counts.length} 項`, p.filledCounts > 0);
       row('日 Total(收入)', p.importedRevenue != null ? fmtMoney(p.importedRevenue) : '—(未解析到)', p.importedRevenue != null);
       row('日 IR', p.irRevenue != null ? fmtMoney(p.irRevenue) : '—', p.irRevenue != null);
@@ -6169,6 +6223,7 @@ function showImportModal(initType, initDate) {
         el('td', null, r.addon ? `${r.name}　→ 額外計費` : r.name + (r.matched ? '' : ' ⚠️待指派')),
         el('td', { style: 'color:var(--accent);font-weight:600' },
           r.addon ? fmtMoney(r.addon.count * r.addon.amount)
+                  : r.resolved ? fmtMoney(r.resolved.reduce((s, pr) => s + (pr.items || []).reduce((ss, it) => ss + Number(it.amount || 0), 0), 0))
                   : (r.preset ? fmtMoney((r.preset.items || []).reduce((s, it) => s + Number(it.amount || 0), 0)) : '—')))));
       const un = rows.filter(r => !r.matched).length;
       const nAd = rows.filter(r => r.addon).length;
@@ -6200,9 +6255,12 @@ function showImportModal(initType, initDate) {
           const d = dateInput.value || dfltDate;
           const p = parsePastedDayColumn(ta.value, d);
           applyPastedDayColumn(d, p);
-          msg = `已整天覆蓋 ${d}(計數 ${p.filledCounts} 項 · procedure ${p.procedures.length} 筆`
-            + (p.importedRevenue != null ? ` · 收入 ${fmtMoney(p.importedRevenue)}` : '')
-            + (p.overtimeHours != null ? ` · 加班 ${p.overtimeHours}h` : '') + ')';
+          const nAddon = p.addons.reduce((s, a) => s + (a.count || 1), 0);
+          msg = p.detailOnly
+            ? `已附加到 ${d}:procedure ${p.procedures.length} 筆` + (nAddon ? ` · 額外計費 ${nAddon} 件` : '')
+            : `已整天覆蓋 ${d}(計數 ${p.filledCounts} 項 · procedure ${p.procedures.length} 筆`
+              + (p.importedRevenue != null ? ` · 收入 ${fmtMoney(p.importedRevenue)}` : '')
+              + (p.overtimeHours != null ? ` · 加班 ${p.overtimeHours}h` : '') + ')';
         }
         else if (type === 'counts') { const d = dateInput.value || dfltDate; applyPastedCounts(d, parsePastedCounts(ta.value)); msg = `已貼上計數到 ${d}`; }
         else if (type === 'meeting') { const n = applyPastedMeetings(month, parsePastedMeetings(ta.value, month)); msg = `已新增 ${n} 場會議到 ${month}`; }
