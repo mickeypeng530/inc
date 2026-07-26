@@ -54,7 +54,17 @@ const harness = `
   const STORAGE_KEY = 'k';
   const localStorage = { setItem(){}, getItem(){ return null; } };
   const flushPendingSaves = () => {};
-  const _normalizeData = (d) => d;          // 測試資料已是正規形態
+  // 逼真的 normalize:補回 procedures/meetings/addons 空陣列,但**不補 counts/schedule**
+  // —— 與 index.html 的 _normalizeData 同構,才抓得到「送出 payload vs 回音」的序列化不對稱。
+  const _normalizeData = (d) => {
+    for (const date in (d.days || {})) {
+      const x = d.days[date];
+      if (!Array.isArray(x.procedures)) x.procedures = [];
+      if (!Array.isArray(x.meetings)) x.meetings = [];
+      if (!Array.isArray(x.addons)) x.addons = [];
+    }
+    return d;
+  };
   const stampRevenue = () => {};            // revenue 衍生值與本測試無關
   const renderAll = () => { __render(); };
   const todayISO = () => '${TODAY}';
@@ -318,6 +328,47 @@ console.log('\n[11] 只看今天:遠端改到別天的 counts 不影響待打');
   api.setBase(api.snapshotOf(data));
   api.applyIncoming(mkOld(9));
   check('待打不動', api.getData().pending.ct_opd === 5, '實際 = ' + api.getData().pending.ct_opd);
+}
+
+// ============================================================
+console.log('\n[14] 月表加班刷卡:稀疏欄位的天,過期回音也要擋掉(序列化不對稱)');
+// ------------------------------------------------------------
+// 加班天只有 overtimeHours,counts/schedule/procedures 全空 → Firebase 丟棄空容器、
+// _normalizeData 只補回部分陣列 → 送出 payload 與回音 normalize 後序列化對不上。
+// 模擬 Firebase 持久化:遞迴剝除空物件 / 空陣列(RTDB 不存空容器)。
+function fbStrip(v) {
+  if (Array.isArray(v)) return v.map(fbStrip);
+  if (v && typeof v === 'object') {
+    const o = {};
+    for (const k of Object.keys(v)) {
+      const s = fbStrip(v[k]);
+      if (s && typeof s === 'object' && Object.keys(s).length === 0) continue;
+      o[k] = s;
+    }
+    return o;
+  }
+  return v;
+}
+{
+  const D = '2026-07-15';
+  // 稀疏加班天:只有 overtimeHours + 空容器(真實 getDay 產出的形狀)
+  const mkFull = (ot) => ({ counts: {}, procedures: [], meetings: [], schedule: {}, notes: '', overtimeHours: ot, updatedAt: 't' + ot });
+  const data = { days: { [D]: mkFull(1) }, pending: {}, settings: {} };
+  api.setData(clone(data));
+  api.setBase(api.snapshotOf(data));
+
+  // 打「1」→「15」,兩次寫入。noteSent 記完整本機 payload(含空容器)
+  api.noteSent('days/' + D, mkFull(1));
+  api.getData().days[D].overtimeHours = 15;
+  api.noteSent('days/' + D, mkFull(15));
+  api.setBase(api.snapshotOf({ days: { [D]: mkFull(15) }, pending: {}, settings: {} }));
+
+  // 「1」的過期回音:經 Firebase 剝空容器後才回來(applyIncoming 內 _normalizeData 補回陣列)
+  const before = renderCount;
+  api.applyIncoming({ days: { [D]: fbStrip(mkFull(1)) }, pending: {}, settings: {} });
+  check('加班時數沒被蓋回 1', api.getData().days[D].overtimeHours === 15,
+        '實際 = ' + api.getData().days[D].overtimeHours);
+  check('沒有 renderAll(焦點不會被吃掉)', renderCount === before);
 }
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);

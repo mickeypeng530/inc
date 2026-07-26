@@ -2030,7 +2030,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.21c';
+const APP_VERSION = '2026.07.22';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2084,12 +2084,30 @@ let syncSeq = 0;           // 只有最新一次寫入可以推進基準,避免�
 //   · 任何非預期的值都會直接解除閘門 → 不可能永久 defer
 const sentValues = new Map();   // path('settings' | 'days/2026-07-21') -> [送出過的值](末項=最新)
 const SENT_CAP = 12;
-// key 排序後再 stringify:送出端是本機物件、回音端是 SDK 重建的物件,key 順序不保證相同
+// 送出端是本機物件、回音端是 RTDB 存過再由 SDK 重建的物件,兩者形狀會有系統性差異:
+//   ① key 順序不保證相同 → 排序後再 stringify
+//   ② **RTDB 不存空物件/空陣列**(`counts:{}`、`procedures:[]` 存進去就消失),而
+//      _normalizeData 只補回 procedures/meetings/addons,counts/schedule 不補 →
+//      光排序仍對不上。稀疏的天(如只填加班時數)整天都是空容器,受害最深。
+//   ③ 同理 undefined / null / '' 在 RTDB 都不存在
+// 所以比對前一律剝掉「空容器與 null」,讓「空」與「不存在」等價 —— 只用於回音比對,
+// 不影響實際存下去的資料。
 function canonJSON(v) {
-  return JSON.stringify(v, (k, val) =>
-    (val && typeof val === 'object' && !Array.isArray(val))
-      ? Object.keys(val).sort().reduce((o, kk) => { o[kk] = val[kk]; return o; }, {})
-      : val);
+  const strip = (x) => {
+    if (Array.isArray(x)) return x.map(strip);
+    if (x && typeof x === 'object') {
+      const o = {};
+      for (const k of Object.keys(x).sort()) {
+        const s = strip(x[k]);
+        if (s === null || s === undefined) continue;
+        if (typeof s === 'object' && Object.keys(s).length === 0) continue;  // {} 與 [] 都算「不存在」
+        o[k] = s;
+      }
+      return o;
+    }
+    return x;
+  };
+  return JSON.stringify(strip(v ?? null) ?? null);
 }
 function noteSent(path, val) {
   const arr = sentValues.get(path) || [];
