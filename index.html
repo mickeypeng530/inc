@@ -314,6 +314,13 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
   color: var(--ink-muted);
   margin-left: 3px;
 }
+.count-money {   /* 計數列的「該項今日小計」:count × 單價,擺在 − 按鈕左邊 */
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 
 /* === Other aggregate (collapsible) === */
 .btn-other-toggle {
@@ -2029,7 +2036,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.26i';
+const APP_VERSION = '2026.07.26j';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3431,6 +3438,9 @@ function renderCountsPanel() {
 
       groupEl.appendChild(el('div', { class: 'count-row' },
         groupCell, subLabel,
+        // 該項今日小計(count × 單價):直填時由 refreshCountMoney() 只改字,不重建 DOM(焦點保護)
+        el('span', { class: 'count-money', 'data-money-key': child.key },
+          v > 0 && unitPrice > 0 ? '$' + fmtMoney(v * unitPrice) : ''),
         el('div', { class: 'count-controls' },
           el('button', { class: 'btn-step', tabindex: '-1', onclick: () => bumpCount(child.key, -1) }, '−'),
           el('input', { class: 'count-input', type: 'number', inputmode: 'numeric', value: String(v), min: '0',
@@ -3515,7 +3525,19 @@ function setCountAndRender(key, val) {
   // debounce 收斂成一次寫入;共用 'saveDebounce' key 讓相鄰編輯一起 coalesce。
   scheduleSave('saveDebounce', () => storage.save(state.data), 400);
   if (state.isMini) renderMini();
-  else { renderStatsPanel(); refreshPendingPanel(); }
+  else { renderStatsPanel(); refreshPendingPanel(); refreshCountMoney(); }
+}
+// 計數列小計就地更新:只改 textContent,不重建 DOM —— 直填時焦點在 input 上,
+// 走 renderCountsPanel() 會把正在打字的格子砍掉(同 refreshPendingPanel 的分工原則)
+function refreshCountMoney() {
+  const day = peekDay(state.currentDate);
+  const settings = state.data.settings;
+  document.querySelectorAll('.count-money[data-money-key]').forEach(elm => {
+    const key = elm.getAttribute('data-money-key');
+    const v = getCount(day, key);
+    const p = getUnitPriceForKey(key, settings);
+    elm.textContent = v > 0 && p > 0 ? '$' + fmtMoney(v * p) : '';
+  });
 }
 // Sheet 式鍵盤流:focus 自動全選 + Enter/↓ 跳下一計數欄、↑ 跳上一欄
 function countSelectFocus(e) { e.target.select(); }
