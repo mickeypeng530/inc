@@ -2029,7 +2029,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.26d';
+const APP_VERSION = '2026.07.26e';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3566,7 +3566,53 @@ function renderProceduresPanel() {
       el('button', { class: 'btn-del', title: '刪除', onclick: () => removeProc(i) }, '×')
     ));
   }
+  // 額外計費(3D / 資源共享)列:數量可直接改、可刪 —— 沒有這段的話選了 3D 只看得到 toast,
+  // 記錯數量就沒有任何地方能修
+  for (const [i, a] of (day.addons || []).entries()) {
+    const label = a.type === 'd3' ? '3D' : '資源共享';
+    procTotal += Number(a.count || 1) * Number(a.amount || 0);
+    list.appendChild(el('li', { class: 'proc-item' },
+      el('div', { style: 'flex:1;min-width:0' },
+        el('div', { class: 'proc-item-name' },
+          el('span', { class: 'proc-item-detail', style: 'color:var(--accent)' }, '額外計費'),
+          el('span', null, ` ${label} × `),
+          el('input', { class: 'proc-item-amount-input', type: 'number', min: '0', inputmode: 'numeric',
+            style: 'width:52px', value: String(a.count || 1),
+            title: '數量(改 0 = 刪除)',
+            onfocus: countSelectFocus,
+            onchange: (e) => setAddonCount(i, e.target.value) })
+        ),
+        el('div', { class: 'proc-item-detail' }, `${fmtMoney(a.amount)} / 件`)
+      ),
+      el('span', { class: 'proc-item-amount-input', style: 'border:none;text-align:right' },
+        fmtMoney(Number(a.count || 1) * Number(a.amount || 0))),
+      el('button', { class: 'btn-del', title: '刪除', onclick: () => removeAddon(i) }, '×')
+    ));
+  }
   $('proc-total').children[1].textContent = fmtMoney(procTotal);
+}
+
+function setAddonCount(i, val) {
+  const day = getDay(state.currentDate);
+  if (!day.addons || !day.addons[i]) return;
+  const n = Math.max(0, Math.round(Number(val) || 0));
+  if (n === 0) day.addons.splice(i, 1);
+  else day.addons[i].count = n;
+  if (!day.addons.length) delete day.addons;
+  touchDay(state.currentDate);
+  storage.save(state.data);
+  renderProceduresPanel();
+  renderStatsPanel();
+}
+function removeAddon(i) {
+  const day = getDay(state.currentDate);
+  if (!day.addons || !day.addons[i]) return;
+  day.addons.splice(i, 1);
+  if (!day.addons.length) delete day.addons;
+  touchDay(state.currentDate);
+  storage.save(state.data);
+  renderProceduresPanel();
+  renderStatsPanel();
 }
 
 function updateProcMedRec(i, val) {
@@ -4849,6 +4895,26 @@ function mpRemove(date, i) {
   storage.save(state.data);
   mpRefresh();
 }
+function mpAddonCount(date, i, val) {
+  const day = state.data.days[date];
+  if (!day || !day.addons || !day.addons[i]) return;
+  const n = Math.max(0, Math.round(Number(val) || 0));
+  if (n === 0) day.addons.splice(i, 1);
+  else day.addons[i].count = n;
+  if (!day.addons.length) delete day.addons;
+  touchDay(date);
+  storage.save(state.data);
+  mpRefresh();
+}
+function mpRemoveAddon(date, i) {
+  const day = state.data.days[date];
+  if (!day || !day.addons || !day.addons[i]) return;
+  day.addons.splice(i, 1);
+  if (!day.addons.length) delete day.addons;
+  touchDay(date);
+  storage.save(state.data);
+  mpRefresh();
+}
 function mpMoveDay(date, i, newDate) {
   if (!newDate || newDate === date) return;
   const day = state.data.days[date];
@@ -5008,7 +5074,24 @@ function showDayProcModal(date) {
         el('button', { class: 'btn-del', title: '刪除', onclick: () => mpRemove(date, i) }, '×')
       ));
     });
-    if (!procs.length) listWrap.appendChild(el('div', { style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '這天目前沒有 procedure'));
+    // 額外計費(3D / 資源共享):數量可改、可刪(改 0 = 刪)
+    for (const [i, a] of ((day && day.addons) || []).entries()) {
+      const label = a.type === 'd3' ? '3D' : '資源共享';
+      const sub = Number(a.count || 1) * Number(a.amount || 0);
+      total += sub;
+      listWrap.appendChild(el('div', { class: 'mp-row' },
+        el('span', { class: 'proc-item-detail', style: 'color:var(--accent);white-space:nowrap' }, '額外計費'),
+        el('div', { class: 'mp-mid' },
+          el('span', null, `${label}(${fmtMoney(a.amount)} / 件)× `),
+          el('input', { class: 'proc-item-amount-input mp-amt', type: 'number', min: '0', inputmode: 'numeric',
+            style: 'width:52px', value: String(a.count || 1), title: '數量(改 0 = 刪除)',
+            onfocus: countSelectFocus, onchange: (e) => mpAddonCount(date, i, e.target.value) })),
+        el('span', { class: 'proc-item-amount-input mp-amt', style: 'border:none;text-align:right' }, fmtMoney(sub)),
+        el('button', { class: 'btn-del', title: '刪除', onclick: () => mpRemoveAddon(date, i) }, '×')
+      ));
+    }
+    if (!procs.length && !((day && day.addons) || []).length)
+      listWrap.appendChild(el('div', { style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '這天目前沒有 procedure'));
     totalEl.textContent = fmtMoney(total);
   };
   state._dayProcModalRender = render;
