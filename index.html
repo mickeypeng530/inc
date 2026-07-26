@@ -1806,7 +1806,6 @@ body:not(.mini-mode) #view-mini { display: none; }
   <button class="icon-btn" id="open-mini" title="開啟迷你快輸視窗">🪟 迷你</button>
   <button class="icon-btn" id="theme-toggle" title="切換主題">🌓</button>
   <button class="icon-btn" id="export-day" title="複製當日計數為 sheet 一欄">📋 當日</button>
-  <button class="icon-btn" id="import-day" title="貼上 sheet 該天整欄:計數/收入/IR/Procedure/加班一次帶進來">📥 當日</button>
 </header>
 
 <div class="day-nav">
@@ -1901,7 +1900,7 @@ body:not(.mini-mode) #view-mini { display: none; }
     <select id="month-month-sel" class="btn-secondary" style="padding:4px 8px"></select>
     <button id="month-next" class="btn-secondary">→</button>
     <span class="header-spacer" style="flex:1"></span>
-    <button id="month-import" class="btn-secondary" title="匯入:計數 / 會議 / procedure(指定日期)">📥 匯入</button>
+    <button id="month-import" class="btn-secondary" title="貼上 sheet 單日整欄:計數/收入/IR/Procedure/加班(日期可在視窗內選)">📥 貼單日</button>
     <button id="month-paste-sheet" class="btn-secondary" title="貼上整月 Excel sheet(Ctrl+A 全選複製該月分頁)一鍵解析:計數/收入/IR/procedure/會議/加班">📄 貼整月</button>
     <button id="month-edit-toggle" class="btn-secondary" title="切換編輯模式:解鎖所有格子(計數/加班/收入/IR)">✏️ 編輯</button>
   </div>
@@ -2030,7 +2029,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.26';
+const APP_VERSION = '2026.07.26b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3619,6 +3618,42 @@ function changeProcPreset(i, presetId) {
   renderStatsPanel();
 }
 
+// ===== 加價項(3D / 資源共享)不是 procedure =====
+// 它們計價上是「非 IR 的加價項」,必須存 day.addons。存進 procedures 會出兩種事:
+//   ① 手算 IR 日(有 irRevenue)的 getDayProcRevenue 直接回傳 irRevenue、不看 procedures
+//      → 這筆金額整個蒸發
+//   ② getProcStats 的比例校正 factor = irRevenue ÷ 當日逐筆加總 → 分母被灌大,
+//      當天所有 procedure 的金額被等比壓低,排行失真
+// 匯入路徑(parseDetailCell)本來就分流正確,但手動入口只有 procedure 下拉 → 只能填錯。
+// 這裡是唯一判定出口,三個手動入口都必須先問它。
+// 認 atomicId 而非 preset 名 —— 使用者在設定頁改名也不會失效。
+const ATOMIC_AS_ADDON = { d3: 'd3', res_share: 'source' };
+
+// preset 整包都是加價項 → 回傳 addon 陣列;否則 null(照常存 procedure)。
+// 混合包(加價項 + 真 procedure)刻意不攔截:拆開會讓金額歸屬更難追。
+function presetAsAddons(preset, qty) {
+  const items = preset?.items || [];
+  if (!items.length) return null;
+  if (!items.every(it => ATOMIC_AS_ADDON[it.atomicId])) return null;
+  const n = Math.max(1, Number(qty) || 1);
+  return items.map(it => {
+    const atom = (state.data.settings.atomicItems || []).find(a => a.id === it.atomicId);
+    const unit = Number(atom?.amount) || Number(it.amount) || 0;
+    // 「資源共享*6」= 單價 100 的 preset 存 600 → 還原成 count 6,月表才顯示得出件數
+    const per = unit > 0 ? Math.max(1, Math.round(Number(it.amount || 0) / unit)) : 1;
+    return { type: ATOMIC_AS_ADDON[it.atomicId], count: per * n, amount: unit };
+  });
+}
+// 併進 day.addons:同 type+單價合併 count,同一天不會長出一堆重複列
+function addAddonsToDay(day, addons) {
+  if (!Array.isArray(day.addons)) day.addons = [];
+  for (const a of addons) {
+    const hit = day.addons.find(x => x.type === a.type && Number(x.amount) === Number(a.amount));
+    if (hit) hit.count = (Number(hit.count) || 1) + a.count;
+    else day.addons.push({ type: a.type, count: a.count, amount: a.amount });
+  }
+}
+
 function addPresetToToday() {
   const id = $('preset-select').value;
   const qty = Number($('preset-qty').value) || 1;
@@ -3626,6 +3661,16 @@ function addPresetToToday() {
   const preset = state.data.settings.presets.find(p => p.id === id);
   if (!preset) return;
   const day = getDay(state.currentDate);
+  const asAddons = presetAsAddons(preset, qty);   // 3D / 資源共享 → 存 addons,不進 procedures
+  if (asAddons) {
+    addAddonsToDay(day, asAddons);
+    $('preset-medrec').value = '';
+    persist();
+    renderProceduresPanel();
+    renderStatsPanel();
+    toast(`✓ 已記為額外計費:${preset.name}${qty > 1 ? ' ×' + qty : ''}`, 'success');
+    return;
+  }
   if (!day.procedures) day.procedures = [];
   for (let n = 0; n < qty; n++) {
     day.procedures.push({
@@ -4978,6 +5023,16 @@ function showDayProcModal(date) {
     if (!preset) { toast('請先選 preset', ''); return; }
     const qty = Math.max(1, Number(addQty.value) || 1);
     const day = getDay(date);
+    const asAddons = presetAsAddons(preset, qty);   // 3D / 資源共享 → addons(同今日 tab)
+    if (asAddons) {
+      addAddonsToDay(day, asAddons);
+      touchDay(date);
+      storage.save(state.data);
+      addSel.value = ''; addQty.value = '1'; addMed.value = '';
+      toast(`✓ 已記為額外計費:${preset.name}${qty > 1 ? ' ×' + qty : ''}`, 'success');
+      mpRefresh();
+      return;
+    }
     if (!day.procedures) day.procedures = [];
     for (let n = 0; n < qty; n++) day.procedures.push({
       presetId: preset.id, presetName: preset.name, medRecord: (addMed.value || '').trim(),
@@ -5934,6 +5989,13 @@ function parsePastedProcedures(text) {
   for (const raw of String(text).split(/\r?\n/)) {
     const line = raw.replace(/"/g, '').trim();
     if (!line) continue;
+    // 加價項優先:「3D」「資源共享*4」這類先攔下來,不然會被比對成同名 preset 而存進 procedures
+    const ad = msDetectAddon(line);
+    if (ad) {
+      rows.push({ medRecord: '', name: line, preset: null, matched: true,
+                  addon: { type: ad[0], count: ad[1], amount: MS_ADDON_PRICE[ad[0]] } });
+      continue;
+    }
     let medRecord = '', name = line, preset = findPreset(line);
     if (!preset) {
       const m = line.match(/^(\S+)\s+(.+)$/);   // 第一 token=病歷號(可含字母,如 S23871),其餘=preset 名
@@ -5943,6 +6005,9 @@ function parsePastedProcedures(text) {
         else if (/^[A-Za-z]*\d[A-Za-z0-9-]*$/.test(m[1])) { medRecord = m[1]; name = rest; }  // 像病歷號 → 切開,rest 待指派
       }
     }
+    // preset 本身就是加價包(如下拉裡的「3D」)→ 一樣轉 addon
+    const pa = preset ? presetAsAddons(preset, 1) : null;
+    if (pa) { rows.push({ medRecord, name, preset: null, matched: true, addon: pa[0] }); continue; }
     rows.push({ medRecord, name, preset: preset || null, matched: !!preset });
   }
   return { rows, errors };
@@ -5952,6 +6017,7 @@ function applyPastedProcedures(date, parsed) {
   if (!day.procedures) day.procedures = [];
   let added = 0;
   for (const r of parsed.rows) {
+    if (r.addon) { addAddonsToDay(day, [r.addon]); added++; continue; }   // 3D / 資源共享
     day.procedures.push({
       presetId: r.preset ? r.preset.id : '',
       presetName: r.preset ? r.preset.name : r.name,   // 對不到 → 保留貼上的名稱,待清單下拉指派
@@ -6088,10 +6154,14 @@ function showImportModal(initType, initDate) {
       tbl.appendChild(el('tr', null, el('th', null, '病歷號'), el('th', null, 'Procedure'), el('th', null, '金額')));
       rows.forEach(r => tbl.appendChild(el('tr', null,
         el('td', { style: 'color:var(--ink-muted)' }, r.medRecord || '—'),
-        el('td', null, r.name + (r.matched ? '' : ' ⚠️待指派')),
-        el('td', { style: 'color:var(--accent);font-weight:600' }, r.preset ? fmtMoney((r.preset.items || []).reduce((s, it) => s + Number(it.amount || 0), 0)) : '—'))));
+        // 加價項標示清楚,不然使用者以為它會變成一筆 procedure
+        el('td', null, r.addon ? `${r.name}　→ 額外計費` : r.name + (r.matched ? '' : ' ⚠️待指派')),
+        el('td', { style: 'color:var(--accent);font-weight:600' },
+          r.addon ? fmtMoney(r.addon.count * r.addon.amount)
+                  : (r.preset ? fmtMoney((r.preset.items || []).reduce((s, it) => s + Number(it.amount || 0), 0)) : '—')))));
       const un = rows.filter(r => !r.matched).length;
-      preview.appendChild(el('div', { class: 'paste-count-hint' }, `將匯入 ${rows.length} 筆${un ? ` · ⚠️ ${un} 筆待指派(匯入後在清單下拉選 preset)` : ''}${errors.length ? ' · ' + errors.length + ' 行略過' : ''}`));
+      const nAd = rows.filter(r => r.addon).length;
+      preview.appendChild(el('div', { class: 'paste-count-hint' }, `將匯入 ${rows.length - nAd} 筆 procedure${nAd ? ` + ${nAd} 筆額外計費` : ''}${un ? ` · ⚠️ ${un} 筆待指派(匯入後在清單下拉選 preset)` : ''}${errors.length ? ' · ' + errors.length + ' 行略過' : ''}`));
     }
     preview.appendChild(tbl);
   };
@@ -7414,8 +7484,10 @@ async function enterApp(user) {
   $('day-notes').oninput = (e) => { getDay(state.currentDate).notes = e.target.value; persist(); };
 
   $('export-day').onclick = exportDayTSV;
-  $('import-day').onclick = () => showImportModal('day', state.currentDate);
-  $('month-import').onclick = () => showImportModal();
+  // 單日匯入只剩這一顆(header 那顆 📥 當日 已移除 —— 開的是同一個 modal,只差日期預填)。
+  // 預填沿用「目前選取日」,前提是它落在正在看的月份,否則交給 modal 自己的預設(月初/今天)。
+  $('month-import').onclick = () =>
+    showImportModal('day', state.currentDate.startsWith(state.currentMonth) ? state.currentDate : undefined);
   $('month-paste-sheet').onclick = () => showMonthSheetModal();
   // 月表 pivot:滾輪直接橫向捲動;捲到底/頭時放行給頁面直捲
   const mps = $('month-pivot-scroll');
