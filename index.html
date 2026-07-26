@@ -2029,7 +2029,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.26f';
+const APP_VERSION = '2026.07.26g';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -4501,13 +4501,21 @@ function renderMonth() {
           monthSum += v;
           return v;
         });
-        if (monthSum === 0) continue;  // 整月 0 不顯示
+        if (monthSum === 0 && !state.monthEditMode) continue;  // 整月 0 不顯示(編輯模式保留,才能新增)
         const tr = el('tr', null,
           el('td', { class: 'row-label row-indent' }, '(' + child.label + ')'),
           el('td', { class: 'col-total' }, String(monthSum))
         );
         for (let di = 0; di < cells.length; di++) {
-          tr.appendChild(el('td', { class: weekCls(days[di]).trim() }, cells[di] ? String(cells[di]) : ''));
+          const td = el('td', { class: weekCls(days[di]).trim() }, cells[di] ? String(cells[di]) : '');
+          if (state.monthEditMode) {   // 編輯模式:點格開該天 Other 編輯(種類/金額/數量)
+            const dd = days[di];
+            td.classList.add('pivot-cell');
+            td.style.cursor = 'pointer';
+            td.title = '編輯這天的 Special(Other):指定種類 / 改數量';
+            td.onclick = () => showDaySpecialModal(dd);
+          }
+          tr.appendChild(td);
         }
         t.appendChild(tr);
         continue;
@@ -5045,6 +5053,85 @@ function renderMonthProcList() {
 
 // === 當天 procedure 編輯 modal(月表編輯模式點日期欄開啟)===
 // 直接改該天現有 procedure(改天/刪/改 preset·病歷號·金額)+ 新增;共用 mp* day-aware helpers
+// 月表編輯模式:點 Special(Other)格 → 編輯該天的 special.others(種類/金額/數量)。
+// 對應「貼 sheet 後種類未指定」的事後修正 —— 不用再切回今日 tab 一天一天找。
+function showDaySpecialModal(date) {
+  const mount = $('modal-mount');
+  const overlay = el('div', { class: 'modal-overlay' });
+  const listWrap = el('div', { class: 'dayproc-list' });
+  const totalEl = el('span', { class: 'stat-money' }, '0');
+  const close = () => overlay.remove();
+  const saveAndRefresh = () => { touchDay(date); storage.save(state.data); renderMonth(); renderStatsPanel(); render(); };
+  const render = () => {
+    listWrap.innerHTML = '';
+    const others = getSpecialOthers(state.data.days[date]);
+    let total = 0;
+    others.forEach((entry, idx) => {
+      total += Number(entry.amount || 0) * Number(entry.count || 0);
+      const amountInp = el('input', { class: 'proc-item-amount-input mp-amt', type: 'number', min: '0',
+        value: String(entry.amount || 0), title: '單筆金額(可改)',
+        onfocus: countSelectFocus,
+        onchange: (e) => { entry.amount = Number(e.target.value) || 0; saveAndRefresh(); } });
+      const sel = el('select', { class: 'proc-item-preset-sel', title: '種類(選了單價自動帶)',
+        onchange: (e) => {
+          entry.catalogId = e.target.value;
+          entry.amount = Number(state.data.settings.unitPrices.special[e.target.value] || 0);
+          saveAndRefresh();
+        } });
+      // 同今日 tab Other 面板:沒佔位選項的話,未指定的筆會偽裝成第一個選項
+      if (!SPECIAL_OTHER_CAT_MAP[entry.catalogId]) {
+        const ph = el('option', { value: entry.catalogId || '' }, '⚠️ 未指定種類');
+        ph.selected = true;
+        sel.appendChild(ph);
+      }
+      for (const cat of SPECIAL_OTHER_CATALOG) {
+        const o = el('option', { value: cat.id }, cat.name);
+        if (cat.id === entry.catalogId) o.selected = true;
+        sel.appendChild(o);
+      }
+      listWrap.appendChild(el('div', { class: 'mp-row' },
+        sel, amountInp,
+        el('input', { class: 'proc-item-amount-input mp-amt', type: 'number', min: '0', style: 'width:52px',
+          value: String(entry.count || 0), title: '數量(改 0 = 刪除)',
+          onfocus: countSelectFocus,
+          onchange: (e) => {
+            const n = Math.max(0, Math.round(Number(e.target.value) || 0));
+            if (n === 0) others.splice(idx, 1); else entry.count = n;
+            saveAndRefresh();
+          } }),
+        el('button', { class: 'btn-del', title: '刪除', onclick: () => { others.splice(idx, 1); saveAndRefresh(); } }, '×')
+      ));
+    });
+    if (!others.length) listWrap.appendChild(el('div', { style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '這天沒有 Special(Other)紀錄'));
+    totalEl.textContent = fmtMoney(total);
+  };
+  // 新增列
+  const addSel = el('select', { class: 'proc-item-preset-sel' });
+  addSel.appendChild(el('option', { value: '' }, '＋ 選種類新增…'));
+  for (const cat of SPECIAL_OTHER_CATALOG) addSel.appendChild(el('option', { value: cat.id }, cat.name));
+  const addCnt = el('input', { type: 'number', min: '1', value: '1', class: 'mp-amt', title: '數量', style: 'width:52px' });
+  const addBtn = el('button', { class: 'btn-secondary', onclick: () => {
+    if (!addSel.value) { toast('請先選種類', ''); return; }
+    const others = ensureSpecialOthers(getDay(date));
+    others.push({ id: 'sor_' + Date.now(), catalogId: addSel.value,
+      amount: Number(state.data.settings.unitPrices.special[addSel.value] || 0),
+      count: Math.max(1, Number(addCnt.value) || 1) });
+    addSel.value = ''; addCnt.value = '1';
+    saveAndRefresh();
+  } }, '加入');
+  const modal = el('div', { class: 'modal paste-modal' },
+    el('h3', null, `${date}(${weekdayCh(date)})Special · Other`),
+    listWrap,
+    el('div', { class: 'dayproc-add' }, addSel, addCnt, addBtn),
+    el('div', { class: 'proc-total' }, el('span', null, '當日 Special(Other)合計'), totalEl),
+    el('div', { class: 'modal-actions' }, el('button', { class: 'btn-primary', onclick: close }, '完成'))
+  );
+  render();
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  mount.appendChild(overlay);
+}
+
 function showDayProcModal(date) {
   const mount = $('modal-mount');
   const presets = state.data.settings.presets || [];
