@@ -2029,7 +2029,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.26b';
+const APP_VERSION = '2026.07.26c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5949,6 +5949,17 @@ function parsePastedDayColumn(text, date) {
     warnings.push('兩格 detail 內容不同 → 採用後面那格(3D / 資源共享 寫在後面)');
   }
   if (tail.length > 5) warnings.push(`尾端多出 ${tail.length - 5} 列未使用`);
+  // 日Total / 日IR / 加班 這三格必須是數字。出現文字 = 貼進來的形狀跟 sheet 那一欄對不上
+  // (最常見:手動打了多行 detail —— Excel 的 detail 是「一格內含多行」,手打會變成多列,
+  //  第二行就掉到日Total 的位置被靜默丟掉)。這種資料損失一定要講出來。
+  const SLOT = { 1: '日 Total', 2: '日 IR', 4: '加班時數' };
+  const misplaced = Object.entries(SLOT)
+    .filter(([i]) => isDetail(tail[i] ?? ''))
+    .map(([i, nm]) => `「${String(tail[i]).trim()}」(應為${nm})`);
+  if (misplaced.length) {
+    warnings.push(`這幾格不是數字,會被丟掉:${misplaced.join('、')}。`
+      + '若你是要手動補多筆 procedure / 3D,請改用月表點日期欄 →「📥 貼上匯入」(逐行解析、附加不覆蓋)。');
+  }
 
   return {
     counts, procedures: det.procedures, addons: det.addons, unmatched: det.unmatched,
