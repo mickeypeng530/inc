@@ -2029,7 +2029,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.26h';
+const APP_VERSION = '2026.07.26i';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3362,7 +3362,8 @@ function renderCountsPanel() {
               sel.appendChild(ph);
             }
             for (const cat of SPECIAL_OTHER_CATALOG) {
-              const opt = el('option', { value: cat.id }, cat.name);
+              const opt = el('option', { value: cat.id },
+                `${cat.name}($${fmtMoney(Number(settings.unitPrices.special[cat.id] || 0))})`);
               if (cat.id === entry.catalogId) opt.selected = true;
               sel.appendChild(opt);
             }
@@ -3398,7 +3399,8 @@ function renderCountsPanel() {
           // placeholder
           addSel.appendChild(el('option', { value: '' }, '— 選項目 —'));
           for (const cat of SPECIAL_OTHER_CATALOG) {
-            const opt = el('option', { value: cat.id }, cat.name);
+            const opt = el('option', { value: cat.id },
+              `${cat.name}($${fmtMoney(Number(settings.unitPrices.special[cat.id] || 0))})`);
             if (cat.id === draft.catalogId) opt.selected = true;
             addSel.appendChild(opt);
           }
@@ -4572,6 +4574,14 @@ function renderMonth() {
         const short = nm.replace(/\s+/g, '').slice(0, 7);
         cell.appendChild(el('div', { class: 'pivot-note-tag' }, cnt > 1 ? `${short}*${cnt}` : short));
       }
+    }
+    if (state.monthEditMode) {
+      // 編輯模式:點格直接開該天 procedure 編輯 modal(同 Special 的行為;空格也能點 → 新增)
+      cell.classList.add('pivot-note-clickable');
+      cell.style.cursor = 'pointer';
+      cell.title = '編輯這天的 procedure(改 preset / 病歷號 / 金額 / 改天 / 新增)';
+      cell.addEventListener('click', () => showDayProcModal(date));
+    } else if (procs.length) {
       cell.classList.add('pivot-note-clickable');
       cell.addEventListener('click', (e) => showProcPopover(e.currentTarget, date, procs));
     }
@@ -5096,7 +5106,8 @@ function showDaySpecialModal(date) {
         sel.appendChild(ph);
       }
       for (const cat of SPECIAL_OTHER_CATALOG) {
-        const o = el('option', { value: cat.id }, cat.name);
+        const o = el('option', { value: cat.id },
+          `${cat.name}($${fmtMoney(Number(state.data.settings.unitPrices.special[cat.id] || 0))})`);
         if (cat.id === entry.catalogId) o.selected = true;
         sel.appendChild(o);
       }
@@ -5119,7 +5130,8 @@ function showDaySpecialModal(date) {
   // 新增列
   const addSel = el('select', { class: 'proc-item-preset-sel' });
   addSel.appendChild(el('option', { value: '' }, '＋ 選種類新增…'));
-  for (const cat of SPECIAL_OTHER_CATALOG) addSel.appendChild(el('option', { value: cat.id }, cat.name));
+  for (const cat of SPECIAL_OTHER_CATALOG) addSel.appendChild(el('option', { value: cat.id },
+    `${cat.name}($${fmtMoney(Number(state.data.settings.unitPrices.special[cat.id] || 0))})`));
   const addCnt = el('input', { type: 'number', min: '1', value: '1', class: 'mp-amt', title: '數量', style: 'width:52px' });
   const addBtn = el('button', { class: 'btn-secondary', onclick: () => {
     if (!addSel.value) { toast('請先選種類', ''); return; }
