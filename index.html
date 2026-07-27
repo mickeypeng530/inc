@@ -2036,7 +2036,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.26j';
+const APP_VERSION = '2026.07.26k';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3341,7 +3341,21 @@ function renderCountsPanel() {
             totalCount > 0 ? el('span', { class: 'count-other-count' }, ` × ${totalCount}` ) : null,
             totalRev > 0 ? el('span', { class: 'count-other-rev-inline' }, ` $${fmtMoney(totalRev)}`) : null
           ),
-          el('div', { class: 'count-controls' })
+          el('div', { class: 'count-controls' },
+            // 第一筆免展開:還沒有任何紀錄時,收合列直接放種類下拉,選了就加一筆(數量 1、單價自動帶)。
+            // 有紀錄後(第二筆起)照舊展開管理 —— 收合列的快選消失,改顯示 × N $合計。
+            (!isOpen && getSpecialOthers(day).length === 0)
+              ? el('select', { class: 'special-other-cat', title: '快速新增第一筆(選了種類直接記一件)',
+                  onchange: (e) => {
+                    const id = e.target.value;
+                    if (!id) return;
+                    addSpecialOtherFull(id, Number(settings.unitPrices.special[id] || 0), 1);
+                  } },
+                  el('option', { value: '' }, '＋ 種類…'),
+                  ...SPECIAL_OTHER_CATALOG.map(cat => el('option', { value: cat.id },
+                    `${cat.name}($${fmtMoney(Number(settings.unitPrices.special[cat.id] || 0))})`)))
+              : null
+          )
         ));
 
         if (isOpen) {
