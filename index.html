@@ -2036,7 +2036,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.27';
+const APP_VERSION = '2026.07.28';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2769,7 +2769,7 @@ const storage = {
     try { json = JSON.stringify(data); }
     catch (e) { console.error('save: JSON.stringify 失敗,略過本次存檔', e); return; }
     try { localStorage.setItem(STORAGE_KEY, json); } catch (e) {}
-    bcChannel?.postMessage({ type: 'data-update' });
+    bcChannel?.postMessage({ type: 'data-update', v: APP_VERSION });   // 帶版本:對方視窗偵測新舊版互蓋
     // SYNC_REVIEW #2:還沒成功讀到雲端 → 只存本機,絕不整包上推(離線寫入會被 SDK
     // 排隊,連線恢復後 flush 就會用空白/過期資料蓋掉雲端)
     if (!userDataRef) return;
@@ -2791,7 +2791,7 @@ const storage = {
     try { json = JSON.stringify(data); }
     catch (e) { console.error('saveFull: JSON.stringify 失敗', e); return; }
     try { localStorage.setItem(STORAGE_KEY, json); } catch (e) {}
-    bcChannel?.postMessage({ type: 'data-update' });
+    bcChannel?.postMessage({ type: 'data-update', v: APP_VERSION });   // 帶版本:對方視窗偵測新舊版互蓋
     if (!userDataRef) return;
     if (!cloudReady) { if (bootDone) offlineEdits = true; return; }
     const clean = JSON.parse(json);
@@ -2903,7 +2903,19 @@ function syncFromStorage() {
   catch (e) { console.error('syncFromStorage 解析失敗', e); }
 }
 bcChannel?.addEventListener('message', (e) => {
-  if (e.data?.type === 'data-update') syncFromStorage();
+  if (e.data?.type !== 'data-update') return;
+  // 版本不一致 = 有別的視窗跑不同版程式(最常見:部署前就開著的迷你視窗,popup 不會自己
+  // 更新 JS)。舊版沒有回音閘門等修正,會跟新版互蓋 —— 2026-07-27 收入/待打來回跳就是這樣。
+  // 舊版廣播沒有 v 欄位(undefined ≠ APP_VERSION)→ 一樣會被抓到。60 秒節流避免洗版。
+  if (e.data.v !== APP_VERSION) {
+    const now = Date.now();
+    if (!state._verWarnAt || now - state._verWarnAt > 60000) {
+      state._verWarnAt = now;
+      toast('⚠️ 偵測到另一個 Worknum 視窗跑的是不同版本(可能是先前開的迷你視窗)— 請把它關掉重開,否則資料會互蓋', 'error');
+      console.warn(`版本不一致:本視窗 ${APP_VERSION},對方 ${e.data.v || '(舊版,無版號)'}`);
+    }
+  }
+  syncFromStorage();
 });
 // Storage event:當另一個 tab/window 寫 localStorage 時觸發(BC 在 BG tab throttle 時的備援)
 window.addEventListener('storage', (e) => {
