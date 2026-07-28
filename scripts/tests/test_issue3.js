@@ -8,6 +8,17 @@ function fn(name, kw = 'function ') {
   let i = src.indexOf('{', s), d = 0;
   for (; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}') { d--; if (!d) return src.slice(s, i + 1); } }
 }
+// const NAME = { … } / [ … ] 跨行版本(applyIncoming 用到 COUNT_TO_PENDING)
+function constBlock(name) {
+  const s = src.indexOf('const ' + name);
+  if (s < 0) throw new Error('not found const ' + name);
+  let d = 0, started = false;
+  for (let i = s; i < src.length; i++) {
+    const c = src[i];
+    if (c === '{' || c === '[') { d++; started = true; }
+    else if (c === '}' || c === ']') { d--; if (started && !d) return src.slice(s, i + 1) + ';'; }
+  }
+}
 let pass = 0, fail = 0;
 const chk = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? '  → ' + JSON.stringify(e) : '')); } };
 
@@ -24,6 +35,13 @@ const renderAll=()=>{ __rendered.n++; };
 const _normalizeData=(d)=>{ d.days=d.days||{}; d.settings=d.settings||{}; return d; };
 let lastSynced=null;
 const _pendingFlush = new Map();
+const sentValues = new Map();
+const SENT_CAP = 12;
+const todayISO = () => '2026-07-08';
+${constBlock('COUNT_TO_PENDING')}
+${fn('canonJSON')}
+${fn('noteSent')}
+${fn('isStaleEcho')}
 ${fn('getCount')}
 ${fn('getSpecialOthers')}
 ${fn('specialOthersTotalRev')}

@@ -28,6 +28,7 @@ const userDataRef={}, fbDB={};
 const localStorage={store:{},setItem(k,v){this.store[k]=v;},getItem(k){return this.store[k]??null;},removeItem(k){delete this.store[k];}};
 const bcChannel=null;
 const state={ data:{ days:{} } };
+const sentValues=new Map(); const SENT_CAP=12; const CLOUD_TIMEOUT_MS=1000;
 const renderAll=()=>{};
 const ref=(db,p)=>({path:p});
 const get=async(r)=>{ const d=r.path.split('/days/')[1]; const v=__cloud[d]; return { exists:()=>v!==undefined, val:()=>v }; };
@@ -36,7 +37,12 @@ const update=async(r,u)=>{ __calls.update.push(JSON.parse(JSON.stringify(u))); }
 ${F('snapshotOf')}
 ${F('diffUpdates')}
 ${F('merge3')}
+${F('canonJSON')}
+${F('noteSent')}
+${F('isStaleEcho')}
+${F('withTimeout')}
 ${A('guardDayUpdates')}
+${A('guardTopUpdates')}
 ${A('_writeDirty')}
 ${F('_writeFull')}
 ${storageSrc}

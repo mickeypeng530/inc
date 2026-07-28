@@ -32,9 +32,16 @@ const fbDB = {};
 const localStorage = { store:{}, setItem(k,v){this.store[k]=v;}, getItem(k){return this.store[k]??null;}, removeItem(k){delete this.store[k];} };
 const bcChannel = null;
 const state = { data: null };
+const sentValues = new Map();
+const SENT_CAP = 12;
+const CLOUD_TIMEOUT_MS = 1000;
 const ref = (db, path) => ({ path });
 const get = async (r) => {
   if (__opts.failRead) throw new Error('offline');
+  if (!r.path.includes('/days/')) {                 // top-level 守門(pending)的讀取
+    const v = __cloud[r.path.split('/').pop()];
+    return { exists: () => v !== undefined, val: () => v };
+  }
   const date = r.path.split('/days/')[1];
   const v = __cloud[date];
   return { exists: () => v !== undefined, val: () => v };
@@ -53,7 +60,12 @@ ${fn('stampRevenue')}
 ${fn('snapshotOf')}
 ${fn('diffUpdates')}
 ${fn('merge3')}
+${fn('canonJSON')}
+${fn('noteSent')}
+${fn('isStaleEcho')}
+${fn('withTimeout')}
 ${afn('guardDayUpdates')}
+${afn('guardTopUpdates')}
 ${afn('_writeDirty')}
 ${fn('_writeFull')}
 ${storageSrc}

@@ -2036,7 +2036,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.28';
+const APP_VERSION = '2026.07.28b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2077,6 +2077,19 @@ let offlineEdits = false;  // 讀不到雲端時使用者有無實際修改 → 
 // 抓到並隨首次 update 一起上雲,不必再靠全樹 set 順便帶上去。
 let lastSynced = null;
 let syncSeq = 0;           // 只有最新一次寫入可以推進基準,避免亂序回填舊快照
+let listening = false;     // onValue 監聽是否活著(被 RTDB 取消時要重掛,見 attachRemoteListener)
+let bufferedIncoming = null;  // 開機對帳完成前收到的 snapshot(監聽先掛,套用要等基準,見 flushBufferedIncoming)
+// 雲端讀取逾時:get() 在連線半死時可能永遠不 settle(醫院網路 / 分頁被 Chrome
+// freeze 後恢復,socket 還在但已經不通)。沒有逾時的話 loadCloudAndReconcile 會卡在
+// await,排在它後面的 onValue 監聽**永遠掛不上** → 視窗看起來正常卻收不到任何遠端更新。
+const CLOUD_TIMEOUT_MS = 15000;
+function withTimeout(promise, ms, msg) {
+  let t;
+  return Promise.race([
+    promise.finally(() => clearTimeout(t)),
+    new Promise((_, rej) => { t = setTimeout(() => rej(new Error(msg)), ms); }),
+  ]);
+}
 
 // ===== 過期回音閘門(打字時值被蓋回去的病根)=====
 // RTDB 每次寫入都會回一次 onValue。連打兩鍵送出兩次寫入時(「3」→「38」),較早那次的
@@ -2670,7 +2683,7 @@ async function guardDayUpdates(updates) {
     const date = p.slice(5);
     let cloudDay;
     try {
-      const s = await get(ref(fbDB, `${userPath}/days/${date}`));
+      const s = await withTimeout(get(ref(fbDB, `${userPath}/days/${date}`)), CLOUD_TIMEOUT_MS, '守門讀取逾時');
       cloudDay = s.exists() ? s.val() : null;
     } catch (e) {
       console.error('Tier2:讀不到雲端該天,略過不寫以免盲蓋', date, e);
@@ -2687,11 +2700,39 @@ async function guardDayUpdates(updates) {
   }));
   return merged;
 }
+// ===== Tier 2(top-level):pending 的守門 =====
+// `days/{date}` 有上面那層守門,top-level 節點沒有 —— diffUpdates 產出的 `pending`
+// 會被 _writeDirty 原封不動整包蓋上去。而 pending 剛好是**唯一兩個寫入端都會改**的
+// top-level 節點:桌寵寫 counts → applyIncoming 依增量補扣待打;web 的 ±1 也會扣。
+// 閒置視窗的 lastSynced 凍結在監聽斷掉那一刻 → 沒有守門就會把舊的待打整包蓋回雲端
+// (2026-07-27「收入/待打來回跳」走的就是這條)。
+// 其餘 top-level(settings / monthlyMeta / scheduleEvents)維持盲蓋 —— 只有 web 會寫它們。
+// 回傳合併結果(沒合併則 null),呼叫端要回寫本地讓兩邊收斂。
+async function guardTopUpdates(updates) {
+  if (!('pending' in updates) || updates.pending === null || !userPath) return null;
+  let cloudVal;
+  try {
+    const s = await withTimeout(get(ref(fbDB, `${userPath}/pending`)), CLOUD_TIMEOUT_MS, '守門讀取逾時');
+    cloudVal = s.exists() ? s.val() : null;
+  } catch (e) {
+    console.error('Tier2:讀不到雲端 pending,略過不寫以免盲蓋', e);
+    delete updates.pending;
+    return null;
+  }
+  const baseStr = (lastSynced && lastSynced.top.pending) || 'null';
+  // 用 canonJSON 比對(不是裸 stringify):RTDB 會丟掉空容器、鍵序也不保證,
+  // 裸比對會把「其實沒人動過」誤判成衝突,白跑一次 merge3。
+  if (canonJSON(cloudVal) === canonJSON(JSON.parse(baseStr))) return null;
+  const m = merge3(JSON.parse(baseStr), updates.pending, cloudVal || {});
+  updates.pending = m;
+  return m;
+}
 // 髒路徑寫入(經 Tier 2 守門)
 async function _writeDirty(updates, nextSnap) {
   const mySeq = ++syncSeq;
   try {
-    const merged = await guardDayUpdates(updates);
+    // 兩個守門各自一趟 get,並行跑不疊加延遲(它們動 updates 的不同 key,不互相干擾)
+    const [merged, mergedTop] = await Promise.all([guardDayUpdates(updates), guardTopUpdates(updates)]);
     // 期間已有更新的存檔接手 → 放棄本次(對方的 payload 是本次的超集,因為基準尚未推進)
     if (mySeq !== syncSeq) return;
     if (!Object.keys(updates).length) return;
@@ -2701,13 +2742,17 @@ async function _writeDirty(updates, nextSnap) {
     await update(userDataRef, updates);
     if (mySeq !== syncSeq) return;
     // 合併結果回寫本地 + 基準,讓本機/雲端收斂(否則下次 diff 會再把舊值推上去)
-    if (merged.size) {
+    if (merged.size || mergedTop) {
       for (const [date, m] of merged) {
         state.data.days[date] = m;
         nextSnap.days[date] = JSON.stringify(m);
       }
+      if (mergedTop) {
+        state.data.pending = mergedTop;
+        nextSnap.top.pending = JSON.stringify(mergedTop);
+      }
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data)); } catch (e) {}
-      console.info(`Tier2:${merged.size} 天與雲端合併(對方較新的欄位已保留)`);
+      console.info(`Tier2:${merged.size} 天${mergedTop ? ' + pending' : ''}與雲端合併(對方較新的欄位已保留)`);
       renderAll();
     }
     lastSynced = nextSnap;
@@ -2747,7 +2792,7 @@ const storage = {
   async loadFromFirebase() {
     if (!userDataRef) return { status: 'error', data: null };
     try {
-      const snap = await get(userDataRef);
+      const snap = await withTimeout(get(userDataRef), CLOUD_TIMEOUT_MS, '讀取雲端逾時');
       if (!snap.exists()) return { status: 'empty', data: null, rawSnap: snapshotOf({}) };
       const raw = snap.val();
       // 先對「雲端原始形態」照相,再 normalize —— _normalizeData 會就地改物件,
@@ -7648,6 +7693,40 @@ function hideCloudWarning() {
   const b = document.getElementById('cloud-warn');
   if (b) b.style.display = 'none';
 }
+// === 連線狀態偵測(`.info/connected`)===
+// attachRemoteListener 的 error callback 只在 RTDB **明確取消監聽**時觸發(token 過期 /
+// 權限)。單純網路斷線、或分頁被 Chrome freeze 後 socket 半死,RTDB 會自己排隊重連、
+// **不會** error → 那段空窗視窗仍以為線上。`.info/connected` 是 SDK 本地維護的連線旗標,
+// 這種情況它會翻 false,補得到 error callback 抓不到的洞。
+//
+// ⚠ 刻意**不動 `cloudReady`**:斷線期間 SDK 會把寫入排隊、重連後自動送出;而
+// `cloudReady=false` 會讓 `storage.save` 改設 `offlineEdits`,一旦設了就只能重整才能恢復
+// 上傳(`retryCloudLoad` 遇 `offlineEdits` 直接顯示紅條 return)。短暫抖動不該把人卡到要重整。
+// 這裡只做兩件事:誠實顯示狀態、重連時確認監聽還活著。
+let connWatched = false, connBarShown = false, offlineBarTimer = null;
+function watchConnection() {
+  if (connWatched || !fbDB) return;
+  connWatched = true;
+  onValue(ref(fbDB, '.info/connected'), (snap) => {
+    if (snap.val() === true) {
+      clearTimeout(offlineBarTimer); offlineBarTimer = null;
+      if (connBarShown) { connBarShown = false; hideCloudWarning(); }
+      // 監聽若在斷線期間被取消 → 立刻重掛,不等 retryCloudLoad 的 backoff 慢慢爬
+      if (!listening) retryCloudLoad(1);
+      return;
+    }
+    if (offlineBarTimer) return;   // 已經在倒數
+    // 抖動很常見(切網路 / 睡醒 / 換 wifi),持續 15 秒才報警,免得警告條一直閃
+    offlineBarTimer = setTimeout(() => {
+      offlineBarTimer = null;
+      const b = document.getElementById('cloud-warn');
+      if (b && b.style.display !== 'none' && b.textContent) return;   // 已有更重要的警告 → 不覆蓋
+      connBarShown = true;
+      showCloudWarning('⚠️ 目前與雲端失去連線:修改先留在本機,連上後會自動送出');
+    }, 15000);
+  });
+}
+
 // 背景重試讀雲端;成功後才解除全樹寫入封鎖
 async function retryCloudLoad(attempt = 1) {
   const delay = Math.min(30000, 3000 * attempt);   // 3s,6s,9s… 上限 30s
@@ -7668,13 +7747,28 @@ async function retryCloudLoad(attempt = 1) {
     lastSynced = res.rawSnap;   // 取得基準後才可以開始寫
     cloudReady = true;
     hideCloudWarning();
+    attachRemoteListener();     // 監聽若是被取消才走到這裡 → 重掛(listening 旗標防重複掛)
+    flushBufferedIncoming();    // 開機那次 get() 失敗時,基準是現在才有的 → 補放暫存的 snapshot
     toast('✓ 已連上雲端,恢復同步', 'success');
   }, delay);
+}
+
+// 開機對帳完成(lastSynced 有值)後,把監聽在對帳期間收到的那筆補放進來
+function flushBufferedIncoming() {
+  if (!bufferedIncoming || !lastSynced) return;
+  const raw = bufferedIncoming;
+  bufferedIncoming = null;
+  applyIncoming(raw);
 }
 
 // 取雲端資料並與「已經畫在畫面上的本機快取」對帳。
 // 在 enterApp 最後才啟動 → 開機與事件綁定完全不受網路速度影響。
 async function loadCloudAndReconcile() {
+  // ⚠ 監聽要**先掛**再 await:掛在 await 後面的話,只要這次 get() 慢或半死不 settle,
+  // 監聽就永遠掛不上 → 視窗看起來正常卻收不到任何遠端更新(「閒置後開不起來」的路徑之一)。
+  // 對帳完成前收到的 snapshot 會被 attachRemoteListener 暫存,不會搶先套用。
+  attachRemoteListener();
+  watchConnection();
   const res = await storage.loadFromFirebase();
   if (res.status === 'ok') {
     if (offlineEdits) {
@@ -7701,13 +7795,33 @@ async function loadCloudAndReconcile() {
     showCloudWarning('⚠️ 讀不到雲端資料:目前僅存本機、不會上傳,正在重試…');
     retryCloudLoad();
   }
+  flushBufferedIncoming();   // 失敗分支 lastSynced 仍是 null → 這裡是 no-op,留給 retryCloudLoad 放
+}
 
-  // === 監聽 Firebase 遠端變動(跨裝置同步)===
-  // 不再用 suppressNextOnValue 過濾自己的回音:單旗標會連桌寵的更新一起吞掉,
-  // 而回音經 applyIncoming 合併後內容相同,本來就不會觸發重繪(#3 / 報告第 11 點)
+// === 監聽 Firebase 遠端變動(跨裝置同步)===
+// 不再用 suppressNextOnValue 過濾自己的回音:單旗標會連桌寵的更新一起吞掉,
+// 而回音經 applyIncoming 合併後內容相同,本來就不會觸發重繪(#3 / 報告第 11 點)
+//
+// ⚠ 第三個參數(error callback)不可省:RTDB 的監聽被取消時(token 過期 / 權限 /
+// 連線被關)會**直接把 listener 移除**,而錯誤沒有人接 → 視窗看起來完全正常、
+// cloudReady 仍是 true,卻永遠收不到遠端更新;它凍結的 lastSynced 之後還會在寫入時
+// 把舊值推回雲端。閒置很久的視窗就是這樣變成「殭屍」的。
+function attachRemoteListener() {
+  if (!userDataRef || listening) return;
+  listening = true;
   onValue(userDataRef, (snap) => {
     if (!snap.exists()) return;
+    // 還沒拿到基準(lastSynced 仍是 null)→ 先收著,不要跑 applyIncoming:
+    // 基準是 null 時它會把本機每一格都判定成「動過」而全部留下,等於用可能過期的
+    // localStorage 快取蓋掉雲端。對帳完成後由 flushBufferedIncoming() 補放。
+    if (!lastSynced) { bufferedIncoming = snap.val(); return; }
     applyIncoming(snap.val());
+  }, (err) => {
+    listening = false;
+    console.error('遠端監聽中斷', err);
+    cloudReady = false;   // 立刻封鎖寫入 —— 基準已經不可信,再寫就是盲蓋
+    showCloudWarning('⚠️ 與雲端的即時連線中斷:目前的修改不會上傳,正在重連…');
+    retryCloudLoad();     // 重讀 → 重新取得基準 → 解除封鎖 → 重掛監聽
   });
 }
 
@@ -7731,7 +7845,13 @@ async function enterApp(user) {
   // #10:currentDate 原本只在 enterApp 設一次 → 迷你視窗常駐過夜後,
   // 「今天」還停在昨天,+1 會記到昨天(桌寵寫今天、web 寫昨天,同日分岔)
   setInterval(checkDateRollover, 60000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkDateRollover(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    checkDateRollover();
+    // 分頁被 Chrome freeze/discard 過:回來時確認監聽還在,死了就立刻重掛
+    // (不等 `.info/connected` 或 retryCloudLoad 的 backoff)
+    if (!listening) retryCloudLoad(1);
+  });
   window.addEventListener('focus', checkDateRollover);
   // 關視窗/切走時把還在 debounce 排隊的存檔沖掉 —— 否則打完字 400ms 內關掉迷你視窗
   // 那筆就沒了(localStorage 是同步寫入,趕得及;雲端來不及也沒關係,下次開機會 diff 上去)。

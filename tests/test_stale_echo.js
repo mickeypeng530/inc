@@ -371,5 +371,31 @@ function fbStrip(v) {
   check('沒有 renderAll(焦點不會被吃掉)', renderCount === before);
 }
 
+// ============================================================
+console.log('\n[15] 基準是 null 時 applyIncoming 會讓過期本機快取全勝(= 監聽必須先暫存的理由)');
+// ------------------------------------------------------------
+// 2026-07-28 把 onValue 的註冊移到 await 之前(修「get() 卡住就永遠掛不上監聽」),
+// 於是監聽有可能在開機對帳完成前就收到 snapshot,那時 lastSynced 還是 null。
+// 這支測試釘住「那時候直接套用會怎樣」——本機每一格都被判定成髒 → 過期快取蓋掉雲端。
+// attachRemoteListener 因此在 !lastSynced 時先把 snapshot 收進 bufferedIncoming,
+// 等 flushBufferedIncoming() 再放。**若哪天想拿掉那個暫存,先看這支。**
+{
+  const D = '2026-07-21';
+  const stale = { days: { [D]: { counts: { ct: { opd: 2 } }, procedures: [], meetings: [], updatedAt: 'old' } },
+                  pending: { ct_opd: 5 }, settings: { theme: 'dark' } };
+  api.setData(clone(stale));
+  api.setBase(null);                       // ← 還沒拿到基準
+
+  api.applyIncoming({                      // 雲端其實已經是 9(別台裝置/桌寵寫的)
+    days: { [D]: { counts: { ct: { opd: 9 } }, procedures: [], meetings: [], updatedAt: 'new' } },
+    pending: { ct_opd: 1 }, settings: { theme: 'light' },
+  });
+
+  check('基準為 null → 雲端的 9 被過期本機的 2 蓋掉(所以不能直接套用)',
+        api.getData().days[D].counts.ct.opd === 2, '實際 = ' + api.getData().days[D].counts.ct.opd);
+  check('top-level 也一樣(pending 留在本機的 5)',
+        api.getData().pending.ct_opd === 5, '實際 = ' + api.getData().pending.ct_opd);
+}
+
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
 process.exit(fail ? 1 : 0);
