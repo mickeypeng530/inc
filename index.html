@@ -2036,7 +2036,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.28b';
+const APP_VERSION = '2026.07.28c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2078,7 +2078,6 @@ let offlineEdits = false;  // 讀不到雲端時使用者有無實際修改 → 
 let lastSynced = null;
 let syncSeq = 0;           // 只有最新一次寫入可以推進基準,避免亂序回填舊快照
 let listening = false;     // onValue 監聽是否活著(被 RTDB 取消時要重掛,見 attachRemoteListener)
-let bufferedIncoming = null;  // 開機對帳完成前收到的 snapshot(監聽先掛,套用要等基準,見 flushBufferedIncoming)
 // 雲端讀取逾時:get() 在連線半死時可能永遠不 settle(醫院網路 / 分頁被 Chrome
 // freeze 後恢復,socket 還在但已經不通)。沒有逾時的話 loadCloudAndReconcile 會卡在
 // await,排在它後面的 onValue 監聽**永遠掛不上** → 視窗看起來正常卻收不到任何遠端更新。
@@ -7748,27 +7747,22 @@ async function retryCloudLoad(attempt = 1) {
     cloudReady = true;
     hideCloudWarning();
     attachRemoteListener();     // 監聽若是被取消才走到這裡 → 重掛(listening 旗標防重複掛)
-    flushBufferedIncoming();    // 開機那次 get() 失敗時,基準是現在才有的 → 補放暫存的 snapshot
     toast('✓ 已連上雲端,恢復同步', 'success');
   }, delay);
 }
 
-// 開機對帳完成(lastSynced 有值)後,把監聽在對帳期間收到的那筆補放進來
-function flushBufferedIncoming() {
-  if (!bufferedIncoming || !lastSynced) return;
-  const raw = bufferedIncoming;
-  bufferedIncoming = null;
-  applyIncoming(raw);
-}
-
 // 取雲端資料並與「已經畫在畫面上的本機快取」對帳。
 // 在 enterApp 最後才啟動 → 開機與事件綁定完全不受網路速度影響。
+//
+// ⚠⚠ **監聽一定要掛在 await 之後**(2026-07-28 踩過,見下)。
+// 曾經為了「get() 卡住就永遠掛不上監聽」把 attachRemoteListener() 移到 await 之前,
+// 並加一個「還沒有基準就先把 snapshot 暫存起來」的閘門。結果:只要 lastSynced 沒被設起來
+// (例如對帳路徑上任何一步出錯/丟例外),**每一筆遠端推播都會被丟進暫存區然後永遠不套用**,
+// 而畫面因為「快取先行」看起來是對的 → 症狀是「重啟數字正確,但之後兩邊再也不同步」,
+// 極難察覺。已整段移除。
+// **那個問題交給 withTimeout 解:`get()` 有 15 秒逾時 → loadFromFirebase 一定會 settle
+// → 這裡一定走得到 → 監聽一定掛得上。** 不需要提前掛。
 async function loadCloudAndReconcile() {
-  // ⚠ 監聽要**先掛**再 await:掛在 await 後面的話,只要這次 get() 慢或半死不 settle,
-  // 監聽就永遠掛不上 → 視窗看起來正常卻收不到任何遠端更新(「閒置後開不起來」的路徑之一)。
-  // 對帳完成前收到的 snapshot 會被 attachRemoteListener 暫存,不會搶先套用。
-  attachRemoteListener();
-  watchConnection();
   const res = await storage.loadFromFirebase();
   if (res.status === 'ok') {
     if (offlineEdits) {
@@ -7795,7 +7789,8 @@ async function loadCloudAndReconcile() {
     showCloudWarning('⚠️ 讀不到雲端資料:目前僅存本機、不會上傳,正在重試…');
     retryCloudLoad();
   }
-  flushBufferedIncoming();   // 失敗分支 lastSynced 仍是 null → 這裡是 no-op,留給 retryCloudLoad 放
+  attachRemoteListener();
+  watchConnection();
 }
 
 // === 監聽 Firebase 遠端變動(跨裝置同步)===
@@ -7811,10 +7806,6 @@ function attachRemoteListener() {
   listening = true;
   onValue(userDataRef, (snap) => {
     if (!snap.exists()) return;
-    // 還沒拿到基準(lastSynced 仍是 null)→ 先收著,不要跑 applyIncoming:
-    // 基準是 null 時它會把本機每一格都判定成「動過」而全部留下,等於用可能過期的
-    // localStorage 快取蓋掉雲端。對帳完成後由 flushBufferedIncoming() 補放。
-    if (!lastSynced) { bufferedIncoming = snap.val(); return; }
     applyIncoming(snap.val());
   }, (err) => {
     listening = false;

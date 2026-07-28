@@ -374,11 +374,13 @@ function fbStrip(v) {
 // ============================================================
 console.log('\n[15] 基準是 null 時 applyIncoming 會讓過期本機快取全勝(= 監聽必須先暫存的理由)');
 // ------------------------------------------------------------
-// 2026-07-28 把 onValue 的註冊移到 await 之前(修「get() 卡住就永遠掛不上監聽」),
-// 於是監聽有可能在開機對帳完成前就收到 snapshot,那時 lastSynced 還是 null。
-// 這支測試釘住「那時候直接套用會怎樣」——本機每一格都被判定成髒 → 過期快取蓋掉雲端。
-// attachRemoteListener 因此在 !lastSynced 時先把 snapshot 收進 bufferedIncoming,
-// 等 flushBufferedIncoming() 再放。**若哪天想拿掉那個暫存,先看這支。**
+// 這支釘住的是「**監聽為什麼一定要掛在取得基準之後**」。
+// 2026-07-28 曾經為了「get() 卡住就永遠掛不上監聽」把 onValue 移到 await 之前,並加一個
+// 「沒基準就先暫存 snapshot」的閘門 —— 結果只要 lastSynced 沒被設起來,推播就永遠卡在暫存區,
+// 而畫面因為「快取先行」看起來是對的 → 症狀是「重啟數字正確,之後兩邊再也不同步」。已改回。
+// 下面示範沒有基準時 applyIncoming 會怎樣:本機每一格都被判定成髒 → 過期快取蓋掉雲端。
+// **所以不要再把 attachRemoteListener() 往 await 前面搬**(get() 不 settle 的問題由
+// withTimeout 15 秒逾時解決,loadFromFirebase 一定會回來)。
 {
   const D = '2026-07-21';
   const stale = { days: { [D]: { counts: { ct: { opd: 2 } }, procedures: [], meetings: [], updatedAt: 'old' } },
