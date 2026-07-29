@@ -314,6 +314,16 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
   color: var(--ink-muted);
   margin-left: 3px;
 }
+.proc-item span.drag-handle {   /* procedure 清單的拖曳把手(span 版;設定頁的是 td) */
+  cursor: grab;
+  color: var(--ink-muted);
+  padding: 0 3px;
+  flex-shrink: 0;
+  user-select: none;
+  font-size: 11px;
+}
+.proc-item.dragging { opacity: .45; }
+.proc-item.drag-over { outline: 1px dashed var(--accent); outline-offset: -1px; }
 .count-money {   /* 計數列的「該項今日小計」:count × 單價,擺在 − 按鈕左邊 */
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1820,6 +1830,7 @@ body:not(.mini-mode) #view-mini { display: none; }
   <input type="date" id="day-picker">
   <button id="day-next">→</button>
   <button id="day-today">今天</button>
+  <button id="day-log" title="操作記錄:這天實際按下去的輸入時間軸(分析時間分配用)">⏱</button>
   <span class="day-label" id="day-label"></span>
 </div>
 
@@ -2036,7 +2047,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.28c';
+const APP_VERSION = '2026.07.29';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3067,6 +3078,50 @@ function flushPendingSaves() {
     try { fn(); } catch (e) { console.error('flush 失敗', key, e); }
   }
 }
+// ===== 操作記錄(activity log)=====
+// 目的:記「幾點幾分做了什麼」(X光 +3 之類),供日後分析時間分配/效率。
+// 存放在 worknum 的**兄弟節點** users/{uid}/worknum_activity/{日期}/{id} ——
+// 不在 onValue 監聽範圍、不進 snapshotOf/diff/merge 管線,對同步架構零影響,
+// 也不會讓每次推播的 payload 隨時間變肥。rules 鎖在 users/{uid} 層,直接可寫。
+// 寫入用 multi-path update() 直寫(append-only,多視窗不衝突);離線時該批會丟失(可接受)。
+// 只記「當下的操作」(今日 tab / 迷你視窗的增減);貼上/匯入是補登歷史,刻意不記。
+let activityPath = null;              // enterApp 設定
+const _actBuf = new Map();            // `${目標日}|${key}` → net delta(1.5s 合併連續 ±)
+function logActivity(key, delta) {
+  if (!delta) return;
+  const tgt = state.currentDate || todayISO();
+  const k = `${tgt}|${key}`;
+  const next = (_actBuf.get(k) || 0) + delta;
+  if (next === 0) _actBuf.delete(k); else _actBuf.set(k, next);
+  scheduleSave('actLogFlush', flushActivityLog, 1500);
+}
+function flushActivityLog() {
+  if (!_actBuf.size) return;
+  if (!activityPath || !fbDB) { _actBuf.clear(); return; }
+  const actionDate = todayISO();       // 記在「實際操作日」;補記昨天 → 帶 for 標記
+  const t = new Date().toISOString();
+  const updates = {};
+  let seq = 0;
+  for (const [bk, d] of _actBuf) {
+    const [tgt, key] = [bk.slice(0, 10), bk.slice(11)];
+    const id = t.replace(/[-:.TZ]/g, '') + '_' + (seq++) + '_' + Math.random().toString(36).slice(2, 5);
+    const entry = { t, k: key, d, src: state.isMini ? 'mini' : 'web' };
+    if (tgt !== actionDate) entry.for = tgt;
+    updates[`${actionDate}/${id}`] = entry;
+  }
+  _actBuf.clear();
+  try { update(ref(fbDB, activityPath), updates).catch(() => {}); } catch (e) {}
+}
+function activityLabel(k) {
+  if (k.startsWith('proc.')) return k.slice(5);
+  if (k.startsWith('addon.')) return k.slice(6) === 'd3' ? '3D' : '資源共享';
+  if (k.startsWith('special.') && SPECIAL_OTHER_CAT_MAP[k.slice(8)]) return 'Special ' + SPECIAL_OTHER_CAT_MAP[k.slice(8)].name;
+  for (const grp of COUNTS_SCHEMA) for (const c of flatChildren(grp)) {
+    if (c.key === k) return `${grp.group}${c.label ? ' ' + c.label : ''}`;
+  }
+  return k;
+}
+
 function persist() {
   // updatedAt 在「呼叫當下」就蓋:一來 350ms 內切日不會蓋錯天(#6),
   // 二來 debounce 被 flush 或取消時時間戳也不會遺失
@@ -3534,7 +3589,9 @@ function bumpCount(key, delta) {
   const day = getDay(state.currentDate);
   const before = getCount(day, key);
   setCount(day, key, before + delta);
-  syncPendingFromCount(key, getCount(day, key) - before);  // 用實際變化量(setCount 會夾 0)
+  const actual = getCount(day, key) - before;   // 實際變化量(setCount 會夾 0)
+  syncPendingFromCount(key, actual);
+  logActivity(key, actual);
   touchDay(state.currentDate);
   storage.save(state.data);  // 立刻 save → broadcast,別的視窗同步
   if (state.isMini) renderMini();
@@ -3551,6 +3608,7 @@ function addSpecialOtherFull(catalogId, amount, count) {
     amount: Number(amount) || 0,
     count: Number(count) || 1,
   });
+  logActivity('special.' + catalogId, Number(count) || 1);
   touchDay(state.currentDate);
   storage.save(state.data);
   renderCountsPanel();
@@ -3562,7 +3620,7 @@ function updateSpecialOther(idx, field, value) {
   if (!others[idx]) return;
   others[idx][field] = value;
   touchDay(state.currentDate);
-  scheduleSave('saveDebounce', () => storage.save(state.data), 100);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
   renderStatsPanel();
 }
 function updateSpecialOtherFields(idx, fields) {
@@ -3571,14 +3629,16 @@ function updateSpecialOtherFields(idx, fields) {
   if (!others[idx]) return;
   Object.assign(others[idx], fields);
   touchDay(state.currentDate);
-  scheduleSave('saveDebounce', () => storage.save(state.data), 100);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
   renderCountsPanel();  // 重 render 讓 Other 頂列 × N $XXX 跟著更新
   renderStatsPanel();
 }
 function removeSpecialOther(idx) {
   const day = getDay(state.currentDate);
   const others = ensureSpecialOthers(day);
+  const gone = others[idx];
   others.splice(idx, 1);
+  if (gone) logActivity('special.' + (gone.catalogId || 'other'), -(Number(gone.count) || 1));
   touchDay(state.currentDate);
   storage.save(state.data);
   renderCountsPanel();
@@ -3588,7 +3648,9 @@ function setCountAndRender(key, val) {
   const day = getDay(state.currentDate);
   const before = getCount(day, key);
   setCount(day, key, val);
-  syncPendingFromCount(key, getCount(day, key) - before);
+  const actual = getCount(day, key) - before;
+  syncPendingFromCount(key, actual);
+  logActivity(key, actual);   // 打字的中間值會在 1.5s 緩衝內互相抵銷,只留淨變化
   touchDay(state.currentDate);
   // 同待打欄的理由:每敲一鍵即存 → 中間值的 onValue 回音會在下一鍵之後才到,
   // applyIncoming 判定「本機沒動過」而採用雲端舊值 → 數字倒退 + renderAll 吃掉焦點。
@@ -3649,7 +3711,12 @@ function renderProceduresPanel() {
       if (p.id === rec.presetId) o.selected = true;
       presetSel.appendChild(o);
     }
-    list.appendChild(el('li', { class: 'proc-item' },
+    // 拖曳排序:handle 給 span(li 內非 td),drop 後 touchDay 蓋 updatedAt 再存
+    const dr = dragReorder(day.procedures, i,
+      () => { renderProceduresPanel(); renderStatsPanel(); }, 'span',
+      () => touchDay(state.currentDate));
+    const li = el('li', { class: 'proc-item' },
+      dr.handle,
       el('div', { style: 'flex:1;min-width:0' },
         el('div', { class: 'proc-item-name' },
           el('input', {
@@ -3669,7 +3736,9 @@ function renderProceduresPanel() {
         onfocus: countSelectFocus,
         onchange: (e) => updateProcAmount(i, e.target.value) }),
       el('button', { class: 'btn-del', title: '刪除', onclick: () => removeProc(i) }, '×')
-    ));
+    );
+    dr.attach(li);
+    list.appendChild(li);
   }
   // 額外計費(3D / 資源共享)列:數量可直接改、可刪 —— 沒有這段的話選了 3D 只看得到 toast,
   // 記錯數量就沒有任何地方能修
@@ -3701,6 +3770,7 @@ function setAddonCount(i, val) {
   const day = getDay(state.currentDate);
   if (!day.addons || !day.addons[i]) return;
   const n = Math.max(0, Math.round(Number(val) || 0));
+  logActivity('addon.' + day.addons[i].type, n - (Number(day.addons[i].count) || 1));
   if (n === 0) day.addons.splice(i, 1);
   else day.addons[i].count = n;
   if (!day.addons.length) delete day.addons;
@@ -3712,6 +3782,7 @@ function setAddonCount(i, val) {
 function removeAddon(i) {
   const day = getDay(state.currentDate);
   if (!day.addons || !day.addons[i]) return;
+  logActivity('addon.' + day.addons[i].type, -(Number(day.addons[i].count) || 1));
   day.addons.splice(i, 1);
   if (!day.addons.length) delete day.addons;
   touchDay(state.currentDate);
@@ -3725,7 +3796,7 @@ function updateProcMedRec(i, val) {
   if (!day.procedures || !day.procedures[i]) return;
   day.procedures[i].medRecord = val;
   touchDay(state.currentDate);
-  scheduleSave('saveDebounce', () => storage.save(state.data), 200);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
 }
 // 改某筆 procedure 金額:按比例分回原子項(保留 atomic / MSK 判定)
 function updateProcAmount(i, val) {
@@ -3815,6 +3886,7 @@ function addPresetToToday() {
   const asAddons = presetAsAddons(preset, qty);   // 3D / 資源共享 → 存 addons,不進 procedures
   if (asAddons) {
     addAddonsToDay(day, asAddons);
+    for (const a of asAddons) logActivity('addon.' + a.type, a.count);
     $('preset-medrec').value = '';
     persist();
     renderProceduresPanel();
@@ -3835,6 +3907,7 @@ function addPresetToToday() {
       time: new Date().toISOString()
     });
   }
+  logActivity('proc.' + preset.name, qty);
   // Reset medrec input
   $('preset-medrec').value = '';
   persist();
@@ -3844,7 +3917,9 @@ function addPresetToToday() {
 
 function removeProc(i) {
   const day = getDay(state.currentDate);
+  const gone = day.procedures[i];
   day.procedures.splice(i, 1);
+  if (gone) logActivity('proc.' + (gone.presetName || '?'), -1);
   persist();
   renderProceduresPanel();
   renderStatsPanel();
@@ -4384,14 +4459,14 @@ function setMonthCellCount(date, key, val) {
   const day = getDay(date);
   setCount(day, key, val);
   touchDay(date);
-  scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
+  scheduleSave('monthSaveDebounce', () => storage.save(state.data), 400);
 }
 function setMonthCellOvertime(date, val) {
   const day = getDay(date);
   day.overtimeHours = Number(val) || 0;
   touchDay(date);
   refreshOtSummary(state.currentMonth);   // 即時更新加班條(不動焦點)
-  scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
+  scheduleSave('monthSaveDebounce', () => storage.save(state.data), 400);
 }
 // 編輯模式:改每日總收入 → 存 importedRevenue override(空字串=清除,回到計算值)
 function setMonthCellRevenue(date, val) {
@@ -4399,7 +4474,7 @@ function setMonthCellRevenue(date, val) {
   if (val === '' || val == null) delete day.importedRevenue;
   else day.importedRevenue = Number(val) || 0;
   touchDay(date);
-  scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
+  scheduleSave('monthSaveDebounce', () => storage.save(state.data), 400);
 }
 // 編輯模式:改每日 procedure 金額 → 存 irRevenue override
 function setMonthCellIR(date, val) {
@@ -4407,7 +4482,7 @@ function setMonthCellIR(date, val) {
   if (val === '' || val == null) delete day.irRevenue;
   else day.irRevenue = Number(val) || 0;
   touchDay(date);
-  scheduleSave('monthSaveDebounce', () => storage.save(state.data), 200);
+  scheduleSave('monthSaveDebounce', () => storage.save(state.data), 400);
 }
 
 function renderMonth() {
@@ -5082,7 +5157,7 @@ function mpMedRec(date, i, val) {
   if (!rec) return;
   rec.medRecord = val;
   touchDay(date);
-  scheduleSave('saveDebounce', () => storage.save(state.data), 200);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
 }
 function mpClearDay(date) {
   const day = state.data.days[date];
@@ -5166,6 +5241,55 @@ function renderMonthProcList() {
 
 // === 當天 procedure 編輯 modal(月表編輯模式點日期欄開啟)===
 // 直接改該天現有 procedure(改天/刪/改 preset·病歷號·金額)+ 新增;共用 mp* day-aware helpers
+// 操作記錄檢視:讀 worknum_activity/{date} —— 該日「實際操作」的時間軸。
+// 顯示用本地時間(存的是 ISO UTC);補記他日的條目帶「補記 YYYY-MM-DD」標示。
+async function showActivityModal(date) {
+  const mount = $('modal-mount');
+  const overlay = el('div', { class: 'modal-overlay' });
+  const listWrap = el('div', { class: 'dayproc-list' },
+    el('div', { style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '讀取中…'));
+  const close = () => overlay.remove();
+  const modal = el('div', { class: 'modal paste-modal' },
+    el('h3', null, `${date}(${weekdayCh(date)})操作記錄`),
+    el('p', { class: 'settings-hint' }, '這天實際按下去的輸入時間軸(1.5 秒內的連續增減合併成一筆;貼上/匯入不記)'),
+    listWrap,
+    el('div', { class: 'modal-actions' }, el('button', { class: 'btn-primary', onclick: close }, '關閉'))
+  );
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  mount.appendChild(overlay);
+
+  let rows = [];
+  try {
+    if (!activityPath) throw new Error('尚未連上雲端');
+    const s = await withTimeout(get(ref(fbDB, `${activityPath}/${date}`)), 8000, '操作記錄讀取逾時');
+    if (s.exists()) rows = Object.values(s.val());
+  } catch (e) {
+    listWrap.innerHTML = '';
+    listWrap.appendChild(el('div', { style: 'text-align:center;color:var(--danger,#e66);padding:14px' },
+      '讀取失敗:' + (e?.message || e)));
+    return;
+  }
+  rows.sort((a, b) => String(a.t).localeCompare(String(b.t)));
+  listWrap.innerHTML = '';
+  if (!rows.length) {
+    listWrap.appendChild(el('div', { style: 'text-align:center;color:var(--ink-muted);padding:14px' },
+      '這天沒有操作記錄(此功能上線後的操作才有)'));
+    return;
+  }
+  for (const r of rows) {
+    const d = new Date(r.t);
+    const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    listWrap.appendChild(el('div', { class: 'mp-row', style: 'align-items:baseline' },
+      el('span', { style: 'font-family:var(--font-mono);color:var(--ink-muted);flex-shrink:0' }, hhmm),
+      el('span', { style: 'flex:1;min-width:0' },
+        activityLabel(r.k) + (r.for ? `(補記 ${r.for})` : '') + (r.src === 'mini' ? ' 🪟' : '')),
+      el('span', { style: 'font-family:var(--font-mono);flex-shrink:0;color:' + (r.d > 0 ? 'var(--accent)' : 'var(--danger,#e66)') },
+        (r.d > 0 ? '+' : '') + r.d)
+    ));
+  }
+}
+
 // 月表編輯模式:點 Special(Other)格 → 編輯該天的 special.others(種類/金額/數量)。
 // 對應「貼 sheet 後種類未指定」的事後修正 —— 不用再切回今日 tab 一天一天找。
 function showDaySpecialModal(date) {
@@ -7306,7 +7430,8 @@ function setUnitPrice(key, val) {
     for (let i = 0; i < parts.length - 1; i++) target = target[parts[i]];
     target[parts[parts.length - 1]] = v;   // #11:at() 需 Chrome 92+
   }
-  storage.save(state.data);
+  // 每敲一鍵即存會踩「中間值回音」race(同計數/待打/病歷號,第四個現場)→ debounce 收斂
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
   renderStatsPanel();
 }
 
@@ -7439,9 +7564,11 @@ function showCascadeModal(atom, oldAmt, newAmt, affected) {
 }
 
 // 通用拖拉重排:回傳 { handle, attach(tr) }。arr=陣列, i=索引, rerender=重繪函數
-function dragReorder(arr, i, rerender) {
+// tag:handle 的元素種類(設定頁表格用 td;procedure 清單的 li 用 span)
+// beforeSave:drop 落地後、storage.save 前的 hook(day 資料要 touchDay 蓋 updatedAt)
+function dragReorder(arr, i, rerender, tag = 'td', beforeSave = null) {
   let trRef = null;
-  const handle = el('td', { class: 'col-drag drag-handle', draggable: 'true', title: '拖拉重排' }, '⋮⋮');
+  const handle = el(tag, { class: 'col-drag drag-handle', draggable: 'true', title: '拖拉重排' }, '⋮⋮');
   handle.addEventListener('dragstart', (e) => {
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', String(i));
@@ -7459,6 +7586,7 @@ function dragReorder(arr, i, rerender) {
       if (Number.isNaN(from) || from === i) return;
       const [moved] = arr.splice(from, 1);
       arr.splice(i, 0, moved);
+      if (beforeSave) beforeSave();
       storage.save(state.data);
       rerender();
     });
@@ -7820,6 +7948,7 @@ async function enterApp(user) {
   currentUser = user;
   userPath = `users/${user.uid}/worknum`;
   userDataRef = ref(fbDB, userPath);
+  activityPath = `users/${user.uid}/worknum_activity`;   // 操作記錄:兄弟節點,不進同步管線
   // 通過 auth → 顯示 app
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-root').style.display = '';
@@ -7924,6 +8053,7 @@ async function enterApp(user) {
   $('day-notes').oninput = (e) => { getDay(state.currentDate).notes = e.target.value; persist(); };
 
   $('export-day').onclick = exportDayTSV;
+  $('day-log').onclick = () => showActivityModal(state.currentDate);
   // 單日匯入只剩這一顆(header 那顆 📥 當日 已移除 —— 開的是同一個 modal,只差日期預填)。
   // 預填沿用「目前選取日」,前提是它落在正在看的月份,否則交給 modal 自己的預設(月初/今天)。
   $('month-import').onclick = () =>
