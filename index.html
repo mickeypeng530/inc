@@ -1956,6 +1956,12 @@ body:not(.mini-mode) #view-mini { display: none; }
     <div id="month-proclist"></div>
   </details>
 
+  <!-- ⏱ 本月操作總覽(lazy:打開才抓雲端;預設收合)-->
+  <details class="panel collapsible-panel" id="panel-month-log" style="margin-top:14px">
+    <summary><h2>⏱ 本月操作總覽 <span style="font-weight:normal;font-size:9px;color:var(--ink-muted);letter-spacing:0.06em">每天首末操作時間 / 筆數 / 來源</span></h2></summary>
+    <div id="month-log"></div>
+  </details>
+
   <!-- 歷月紀錄(放最下、預設收合)-->
   <details class="panel collapsible-panel" id="panel-month-records" style="margin-top:14px">
     <summary><h2>歷月紀錄 <span style="font-weight:normal;font-size:10px;color:var(--ink-muted);letter-spacing:0.06em" id="records-month-label"></span></h2></summary>
@@ -2047,7 +2053,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.29b';
+const APP_VERSION = '2026.07.29c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2055,7 +2061,7 @@ document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
-import { getDatabase, ref, set, get, onValue, update }
+import { getDatabase, ref, set, get, onValue, update, query, orderByKey, startAt, endAt }
   from "https://www.gstatic.com/firebasejs/10.13.2/firebase-database.js";
 
 const firebaseConfig = {
@@ -5237,11 +5243,63 @@ function renderMonthProcList() {
   }
   if (!total) wrap.appendChild(el('div', { style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '本月尚無 procedure 紀錄'));
   else wrap.appendChild(el('div', { class: 'settings-hint', style: 'margin-top:8px' }, `本月共 ${total} 筆 · 改「日期」欄即搬到別天;有手算 IR 的日子,改分項不動當日收入總額`));
+  // ⏱ 面板開著且月份換了才重抓(不跟著每次遠端更新重打雲端)
+  if ($('panel-month-log')?.open && state._monthLogFor !== state.currentMonth) renderMonthLog();
 }
 
 // === 當天 procedure 編輯 modal(月表編輯模式點日期欄開啟)===
 // 直接改該天現有 procedure(改天/刪/改 preset·病歷號·金額)+ 新增;共用 mp* day-aware helpers
 // 操作記錄檢視:讀 worknum_activity/{date} —— 該日「實際操作」的時間軸。
+// ⏱ 本月操作總覽:lazy —— 面板打開才抓,一次 range query 撈整月(key = YYYY-MM-DD,
+// orderByKey + startAt/endAt 字串比對即可,不需 index)。同月快取(state._monthLogFor),
+// 換月或重開面板才重抓 —— 遠端更新頻繁時不跟著重打雲端。
+async function renderMonthLog() {
+  const wrap = $('month-log');
+  if (!wrap) return;
+  const month = state.currentMonth;
+  state._monthLogFor = month;
+  wrap.innerHTML = '';
+  wrap.appendChild(el('div', { class: 'paste-count-hint' }, '讀取中…'));
+  let byDay = {};
+  try {
+    if (!activityPath) throw new Error('尚未連上雲端');
+    const q = query(ref(fbDB, activityPath), orderByKey(), startAt(month + '-01'), endAt(month + '-31'));
+    const s = await withTimeout(get(q), 10000, '操作記錄讀取逾時');
+    byDay = s.exists() ? s.val() : {};
+  } catch (e) {
+    wrap.innerHTML = '';
+    wrap.appendChild(el('div', { class: 'paste-count-hint', style: 'color:var(--danger,#e66)' }, '讀取失敗:' + (e?.message || e)));
+    return;
+  }
+  wrap.innerHTML = '';
+  const days = Object.keys(byDay).sort();
+  if (!days.length) {
+    wrap.appendChild(el('div', { class: 'paste-count-hint' }, '本月沒有操作記錄(2026-07-29 上線後的實際操作才有)'));
+    return;
+  }
+  const hhmm = (iso) => { const x = new Date(iso); return `${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`; };
+  const tbl = el('table', { class: 'settings-table' });
+  tbl.appendChild(el('tr', null, ...['日期', '筆數', '首次', '末次', '🐾', '🪟', '補記'].map(h => el('th', null, h))));
+  for (const d of days) {
+    const rows = Object.values(byDay[d] || {}).sort((a, b) => String(a.t).localeCompare(String(b.t)));
+    if (!rows.length) continue;
+    const pet = rows.filter(r => r.src === 'pet').length;
+    const mini = rows.filter(r => r.src === 'mini').length;
+    const backfill = rows.filter(r => r.for).length;
+    tbl.appendChild(el('tr', { style: 'cursor:pointer', title: '點開這天的完整時間軸', onclick: () => showActivityModal(d) },
+      el('td', null, `${d.slice(5)}(週${'日一二三四五六'[new Date(d + 'T00:00').getDay()]})`),
+      el('td', null, String(rows.length)),
+      el('td', null, hhmm(rows[0].t)),
+      el('td', null, hhmm(rows[rows.length - 1].t)),
+      el('td', { style: 'color:var(--ink-muted)' }, pet ? String(pet) : ''),
+      el('td', { style: 'color:var(--ink-muted)' }, mini ? String(mini) : ''),
+      el('td', { style: 'color:var(--ink-muted)' }, backfill ? String(backfill) : '')
+    ));
+  }
+  wrap.appendChild(el('div', { class: 'paste-count-hint' }, '首次/末次 = 該天最早與最晚的實際輸入時間(本地時間)。🐾 桌寵 / 🪟 迷你視窗筆數。點列看完整時間軸。'));
+  wrap.appendChild(tbl);
+}
+
 // 顯示用本地時間(存的是 ISO UTC);補記他日的條目帶「補記 YYYY-MM-DD」標示。
 async function showActivityModal(date) {
   const mount = $('modal-mount');
@@ -8054,6 +8112,8 @@ async function enterApp(user) {
 
   $('export-day').onclick = exportDayTSV;
   $('day-log').onclick = () => showActivityModal(state.currentDate);
+  // ⏱ 本月操作總覽:打開面板才抓(lazy);換月時 renderMonthProcList 尾端會依快取旗標重抓
+  $('panel-month-log')?.addEventListener('toggle', (e) => { if (e.target.open) renderMonthLog(); });
   // 單日匯入只剩這一顆(header 那顆 📥 當日 已移除 —— 開的是同一個 modal,只差日期預填)。
   // 預填沿用「目前選取日」,前提是它落在正在看的月份,否則交給 modal 自己的預設(月初/今天)。
   $('month-import').onclick = () =>
