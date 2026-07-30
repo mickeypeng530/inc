@@ -314,6 +314,18 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
   color: var(--ink-muted);
   margin-left: 3px;
 }
+.proc-time {   /* procedure 起訖時間(選填):type=time 在窄欄要壓寬度 */
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 2px;
+  width: 68px;
+  background: var(--bg-page);
+  color: var(--ink-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.proc-time:focus { outline: none; border-color: var(--accent); }
+.proc-dur { font-family: var(--font-mono); font-size: 11px; color: var(--accent); white-space: nowrap; }
 .proc-item span.drag-handle {   /* procedure 清單的拖曳把手(span 版;設定頁的是 td) */
   cursor: grab;
   color: var(--ink-muted);
@@ -2053,7 +2065,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.30b';
+const APP_VERSION = '2026.07.30c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3728,6 +3740,7 @@ function renderProceduresPanel() {
     const items = rec.items || [];
     procTotal += items.reduce((s,it)=>s+Number(it.amount||0),0);
     const detailText = items.map(it => `${it.name} ${fmtMoney(it.amount)}`).join(' + ');
+    const dur = procDuration(rec);
     const known = rec.presetId && presets.some(p => p.id === rec.presetId);
     const presetSel = el('select', { class: 'proc-item-preset-sel', title: '可重選 preset(會重新展開原子項)',
       onchange: (e) => changeProcPreset(i, e.target.value) });
@@ -3754,7 +3767,16 @@ function renderProceduresPanel() {
           }),
           presetSel
         ),
-        el('div', { class: 'proc-item-detail' }, detailText)
+        el('div', { class: 'proc-item-detail' },
+          // 起訖時間(選填):填了才算耗時。放第二行,不擠壓病歷號/preset 那列
+          el('input', { class: 'proc-time', type: 'time', value: rec.startTime || '',
+            title: '開始時間(選填)', onchange: (e) => updateProcTime(i, 'startTime', e.target.value) }),
+          el('span', null, ' – '),
+          el('input', { class: 'proc-time', type: 'time', value: rec.endTime || '',
+            title: '結束時間(選填)', onchange: (e) => updateProcTime(i, 'endTime', e.target.value) }),
+          dur != null ? el('span', { class: 'proc-dur' }, `  ⏱ ${fmtDur(dur)}`) : null,
+          el('span', null, `  ${detailText}`)
+        )
       ),
       el('input', { class: 'proc-item-amount-input', type: 'number', min: '0', inputmode: 'numeric',
         value: String(items.reduce((s, it) => s + Number(it.amount || 0), 0)),
@@ -3815,6 +3837,49 @@ function removeAddon(i) {
   storage.save(state.data);
   renderProceduresPanel();
   renderStatsPanel();
+}
+
+// procedure 起訖時間(選填,'HH:MM' 本地時間)。
+// ⚠ 刻意用新欄位 startTime/endTime,**不碰既有的 `time`** —— `time` 是「這筆紀錄被建立
+// 的 ISO 時刻」,而 registry.html 的 caseKey 拿它當組成部分(registry.html:580),
+// 動它會讓 registry 既存的 outcome 全部變孤兒。
+// 兩者語意不同:`time` = 你何時按下記錄;startTime/endTime = 術式實際何時做。
+function procDuration(rec) {
+  const s = rec && rec.startTime, e = rec && rec.endTime;
+  if (!s || !e) return null;
+  const [sh, sm] = String(s).split(':').map(Number);
+  const [eh, em] = String(e).split(':').map(Number);
+  if (![sh, sm, eh, em].every(Number.isFinite)) return null;
+  let d = (eh * 60 + em) - (sh * 60 + sm);
+  if (d < 0) d += 1440;      // 跨午夜(23:40 → 00:20 = 40 分),不當成負值
+  return d;
+}
+function fmtDur(min) {
+  if (min == null) return '';
+  return min >= 60 ? `${Math.floor(min / 60)} 時 ${min % 60} 分` : `${min} 分`;
+}
+// 空字串一律 delete,不塞 undefined(RTDB 遇巢狀 undefined 會同步 throw)
+function setProcTimeField(rec, field, val) {
+  const v = String(val || '').trim();
+  if (v) rec[field] = v; else delete rec[field];
+}
+function updateProcTime(i, field, val) {
+  const day = getDay(state.currentDate);
+  const rec = day.procedures && day.procedures[i];
+  if (!rec) return;
+  setProcTimeField(rec, field, val);
+  touchDay(state.currentDate);
+  storage.save(state.data);         // type=time 用 onchange → 不是逐鍵事件,無 debounce race
+  renderProceduresPanel();          // 更新耗時顯示
+}
+function mpProcTime(date, i, field, val) {
+  const rec = state.data.days[date] && state.data.days[date].procedures
+    && state.data.days[date].procedures[i];
+  if (!rec) return;
+  setProcTimeField(rec, field, val);
+  touchDay(date);
+  storage.save(state.data);
+  mpRefresh();
 }
 
 function updateProcMedRec(i, val) {
@@ -5237,6 +5302,7 @@ function renderMonthProcList() {
       const items = rec.items || [];
       const amt = items.reduce((s, it) => s + Number(it.amount || 0), 0);
       const detail = items.map(it => `${it.name} ${fmtMoney(it.amount)}`).join(' + ');
+      const dur = procDuration(rec);
       const known = rec.presetId && presets.some(p => p.id === rec.presetId);
       const dateInput = el('input', { class: 'mp-date', type: 'date', value: date, title: '改天:改這裡把此筆搬到別天' });
       dateInput.min = month + '-01';
@@ -5253,7 +5319,14 @@ function renderMonthProcList() {
         dateInput,
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
-        el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail' }, detail)),
+        el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail' },
+          el('input', { class: 'proc-time', type: 'time', value: rec.startTime || '',
+            title: '開始時間(選填)', onchange: (e) => mpProcTime(date, i, 'startTime', e.target.value) }),
+          el('span', null, ' – '),
+          el('input', { class: 'proc-time', type: 'time', value: rec.endTime || '',
+            title: '結束時間(選填)', onchange: (e) => mpProcTime(date, i, 'endTime', e.target.value) }),
+          dur != null ? el('span', { class: 'proc-dur' }, `  ⏱ ${fmtDur(dur)}`) : null,
+          el('span', null, `  ${detail}`))),
         el('input', { class: 'proc-item-amount-input mp-amt', type: 'number', min: '0', inputmode: 'numeric', value: String(amt),
           title: hasIR ? '改金額(此日有手算 IR 總額,分項改不影響當日收入總額)' : '改金額(按比例分回原子項)',
           onfocus: countSelectFocus, onchange: (e) => mpAmount(date, i, e.target.value) }),
@@ -5467,6 +5540,7 @@ function showDayProcModal(date) {
       const amt = items.reduce((s, it) => s + Number(it.amount || 0), 0);
       total += amt;
       const detail = items.map(it => `${it.name} ${fmtMoney(it.amount)}`).join(' + ');
+      const dur = procDuration(rec);
       const known = rec.presetId && presets.some(p => p.id === rec.presetId);
       const dateInput = el('input', { class: 'mp-date', type: 'date', value: date, title: '改天:改這裡把此筆搬到別天' });
       dateInput.onchange = (e) => mpMoveDay(date, i, e.target.value);
@@ -5482,7 +5556,14 @@ function showDayProcModal(date) {
         dateInput,
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
-        el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail' }, detail)),
+        el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail' },
+          el('input', { class: 'proc-time', type: 'time', value: rec.startTime || '',
+            title: '開始時間(選填)', onchange: (e) => mpProcTime(date, i, 'startTime', e.target.value) }),
+          el('span', null, ' – '),
+          el('input', { class: 'proc-time', type: 'time', value: rec.endTime || '',
+            title: '結束時間(選填)', onchange: (e) => mpProcTime(date, i, 'endTime', e.target.value) }),
+          dur != null ? el('span', { class: 'proc-dur' }, `  ⏱ ${fmtDur(dur)}`) : null,
+          el('span', null, `  ${detail}`))),
         el('input', { class: 'proc-item-amount-input mp-amt', type: 'number', min: '0', inputmode: 'numeric', value: String(amt),
           title: hasIR ? '改金額(此日有手算 IR 總額,分項改不影響當日收入總額)' : '改金額(按比例分回原子項)',
           onfocus: countSelectFocus, onchange: (e) => mpAmount(date, i, e.target.value) }),
