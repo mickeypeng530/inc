@@ -2053,7 +2053,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.30';
+const APP_VERSION = '2026.07.30b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2952,7 +2952,15 @@ function applyIncoming(raw) {
   }
   lastSynced = incomingSnap;
   const nextStr = JSON.stringify(next);
-  if (nextStr === JSON.stringify(state.data)) return;   // 內容沒變 → 不重繪(避免打斷輸入)
+  // ⚠ 這裡必須用 canonJSON(遞迴排序 key + 剝空容器),不可用裸 JSON.stringify:
+  // 雲端回傳的物件 key 是**字典序**、本機物件是**插入序**,而 merge3 的輸出承襲 base
+  // (= 雲端形態)的 key 序 → 與 state.data「字串不同但語意相同」→ 舊版幾乎每次遠端
+  // 回音都會 renderAll(),把正在輸入的格子整個重建。
+  // 症狀:新增 procedure 後馬上改病歷號,打到一半焦點消失(值其實有保住 —— merge3 讓
+  // 本機贏了,所以看起來像「游標跳開」而不是「資料被蓋掉」)。回歸測試 [16]。
+  if (nextStr === JSON.stringify(state.data)) return;      // 快路徑:完全相同(零額外成本)
+  if (canonJSON(next) === canonJSON(state.data)) return;   // 慢路徑:key 序不同但語意相同
+  // (canonJSON 對 900 天約 7ms、一次比對 ~15ms;但 renderAll 要重建月表上千格,更貴 → 淨賺)
   state.data = next;
   try { localStorage.setItem(STORAGE_KEY, nextStr); } catch (e) {}
   renderAll();

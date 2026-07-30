@@ -399,5 +399,39 @@ console.log('\n[15] 基準是 null 時 applyIncoming 會讓過期本機快取全
         api.getData().pending.ct_opd === 5, '實際 = ' + api.getData().pending.ct_opd);
 }
 
+// ============================================================
+console.log('');
+console.log('[16] 打字中「自己的回音」不可以觸發 renderAll(key 序陷阱)');
+// ------------------------------------------------------------
+// RTDB 回傳的物件 key 是**字典序**、本機物件是**插入序**;merge3 的輸出承襲 base
+// (= 雲端形態)的 key 序 → 與 state.data「字串不同但語意相同」。舊版用裸
+// JSON.stringify 比對 → 判定內容有變 → renderAll() 把正在輸入的格子重建掉。
+// 症狀:改病歷號打到一半焦點消失(值其實保住了 —— merge3 讓本機贏)。
+// ⚠ 這條測試的價值在「key 序刻意不同」;兩邊寫成同序就永遠綠燈,抓不到 bug。
+{
+  const D = '2026-06-15';   // 刻意不是 TODAY,避開待打自動扣減那段
+  const cloudDay = (mr) => ({   // 字典序(RTDB 回傳形態)
+    counts: { ct: { opd: 2 } }, meetings: [], notes: '', overtimeHours: 0,
+    procedures: [{ items: [{ amount: 1034, atomicId: 'picc', name: 'PICC' }], medRecord: mr,
+                   presetId: 'picc_av', presetName: 'PICC+AV', time: 't' }],
+    schedule: {}, updatedAt: 'u1',
+  });
+  const synced = { days: { [D]: cloudDay('') }, pending: {}, settings: { a: 1 } };
+  api.setData(clone(synced));
+  api.setBase(api.snapshotOf(synced));
+
+  // 打「S」→ 送出;還沒收到回音就繼續打成「S2」
+  api.getData().days[D].procedures[0].medRecord = 'S';
+  api.noteSent('days/' + D, api.getData().days[D]);
+  api.getData().days[D].procedures[0].medRecord = 'S2';
+
+  const before = renderCount;
+  api.applyIncoming({ days: { [D]: cloudDay('S') }, pending: {}, settings: { a: 1 } });
+  check('病歷號保住 S2', api.getData().days[D].procedures[0].medRecord === 'S2',
+        '實際 = ' + api.getData().days[D].procedures[0].medRecord);
+  check('沒有 renderAll(焦點不會被吃掉)', renderCount === before,
+        'renderAll 跑了 ' + (renderCount - before) + ' 次');
+}
+
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
 process.exit(fail ? 1 : 0);
