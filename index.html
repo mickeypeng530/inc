@@ -2071,7 +2071,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.30e';
+const APP_VERSION = '2026.07.30f';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3157,7 +3157,14 @@ function flushActivityLog() {
   try { update(ref(fbDB, activityPath), updates).catch(() => {}); } catch (e) {}
 }
 function activityLabel(k) {
-  if (k.startsWith('proc.')) return k.slice(5);
+  if (k.startsWith('proc.')) {
+    // 2026-07-30 起 proc key 存的是 preset **id**;查表換回顯示名。
+    // 查不到就原樣顯示 —— 涵蓋兩種情況:①那天以前寫的舊 entry(存的是名稱)
+    // ②preset 已被刪掉。兩者都不該顯示成空白。
+    const raw = k.slice(5);
+    const p = (state.data.settings.presets || []).find(x => x.id === raw);
+    return p ? p.name : raw;
+  }
   if (k.startsWith('addon.')) return k.slice(6) === 'd3' ? '3D' : '資源共享';
   if (k.startsWith('special.') && SPECIAL_OTHER_CAT_MAP[k.slice(8)]) return 'Special ' + SPECIAL_OTHER_CAT_MAP[k.slice(8)].name;
   for (const grp of COUNTS_SCHEMA) for (const c of flatChildren(grp)) {
@@ -4019,7 +4026,7 @@ function addPresetToToday() {
       time: new Date().toISOString()
     });
   }
-  logActivity('proc.' + preset.name, qty);
+  logActivity('proc.' + (preset.id || preset.name), qty);   // 認 id 不認名(設定頁改名不會讓 log 裂成兩個 key)
   // Reset medrec input
   $('preset-medrec').value = '';
   persist();
@@ -4031,7 +4038,8 @@ function removeProc(i) {
   const day = getDay(state.currentDate);
   const gone = day.procedures[i];
   day.procedures.splice(i, 1);
-  if (gone) logActivity('proc.' + (gone.presetName || '?'), -1);
+  // 貼上/匯入來的筆可能沒有 presetId(對不到 preset)→ 只有這種情況才退回用名稱
+  if (gone) logActivity('proc.' + (gone.presetId || gone.presetName || '?'), -1);
   persist();
   renderProceduresPanel();
   renderStatsPanel();
