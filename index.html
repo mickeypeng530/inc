@@ -2053,7 +2053,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.29c';
+const APP_VERSION = '2026.07.30';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3084,6 +3084,18 @@ function flushPendingSaves() {
     try { fn(); } catch (e) { console.error('flush 失敗', key, e); }
   }
 }
+// 設定頁文字/數字欄的存檔:與計數/待打/病歷號同一條規則 —— 每敲一鍵即存會踩「中間值
+// 回音」race(打「PICC」的中間值「PIC」回音晚到 → applyIncoming 判定本機沒動過 → 值倒退)。
+// 共用 saveDebounce key,不另立計時器(各自計時會產生重疊寫入,等於把 race 再造一次)。
+// afterSave:名稱/金額改動要反映到今日 tab 的下拉,存完再重繪(重繪的是別的 DOM 子樹,
+// 不會動到正在輸入的設定頁欄位)。
+function saveSettingsDebounced(afterSave) {
+  scheduleSave('saveDebounce', () => {
+    storage.save(state.data);
+    if (afterSave) afterSave();
+  }, 400);
+}
+
 // ===== 操作記錄(activity log)=====
 // 目的:記「幾點幾分做了什麼」(X光 +3 之類),供日後分析時間分配/效率。
 // 存放在 worknum 的**兄弟節點** users/{uid}/worknum_activity/{日期}/{id} ——
@@ -7528,7 +7540,7 @@ function renderSettingsAtomics() {
 
     const tr = el('tr', null,
       handle,
-      el('td', null, el('input', { type: 'text', value: a.name, oninput: (e) => { a.name = e.target.value; storage.save(state.data); } })),
+      el('td', null, el('input', { type: 'text', value: a.name, oninput: (e) => { a.name = e.target.value; saveSettingsDebounced(); } })),
       el('td', null, el('input', { class: 'amount', type: 'number', value: String(a.amount),
         onchange: (e) => onAtomicAmountChange(a, Number(e.target.value)||0) })),
       el('td', { class: 'col-narrow' },
@@ -7675,7 +7687,7 @@ function renderSettingsPresets() {
     const tr = el('tr', { class: isOpen ? 'preset-row-open' : null },
       handle,
       el('td', null, el('input', { class: 'preset-name-input', type: 'text', value: p.name,
-        oninput: (e) => { p.name = e.target.value; storage.save(state.data); renderProceduresPanel(); } })),
+        oninput: (e) => { p.name = e.target.value; saveSettingsDebounced(renderProceduresPanel); } })),
       el('td', { class: 'preset-summary-cell', title: summary }, summary),
       el('td', { class: 'preset-total-cell' }, fmtMoney(total)),
       el('td', { class: 'col-narrow' },
@@ -7704,7 +7716,7 @@ function renderSettingsPresets() {
         itemsBox.appendChild(el('div', { class: 'preset-item-row' },
           atomSel,
           el('input', { class: 'amount', type: 'number', value: String(it.amount || 0),
-            oninput: (e) => { it.amount = Number(e.target.value) || 0; storage.save(state.data); renderProceduresPanel(); },
+            oninput: (e) => { it.amount = Number(e.target.value) || 0; saveSettingsDebounced(renderProceduresPanel); },
             onblur: () => renderSettingsPresets() }),
           el('button', { class: 'btn-del', title: '刪除此項', onclick: () => { p.items.splice(j, 1); storage.save(state.data); renderSettingsPresets(); renderProceduresPanel(); } }, '×')
         ));
@@ -7738,8 +7750,8 @@ function renderSettingsMeetings() {
     const tr = el('tr', null,
       handle,
       el('td', { style: 'width:80px' }, sel),
-      el('td', null, el('input', { type: 'text', value: m.name, oninput: (e) => { m.name = e.target.value; storage.save(state.data); renderProceduresPanel(); } })),
-      el('td', null, el('input', { class: 'amount', type: 'number', value: String(m.amount), oninput: (e) => { m.amount = Number(e.target.value)||0; storage.save(state.data); renderProceduresPanel(); } })),
+      el('td', null, el('input', { type: 'text', value: m.name, oninput: (e) => { m.name = e.target.value; saveSettingsDebounced(renderProceduresPanel); } })),
+      el('td', null, el('input', { class: 'amount', type: 'number', value: String(m.amount), oninput: (e) => { m.amount = Number(e.target.value)||0; saveSettingsDebounced(renderProceduresPanel); } })),
       el('td', { class: 'col-narrow' },
         el('button', { class: 'btn-del', title: '刪除會議', onclick: () => { arr.splice(i,1); storage.save(state.data); renderSettingsMeetings(); renderProceduresPanel(); } }, '×'))
     );
@@ -7767,7 +7779,7 @@ function renderSettingsSheetOrder() {
         el('button', { class: 'btn-step', onclick: () => moveSheetOrder(i, -1) }, '↑'),
         el('button', { class: 'btn-step', onclick: () => moveSheetOrder(i, +1) }, '↓')
       ),
-      el('td', null, el('input', { type: 'text', value: item.label, oninput: (e) => { item.label = e.target.value; storage.save(state.data); } })),
+      el('td', null, el('input', { type: 'text', value: item.label, oninput: (e) => { item.label = e.target.value; saveSettingsDebounced(); } })),
       el('td', null, el('code', null, item.key))
     ));
   }
