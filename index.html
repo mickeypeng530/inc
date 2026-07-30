@@ -314,17 +314,23 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
   color: var(--ink-muted);
   margin-left: 3px;
 }
-.proc-time {   /* procedure 起訖時間(選填):type=time 在窄欄要壓寬度 */
+/* procedure 起訖時間(選填)。
+   ⚠ 不要指定固定寬度:zh-TW 的 <input type="time"> 是 12 小時制「上午 09:00」,
+   瀏覽器自算需要 ~97px;先前寫死 68px → 分鐘被切掉,只看到「上午 09」(2026-07-30 實測截圖)。
+   一律交給 auto + flex-shrink:0(在 flex 容器裡不准被壓縮)。 */
+.proc-time {
   font-family: var(--font-mono);
   font-size: 11px;
   padding: 1px 2px;
-  width: 68px;
+  flex-shrink: 0;
   background: var(--bg-page);
   color: var(--ink-1);
   border: 1px solid var(--border);
   border-radius: var(--r);
 }
 .proc-time:focus { outline: none; border-color: var(--accent); }
+/* 有時間欄的那條明細列才切 flex(窄欄自動換行);純文字的 .proc-item-detail 維持 block */
+.proc-item-detail.has-time { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .proc-dur { font-family: var(--font-mono); font-size: 11px; color: var(--accent); white-space: nowrap; }
 .proc-item span.drag-handle {   /* procedure 清單的拖曳把手(span 版;設定頁的是 td) */
   cursor: grab;
@@ -2065,7 +2071,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.30c';
+const APP_VERSION = '2026.07.30d';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3767,7 +3773,7 @@ function renderProceduresPanel() {
           }),
           presetSel
         ),
-        el('div', { class: 'proc-item-detail' },
+        el('div', { class: 'proc-item-detail has-time' },
           // 起訖時間(選填):填了才算耗時。放第二行,不擠壓病歷號/preset 那列
           el('input', { class: 'proc-time', type: 'time', value: rec.startTime || '',
             title: '開始時間(選填)', onchange: (e) => updateProcTime(i, 'startTime', e.target.value) }),
@@ -5319,7 +5325,7 @@ function renderMonthProcList() {
         dateInput,
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
-        el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail' },
+        el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail has-time' },
           el('input', { class: 'proc-time', type: 'time', value: rec.startTime || '',
             title: '開始時間(選填)', onchange: (e) => mpProcTime(date, i, 'startTime', e.target.value) }),
           el('span', null, ' – '),
@@ -5556,7 +5562,7 @@ function showDayProcModal(date) {
         dateInput,
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
-        el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail' },
+        el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail has-time' },
           el('input', { class: 'proc-time', type: 'time', value: rec.startTime || '',
             title: '開始時間(選填)', onchange: (e) => mpProcTime(date, i, 'startTime', e.target.value) }),
           el('span', null, ' – '),
