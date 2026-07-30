@@ -2071,7 +2071,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.30d';
+const APP_VERSION = '2026.07.30e';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3780,8 +3780,10 @@ function renderProceduresPanel() {
           el('span', null, ' – '),
           el('input', { class: 'proc-time', type: 'time', value: rec.endTime || '',
             title: '結束時間(選填)', onchange: (e) => updateProcTime(i, 'endTime', e.target.value) }),
-          dur != null ? el('span', { class: 'proc-dur' }, `  ⏱ ${fmtDur(dur)}`) : null,
-          el('span', null, `  ${detailText}`)
+          // 一律輸出(空字串也要),refreshProcDur 才找得到它就地更新
+          el('span', { class: 'proc-dur', 'data-dur-key': `${state.currentDate}|${i}` },
+            dur != null ? `⏱ ${fmtDur(dur)}` : ''),
+          el('span', null, detailText)
         )
       ),
       el('input', { class: 'proc-item-amount-input', type: 'number', min: '0', inputmode: 'numeric',
@@ -3869,14 +3871,27 @@ function setProcTimeField(rec, field, val) {
   const v = String(val || '').trim();
   if (v) rec[field] = v; else delete rec[field];
 }
+// 就地更新耗時顯示:只改 textContent,**絕不重建 DOM**。
+// ⚠ `type="time"` 的 change 事件會在「分鐘只打了第一個數字」時就觸發(此刻 09:04 已是
+// 合法值)→ 若在 handler 裡 renderProceduresPanel()/mpRefresh(),正在輸入的格子會被砍掉,
+// 第二個數字就打不進去(2026-07-30 使用者回報「分的部分一個數字就跳掉」)。
+// 同待打面板 refreshPendingPanel / 計數 refreshCountMoney 的分工原則。
+function refreshProcDur() {
+  document.querySelectorAll('.proc-dur[data-dur-key]').forEach(elm => {
+    const [date, idx] = elm.getAttribute('data-dur-key').split('|');
+    const rec = state.data.days?.[date]?.procedures?.[Number(idx)];
+    const d = procDuration(rec);
+    elm.textContent = d != null ? `⏱ ${fmtDur(d)}` : '';
+  });
+}
 function updateProcTime(i, field, val) {
   const day = getDay(state.currentDate);
   const rec = day.procedures && day.procedures[i];
   if (!rec) return;
   setProcTimeField(rec, field, val);
-  touchDay(state.currentDate);
-  storage.save(state.data);         // type=time 用 onchange → 不是逐鍵事件,無 debounce race
-  renderProceduresPanel();          // 更新耗時顯示
+  touchDay(state.currentDate);      // 時間戳當下就蓋(debounce 被 flush/取消也不遺失)
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
+  refreshProcDur();
 }
 function mpProcTime(date, i, field, val) {
   const rec = state.data.days[date] && state.data.days[date].procedures
@@ -3884,8 +3899,8 @@ function mpProcTime(date, i, field, val) {
   if (!rec) return;
   setProcTimeField(rec, field, val);
   touchDay(date);
-  storage.save(state.data);
-  mpRefresh();
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
+  refreshProcDur();                 // 不走 mpRefresh —— 它會重建整個 modal 列表
 }
 
 function updateProcMedRec(i, val) {
@@ -5331,8 +5346,9 @@ function renderMonthProcList() {
           el('span', null, ' – '),
           el('input', { class: 'proc-time', type: 'time', value: rec.endTime || '',
             title: '結束時間(選填)', onchange: (e) => mpProcTime(date, i, 'endTime', e.target.value) }),
-          dur != null ? el('span', { class: 'proc-dur' }, `  ⏱ ${fmtDur(dur)}`) : null,
-          el('span', null, `  ${detail}`))),
+          el('span', { class: 'proc-dur', 'data-dur-key': `${date}|${i}` },
+            dur != null ? `⏱ ${fmtDur(dur)}` : ''),
+          el('span', null, detail))),
         el('input', { class: 'proc-item-amount-input mp-amt', type: 'number', min: '0', inputmode: 'numeric', value: String(amt),
           title: hasIR ? '改金額(此日有手算 IR 總額,分項改不影響當日收入總額)' : '改金額(按比例分回原子項)',
           onfocus: countSelectFocus, onchange: (e) => mpAmount(date, i, e.target.value) }),
@@ -5568,8 +5584,9 @@ function showDayProcModal(date) {
           el('span', null, ' – '),
           el('input', { class: 'proc-time', type: 'time', value: rec.endTime || '',
             title: '結束時間(選填)', onchange: (e) => mpProcTime(date, i, 'endTime', e.target.value) }),
-          dur != null ? el('span', { class: 'proc-dur' }, `  ⏱ ${fmtDur(dur)}`) : null,
-          el('span', null, `  ${detail}`))),
+          el('span', { class: 'proc-dur', 'data-dur-key': `${date}|${i}` },
+            dur != null ? `⏱ ${fmtDur(dur)}` : ''),
+          el('span', null, detail))),
         el('input', { class: 'proc-item-amount-input mp-amt', type: 'number', min: '0', inputmode: 'numeric', value: String(amt),
           title: hasIR ? '改金額(此日有手算 IR 總額,分項改不影響當日收入總額)' : '改金額(按比例分回原子項)',
           onfocus: countSelectFocus, onchange: (e) => mpAmount(date, i, e.target.value) }),
