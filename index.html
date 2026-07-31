@@ -314,6 +314,15 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
   color: var(--ink-muted);
   margin-left: 3px;
 }
+/* === 每小時產值(⏱ 操作記錄 modal 內)=== */
+.hr-row { display: flex; align-items: center; gap: 6px; font-size: 11px; line-height: 1.5; }
+.hr-h { font-family: var(--font-mono); color: var(--ink-muted); width: 26px; flex-shrink: 0; text-align: right; }
+.hr-bar-wrap { flex: 1; min-width: 0; background: var(--bg-page); border-radius: 2px; height: 13px; }
+.hr-bar { height: 100%; background: var(--accent); border-radius: 2px; }
+.hr-bar.peak { background: var(--ok, #3fb950); }
+.hr-v { font-family: var(--font-mono); width: 62px; flex-shrink: 0; text-align: right; color: var(--ink-2); }
+.hr-proc { background: repeating-linear-gradient(45deg, var(--accent) 0 4px, transparent 4px 8px); }
+
 /* procedure 起訖時間(選填)。
    ⚠ 不要指定固定寬度:zh-TW 的 <input type="time"> 是 12 小時制「上午 09:00」,
    瀏覽器自算需要 ~97px;先前寫死 68px → 分鐘被切掉,只看到「上午 09」(2026-07-30 實測截圖)。
@@ -2071,7 +2080,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.30f';
+const APP_VERSION = '2026.07.31';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5423,16 +5432,135 @@ async function renderMonthLog() {
   wrap.appendChild(tbl);
 }
 
+// ===== 每小時產值 =====
+// 把當日收入攤回「時鐘小時」,回答「哪個時段值錢」。刻意不試圖分類空檔 ——
+// 低產值的小時可能是沒在工作,也可能是在做低單價的事(2026-07-30 的 09 點只有 $240,
+// 但他 08:50–09:20 在做 Arthro),這張圖分不出來,也不假裝分得出來。
+//
+// ⚠ procedure 一定要**按時長攤開**,不能整筆丟在開始那格:
+//   07-30 的 CT NB 15:50–16:50 若整筆記在 15 點,16 點就只剩 $250,看起來像整個小時在發呆。
+// counts/special/addon 用 log 時間戳落桶(批次筆落在該批完成的小時,誤差最多溢到前一小時)。
+// 對不上的部分一律進「未定位」,不硬塞 —— 貼上/匯入的天沒有 log,整天都會是未定位。
+function getHourlyRevenue(date, entries) {
+  const s = state.data.settings;
+  const day = peekDay(date);
+  const hours = new Array(24).fill(0);
+  let placed = 0, unplaced = 0;
+  const procHours = new Array(24).fill(0);   // 該小時有多少來自 procedure(供標示)
+
+  for (const r of entries || []) {
+    const k = String(r.k || '');
+    if (k.startsWith('proc.')) continue;      // procedure 走下面的起訖攤開,避免重複計
+    let unit = 0;
+    if (k.startsWith('addon.')) {
+      const type = k.slice(6);
+      const a = (day.addons || []).find(x => x.type === type);
+      unit = Number(a && a.amount) || (type === 'd3' ? 600 : 100);
+    } else if (k.startsWith('special.')) {
+      unit = Number(s.unitPrices.special && s.unitPrices.special[k.slice(8)]) || 0;
+    } else {
+      unit = getUnitPriceForKey(k, s);
+    }
+    const v = (Number(r.d) || 0) * unit;
+    if (!v) continue;
+    const h = new Date(r.t).getHours();
+    hours[h] += v;
+    placed += v;
+  }
+
+  for (const p of (day.procedures || [])) {
+    const amt = (p.items || []).reduce((x, it) => x + Number(it.amount || 0), 0);
+    if (!amt) continue;
+    const dur = procDuration(p);
+    if (dur == null || dur <= 0) { unplaced += amt; continue; }   // 沒填起訖 → 不硬塞
+    const [sh, sm] = String(p.startTime).split(':').map(Number);
+    let cur = sh * 60 + sm, left = dur;
+    while (left > 0) {
+      const h = Math.floor(cur / 60) % 24;
+      const use = Math.min(60 - (cur % 60), left);
+      const share = amt * (use / dur);
+      hours[h] += share; procHours[h] += share;
+      cur += use; left -= use;
+    }
+    placed += amt;
+  }
+  return { hours, procHours, placed, unplaced };
+}
+// 日型標籤:只用現有欄位判,給「同型日才互相比較」用
+function dayTypeLabel(date) {
+  const d = peekDay(date);
+  const np = (d.procedures || []).length;
+  const opd = getCount(d, 'opd');
+  const parts = [np >= 3 ? 'IR 日' : '閱片日'];
+  if (opd >= 5) parts.push(`門診日(${opd} 位)`);
+  else if (opd > 0) parts.push(`約診 ${opd} 位`);
+  if (d.schedule && d.schedule.onCall) parts.push('值班');
+  return parts.join(' · ');
+}
+
+function renderHourlyChart(wrap, date, entries) {
+  wrap.innerHTML = '';
+  const day = peekDay(date);
+  const s = state.data.settings;
+  const rev = getDayRevenue(day, s);
+  const ot = Number(day.overtimeHours) || 0;
+  const instHours = 9 + ot;      // 制度分母(= 在院時間口徑),不用 log 跨度 —— 後者含在家打報告
+  const { hours, procHours, placed, unplaced } = getHourlyRevenue(date, entries);
+
+  wrap.appendChild(el('div', { class: 'settings-hint', style: 'margin-bottom:6px' },
+    `${dayTypeLabel(date)} · $${fmtMoney(rev)} · 制度時薪 $${fmtMoney(Math.round(rev / instHours))}(常班 9h + 加班 ${ot}h)`));
+
+  const max = Math.max.apply(null, hours);
+  if (!(max > 0)) {
+    wrap.appendChild(el('div', { class: 'paste-count-hint' }, '這天沒有可定位到時段的收入'));
+    return;
+  }
+  const lo = hours.findIndex(v => v > 0);
+  let hi = 23; while (hi > lo && !(hours[hi] > 0)) hi--;
+  const peak = hours.indexOf(max);
+  let trough = -1;   // 只在「有值」的小時裡找谷底 —— 0 通常是午餐或不在場,不是谷底
+  for (let h = lo; h <= hi; h++) if (hours[h] > 0 && (trough < 0 || hours[h] < hours[trough])) trough = h;
+
+  for (let h = lo; h <= hi; h++) {
+    const v = hours[h];
+    const hh = String(h).padStart(2, '0');
+    wrap.appendChild(el('div', { class: 'hr-row', title: v > 0
+        ? `${hh}:00–${String(h + 1).padStart(2, '0')}:00　$${fmtMoney(Math.round(v))}`
+          + (procHours[h] > 0 ? `(其中 procedure $${fmtMoney(Math.round(procHours[h]))})` : '')
+        : '無可定位收入' },
+      el('span', { class: 'hr-h' }, hh),
+      el('div', { class: 'hr-bar-wrap' },
+        el('div', { class: 'hr-bar' + (h === peak ? ' peak' : '') + (v > 0 && procHours[h] / v > 0.5 ? ' hr-proc' : ''),
+                    style: `width:${((v / max) * 100).toFixed(1)}%` })),
+      el('span', { class: 'hr-v' }, v > 0 ? fmtMoney(Math.round(v)) : '')
+    ));
+  }
+
+  const notes = [`尖峰 ${String(peak).padStart(2, '0')}:00 $${fmtMoney(Math.round(max))}`];
+  if (trough >= 0 && trough !== peak) notes.push(`谷底 ${String(trough).padStart(2, '0')}:00 $${fmtMoney(Math.round(hours[trough]))}`);
+  wrap.appendChild(el('div', { class: 'paste-count-hint', style: 'margin-top:4px' }, notes.join(' · ')));
+
+  const un = Math.round(rev - placed);
+  if (Math.abs(un) >= 1) wrap.appendChild(el('div', { class: 'paste-count-hint', style: 'color:var(--warn,#da3)' },
+    `未定位 $${fmtMoney(un)}` + (unplaced > 0
+      ? `(含 procedure 未填起訖 $${fmtMoney(Math.round(unplaced))})`
+      : '(這些筆沒有操作記錄 —— 貼上/匯入不記 log)')));
+  wrap.appendChild(el('div', { class: 'paste-count-hint' },
+    '斜紋 = 該小時逾半來自 procedure(依手填起訖按時長攤開)。低產值的小時可能沒在工作,也可能在做低單價的事 —— 本圖不區分。'));
+}
+
 // 顯示用本地時間(存的是 ISO UTC);補記他日的條目帶「補記 YYYY-MM-DD」標示。
 async function showActivityModal(date) {
   const mount = $('modal-mount');
   const overlay = el('div', { class: 'modal-overlay' });
   const listWrap = el('div', { class: 'dayproc-list' },
     el('div', { style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '讀取中…'));
+  const chartWrap = el('div', { style: 'margin:4px 0 10px' });
   const close = () => overlay.remove();
   const modal = el('div', { class: 'modal paste-modal' },
-    el('h3', null, `${date}(${weekdayCh(date)})操作記錄`),
-    el('p', { class: 'settings-hint' }, '這天實際按下去的輸入時間軸(1.5 秒內的連續增減合併成一筆;貼上/匯入不記)'),
+    el('h3', null, `${date}(${weekdayCh(date)})`),
+    chartWrap,
+    el('p', { class: 'settings-hint', style: 'margin-top:10px' }, '↓ 操作時間軸(按下按鈕的時刻;1.5 秒內連續增減合併;貼上/匯入不記)'),
     listWrap,
     el('div', { class: 'modal-actions' }, el('button', { class: 'btn-primary', onclick: close }, '關閉'))
   );
@@ -5449,9 +5577,9 @@ async function showActivityModal(date) {
     listWrap.innerHTML = '';
     listWrap.appendChild(el('div', { style: 'text-align:center;color:var(--danger,#e66);padding:14px' },
       '讀取失敗:' + (e?.message || e)));
-    return;
   }
   rows.sort((a, b) => String(a.t).localeCompare(String(b.t)));
+  renderHourlyChart(chartWrap, date, rows);   // log 讀失敗也畫 —— procedure 起訖本身就有資料
   listWrap.innerHTML = '';
   if (!rows.length) {
     listWrap.appendChild(el('div', { style: 'text-align:center;color:var(--ink-muted);padding:14px' },
