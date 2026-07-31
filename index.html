@@ -317,11 +317,15 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
 /* === 每小時產值(⏱ 操作記錄 modal 內)=== */
 .hr-row { display: flex; align-items: center; gap: 6px; font-size: 11px; line-height: 1.5; }
 .hr-h { font-family: var(--font-mono); color: var(--ink-muted); width: 26px; flex-shrink: 0; text-align: right; }
-.hr-bar-wrap { flex: 1; min-width: 0; background: var(--bg-page); border-radius: 2px; height: 13px; }
-.hr-bar { height: 100%; background: var(--accent); border-radius: 2px; }
-.hr-bar.peak { background: var(--ok, #3fb950); }
+.hr-bar-wrap { flex: 1; min-width: 0; background: var(--bg-page); border-radius: 2px; height: 13px;
+               display: flex; overflow: hidden; }
+.hr-seg { height: 100%; }
+.hr-seg-read { background: var(--accent); }              /* 報告(閱片) */
+.hr-seg-proc { background: #e3a23b; }                    /* Procedure(沿用統計頁的琥珀色) */
 .hr-v { font-family: var(--font-mono); width: 62px; flex-shrink: 0; text-align: right; color: var(--ink-2); }
-.hr-proc { background: repeating-linear-gradient(45deg, var(--accent) 0 4px, transparent 4px 8px); }
+.hr-row.peak .hr-v { color: var(--ok, #3fb950); font-weight: 600; }
+.hr-legend { display: flex; gap: 12px; align-items: center; font-size: 10px; color: var(--ink-muted); margin: 2px 0 4px; }
+.hr-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
 
 /* procedure 起訖時間(選填)。
    ⚠ 不要指定固定寬度:zh-TW 的 <input type="time"> 是 12 小時制「上午 09:00」,
@@ -2080,7 +2084,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.31';
+const APP_VERSION = '2026.07.31b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5521,17 +5525,24 @@ function renderHourlyChart(wrap, date, entries) {
   let trough = -1;   // 只在「有值」的小時裡找谷底 —— 0 通常是午餐或不在場,不是谷底
   for (let h = lo; h <= hi; h++) if (hours[h] > 0 && (trough < 0 || hours[h] < hours[trough])) trough = h;
 
+  wrap.appendChild(el('div', { class: 'hr-legend' },
+    el('span', null, el('i', { class: 'hr-seg-read' }), '報告'),
+    el('span', null, el('i', { class: 'hr-seg-proc' }), 'Procedure')));
+
   for (let h = lo; h <= hi; h++) {
     const v = hours[h];
+    const pv = procHours[h];
+    const rv = Math.max(0, v - pv);          // 浮點攤分可能差幾毛,夾 0
     const hh = String(h).padStart(2, '0');
-    wrap.appendChild(el('div', { class: 'hr-row', title: v > 0
-        ? `${hh}:00–${String(h + 1).padStart(2, '0')}:00　$${fmtMoney(Math.round(v))}`
-          + (procHours[h] > 0 ? `(其中 procedure $${fmtMoney(Math.round(procHours[h]))})` : '')
-        : '無可定位收入' },
+    const tip = v > 0
+      ? `${hh}:00–${String(h + 1).padStart(2, '0')}:00　$${fmtMoney(Math.round(v))}`
+        + (pv > 0 ? `\n　報告 $${fmtMoney(Math.round(rv))} ＋ Procedure $${fmtMoney(Math.round(pv))}` : '')
+      : '無可定位收入';
+    wrap.appendChild(el('div', { class: 'hr-row' + (h === peak ? ' peak' : ''), title: tip },
       el('span', { class: 'hr-h' }, hh),
       el('div', { class: 'hr-bar-wrap' },
-        el('div', { class: 'hr-bar' + (h === peak ? ' peak' : '') + (v > 0 && procHours[h] / v > 0.5 ? ' hr-proc' : ''),
-                    style: `width:${((v / max) * 100).toFixed(1)}%` })),
+        el('div', { class: 'hr-seg hr-seg-read', style: `width:${((rv / max) * 100).toFixed(1)}%` }),
+        el('div', { class: 'hr-seg hr-seg-proc', style: `width:${((pv / max) * 100).toFixed(1)}%` })),
       el('span', { class: 'hr-v' }, v > 0 ? fmtMoney(Math.round(v)) : '')
     ));
   }
@@ -5546,7 +5557,8 @@ function renderHourlyChart(wrap, date, entries) {
       ? `(含 procedure 未填起訖 $${fmtMoney(Math.round(unplaced))})`
       : '(這些筆沒有操作記錄 —— 貼上/匯入不記 log)')));
   wrap.appendChild(el('div', { class: 'paste-count-hint' },
-    '斜紋 = 該小時逾半來自 procedure(依手填起訖按時長攤開)。低產值的小時可能沒在工作,也可能在做低單價的事 —— 本圖不區分。'));
+    'Procedure 依手填起訖按時長攤開;報告含計數/Special/加價項,落在按下按鈕的小時。'
+    + '低產值的小時可能沒在工作,也可能在做低單價的事 —— 本圖不區分。'));
 }
 
 // 顯示用本地時間(存的是 ISO UTC);補記他日的條目帶「補記 YYYY-MM-DD」標示。
