@@ -14,10 +14,12 @@ function grabFn(name) {
   throw new Error('括號沒配對 ' + name);
 }
 const api = new Function(`
+  ${grabFn('spanMinutes')}
   ${grabFn('procDuration')}
+  ${grabFn('mtgDuration')}
   ${grabFn('fmtDur')}
   ${grabFn('setProcTimeField')}
-  return { procDuration, fmtDur, setProcTimeField };
+  return { spanMinutes, procDuration, mtgDuration, fmtDur, setProcTimeField };
 `)();
 
 let pass = 0, fail = 0;

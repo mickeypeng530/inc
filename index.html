@@ -322,6 +322,7 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
 .hr-seg { height: 100%; }
 .hr-seg-read { background: var(--accent); }              /* 報告(閱片) */
 .hr-seg-proc { background: #e3a23b; }                    /* Procedure(沿用統計頁的琥珀色) */
+.hr-seg-mtg  { background: #a371f7; }                    /* 會議 */
 .hr-v { font-family: var(--font-mono); width: 62px; flex-shrink: 0; text-align: right; color: var(--ink-2); }
 .hr-row.peak .hr-v { color: var(--ok, #3fb950); font-weight: 600; }
 .hr-legend { display: flex; gap: 12px; align-items: center; font-size: 10px; color: var(--ink-muted); margin: 2px 0 4px; }
@@ -1936,6 +1937,17 @@ body:not(.mini-mode) #view-mini { display: none; }
         <div class="meta-row"><label>備註</label><textarea id="day-notes"></textarea></div>
       </div>
 
+      <!-- 當日會議(2026-07-31 新增)。原本只有月表那個「一格打 3 15 22」的批次面板,
+           開完會當下沒有地方記 → 形同虛設。這裡逐筆記,並可填起訖時間。 -->
+      <div class="panel" id="panel-day-meeting">
+        <h2>會議</h2>
+        <div class="proc-input-row">
+          <select id="day-meeting-select"></select>
+          <button class="btn-primary" id="day-meeting-add">＋</button>
+        </div>
+        <ul class="proc-list" id="day-meeting-list"></ul>
+      </div>
+
     </div>
 
   </div>
@@ -2084,7 +2096,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.31b';
+const APP_VERSION = '2026.07.31c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3178,6 +3190,10 @@ function activityLabel(k) {
     const p = (state.data.settings.presets || []).find(x => x.id === raw);
     return p ? p.name : raw;
   }
+  if (k.startsWith('mtg.')) {
+    const c = (state.data.settings.meetingCatalog || []).find(x => x.id === k.slice(4));
+    return '會議 ' + (c ? c.name : k.slice(4));
+  }
   if (k.startsWith('addon.')) return k.slice(6) === 'd3' ? '3D' : '資源共享';
   if (k.startsWith('special.') && SPECIAL_OTHER_CAT_MAP[k.slice(8)]) return 'Special ' + SPECIAL_OTHER_CAT_MAP[k.slice(8)].name;
   for (const grp of COUNTS_SCHEMA) for (const c of flatChildren(grp)) {
@@ -3872,16 +3888,19 @@ function removeAddon(i) {
 // 的 ISO 時刻」,而 registry.html 的 caseKey 拿它當組成部分(registry.html:580),
 // 動它會讓 registry 既存的 outcome 全部變孤兒。
 // 兩者語意不同:`time` = 你何時按下記錄;startTime/endTime = 術式實際何時做。
-function procDuration(rec) {
-  const s = rec && rec.startTime, e = rec && rec.endTime;
+// 'HH:MM' 兩點之間的分鐘數;跨午夜 +1440 不當負值。procedure 與會議共用。
+function spanMinutes(s, e) {
   if (!s || !e) return null;
   const [sh, sm] = String(s).split(':').map(Number);
   const [eh, em] = String(e).split(':').map(Number);
   if (![sh, sm, eh, em].every(Number.isFinite)) return null;
   let d = (eh * 60 + em) - (sh * 60 + sm);
-  if (d < 0) d += 1440;      // 跨午夜(23:40 → 00:20 = 40 分),不當成負值
+  if (d < 0) d += 1440;      // 跨午夜(23:40 → 00:20 = 40 分)
   return d;
 }
+function procDuration(rec) { return spanMinutes(rec && rec.startTime, rec && rec.endTime); }
+// ⚠ 會議刻意用 start/end 而非 startTime/endTime —— 與 procedure 分開,兩者語意不綁死
+function mtgDuration(rec) { return spanMinutes(rec && rec.start, rec && rec.end); }
 function fmtDur(min) {
   if (min == null) return '';
   return min >= 60 ? `${Math.floor(min / 60)} 時 ${min % 60} 分` : `${min} 分`;
@@ -3921,6 +3940,83 @@ function mpProcTime(date, i, field, val) {
   touchDay(date);
   scheduleSave('saveDebounce', () => storage.save(state.data), 400);
   refreshProcDur();                 // 不走 mpRefresh —— 它會重建整個 modal 列表
+}
+
+// ===== 當日會議(2026-07-31)=====
+// 舊設計只有月表那個「一格打 3 15 22」的批次面板 —— 開完會的當下沒有地方記,形同虛設。
+// 這裡逐筆記,並可填起訖時間(欄位用 start/end,與 procedure 的 startTime/endTime 分開)。
+function renderDayMeetingPanel() {
+  const sel = $('day-meeting-select'), list = $('day-meeting-list');
+  if (!sel || !list) return;
+  const cat = state.data.settings.meetingCatalog || [];
+  const keep = sel.value;
+  sel.innerHTML = '';
+  for (const c of cat) sel.appendChild(el('option', { value: c.id }, `${c.name}(${c.role} $${fmtMoney(c.amount)})`));
+  if (keep) sel.value = keep;
+
+  const day = peekDay(state.currentDate);
+  const mtgs = day.meetings || [];
+  list.innerHTML = '';
+  for (const [i, m] of mtgs.entries()) {
+    const dur = mtgDuration(m);
+    list.appendChild(el('li', { class: 'proc-item' },
+      el('div', { style: 'flex:1;min-width:0' },
+        el('div', { class: 'proc-item-name' }, m.name || '?',
+          el('span', { class: 'count-unitprice' }, m.role || '')),
+        el('div', { class: 'proc-item-detail has-time' },
+          el('input', { class: 'proc-time', type: 'time', value: m.start || '',
+            title: '開始(選填)', onchange: (e) => updateMtgTime(i, 'start', e.target.value) }),
+          el('span', null, '–'),
+          el('input', { class: 'proc-time', type: 'time', value: m.end || '',
+            title: '結束(選填)', onchange: (e) => updateMtgTime(i, 'end', e.target.value) }),
+          el('span', { class: 'proc-dur', 'data-mdur-key': `${state.currentDate}|${i}` },
+            dur != null ? `⏱ ${fmtDur(dur)}` : ''))
+      ),
+      el('span', { class: 'proc-item-amount-input', style: 'border:none;text-align:right' }, fmtMoney(m.amount || 0)),
+      el('button', { class: 'btn-del', title: '刪除', onclick: () => removeDayMeeting(i) }, '×')
+    ));
+  }
+  if (!mtgs.length) list.appendChild(el('li', { class: 'proc-item',
+    style: 'color:var(--ink-muted);justify-content:center;font-size:12px' }, '今天沒有會議'));
+}
+// 就地更新耗時,不重建 DOM(同 refreshProcDur —— time input 的 change 會在輸入中途觸發)
+function refreshMtgDur() {
+  document.querySelectorAll('.proc-dur[data-mdur-key]').forEach(elm => {
+    const [date, idx] = elm.getAttribute('data-mdur-key').split('|');
+    const rec = state.data.days?.[date]?.meetings?.[Number(idx)];
+    const d = mtgDuration(rec);
+    elm.textContent = d != null ? `⏱ ${fmtDur(d)}` : '';
+  });
+}
+function addDayMeeting() {
+  const c = (state.data.settings.meetingCatalog || []).find(x => x.id === $('day-meeting-select').value);
+  if (!c) { toast('請先選會議', ''); return; }
+  const day = getDay(state.currentDate);
+  if (!day.meetings) day.meetings = [];
+  day.meetings.push({ catalogId: c.id, role: c.role, name: c.name, amount: c.amount });
+  logActivity('mtg.' + c.id, 1);
+  persist();
+  renderDayMeetingPanel();
+  renderStatsPanel();
+}
+function removeDayMeeting(i) {
+  const day = getDay(state.currentDate);
+  const gone = day.meetings && day.meetings[i];
+  if (!gone) return;
+  logActivity('mtg.' + (gone.catalogId || '?'), -1);
+  day.meetings.splice(i, 1);
+  persist();
+  renderDayMeetingPanel();
+  renderStatsPanel();
+}
+function updateMtgTime(i, field, val) {
+  const day = getDay(state.currentDate);
+  const rec = day.meetings && day.meetings[i];
+  if (!rec) return;
+  setProcTimeField(rec, field, val);   // 共用:空值 delete,不塞 undefined(RTDB 會同步 throw)
+  touchDay(state.currentDate);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
+  refreshMtgDur();
 }
 
 function updateProcMedRec(i, val) {
@@ -4106,10 +4202,16 @@ function setMeetingDates(month, catalogId, datesStr) {
   // 清除前先抓會議資訊(imported imp_xxx 也撈得到)
   const info = getMeetingInfo(month, catalogId);
 
+  // ⚠ 先把既有的同 catalogId 紀錄留下來(連 start/end 一起),重建時原樣放回。
+  // 舊版是純 wipe-and-rebuild:使用者只要再碰一次日期字串(哪怕重打同樣內容),
+  // 當日填好的會議起訖時間就**無聲全滅**;同一天兩場同名會議也會被壓成一場。
+  const kept = {};
   for (let d = 1; d <= daysInMonth; d++) {
     const date = `${month}-${String(d).padStart(2,'0')}`;
     const dayRec = state.data.days[date];
     if (!dayRec) continue;
+    const mine = (dayRec.meetings || []).filter(mtg => mtg.catalogId === catalogId);
+    if (mine.length) kept[d] = mine;
     const before = (dayRec.meetings || []).length;
     dayRec.meetings = (dayRec.meetings || []).filter(mtg => mtg.catalogId !== catalogId);
     // 真的刪到才蓋 updatedAt —— 沒動到的天不可留痕跡(#7)
@@ -4120,11 +4222,18 @@ function setMeetingDates(month, catalogId, datesStr) {
       const date = `${month}-${String(d).padStart(2,'0')}`;
       const dayRec = touchDay(date);   // #7/#12:改動要蓋 updatedAt,否則衝突判定會被回滾
       if (!dayRec.meetings) dayRec.meetings = [];
-      dayRec.meetings.push({ catalogId: info.id, role: info.role, name: info.name, amount: info.amount });
+      const old = kept[d];
+      if (old && old.length) {
+        // 原樣放回(保住 start/end 與同日重複場次);角色/金額跟隨 catalog 最新值
+        for (const o of old) dayRec.meetings.push({ ...o, role: info.role, name: info.name, amount: info.amount });
+      } else {
+        dayRec.meetings.push({ catalogId: info.id, role: info.role, name: info.name, amount: info.amount });
+      }
     }
   }
   storage.save(state.data);
   renderMeetingPanel();
+  renderDayMeetingPanel();
   renderStatsPanel();
 }
 
@@ -4315,6 +4424,7 @@ function renderToday() {
   renderProceduresPanel();
   renderStatsPanel();
   renderPendingPanel();
+  renderDayMeetingPanel();
 }
 
 // --- Pending reports (待打) ---
@@ -5450,11 +5560,24 @@ function getHourlyRevenue(date, entries) {
   const day = peekDay(date);
   const hours = new Array(24).fill(0);
   let placed = 0, unplaced = 0;
-  const procHours = new Array(24).fill(0);   // 該小時有多少來自 procedure(供標示)
+  const procHours = new Array(24).fill(0);   // 該小時有多少來自 procedure
+  const mtgHours = new Array(24).fill(0);    // …來自會議
+  // 有起訖的項目按時長攤到各小時(整筆丟在開始那格會讓後面的小時看起來在發呆)
+  const spread = (startStr, dur, amt, bucket) => {
+    const [sh, sm] = String(startStr).split(':').map(Number);
+    let cur = sh * 60 + sm, left = dur;
+    while (left > 0) {
+      const h = Math.floor(cur / 60) % 24;
+      const use = Math.min(60 - (cur % 60), left);
+      const share = amt * (use / dur);
+      hours[h] += share; bucket[h] += share;
+      cur += use; left -= use;
+    }
+  };
 
   for (const r of entries || []) {
     const k = String(r.k || '');
-    if (k.startsWith('proc.')) continue;      // procedure 走下面的起訖攤開,避免重複計
+    if (k.startsWith('proc.') || k.startsWith('mtg.')) continue;   // 走下面的起訖攤開,避免重複計
     let unit = 0;
     if (k.startsWith('addon.')) {
       const type = k.slice(6);
@@ -5477,18 +5600,18 @@ function getHourlyRevenue(date, entries) {
     if (!amt) continue;
     const dur = procDuration(p);
     if (dur == null || dur <= 0) { unplaced += amt; continue; }   // 沒填起訖 → 不硬塞
-    const [sh, sm] = String(p.startTime).split(':').map(Number);
-    let cur = sh * 60 + sm, left = dur;
-    while (left > 0) {
-      const h = Math.floor(cur / 60) % 24;
-      const use = Math.min(60 - (cur % 60), left);
-      const share = amt * (use / dur);
-      hours[h] += share; procHours[h] += share;
-      cur += use; left -= use;
-    }
+    spread(p.startTime, dur, amt, procHours);
     placed += amt;
   }
-  return { hours, procHours, placed, unplaced };
+  for (const m of (day.meetings || [])) {
+    const amt = Number(m.amount) || 0;
+    if (!amt) continue;
+    const dur = mtgDuration(m);
+    if (dur == null || dur <= 0) { unplaced += amt; continue; }
+    spread(m.start, dur, amt, mtgHours);
+    placed += amt;
+  }
+  return { hours, procHours, mtgHours, placed, unplaced };
 }
 // 日型標籤:只用現有欄位判,給「同型日才互相比較」用
 function dayTypeLabel(date) {
@@ -5509,7 +5632,7 @@ function renderHourlyChart(wrap, date, entries) {
   const rev = getDayRevenue(day, s);
   const ot = Number(day.overtimeHours) || 0;
   const instHours = 9 + ot;      // 制度分母(= 在院時間口徑),不用 log 跨度 —— 後者含在家打報告
-  const { hours, procHours, placed, unplaced } = getHourlyRevenue(date, entries);
+  const { hours, procHours, mtgHours, placed, unplaced } = getHourlyRevenue(date, entries);
 
   wrap.appendChild(el('div', { class: 'settings-hint', style: 'margin-bottom:6px' },
     `${dayTypeLabel(date)} · $${fmtMoney(rev)} · 制度時薪 $${fmtMoney(Math.round(rev / instHours))}(常班 9h + 加班 ${ot}h)`));
@@ -5525,24 +5648,31 @@ function renderHourlyChart(wrap, date, entries) {
   let trough = -1;   // 只在「有值」的小時裡找谷底 —— 0 通常是午餐或不在場,不是谷底
   for (let h = lo; h <= hi; h++) if (hours[h] > 0 && (trough < 0 || hours[h] < hours[trough])) trough = h;
 
+  const hasMtg = mtgHours.some(v => v > 0);
   wrap.appendChild(el('div', { class: 'hr-legend' },
     el('span', null, el('i', { class: 'hr-seg-read' }), '報告'),
-    el('span', null, el('i', { class: 'hr-seg-proc' }), 'Procedure')));
+    el('span', null, el('i', { class: 'hr-seg-proc' }), 'Procedure'),
+    hasMtg ? el('span', null, el('i', { class: 'hr-seg-mtg' }), '會議') : null));
 
   for (let h = lo; h <= hi; h++) {
     const v = hours[h];
-    const pv = procHours[h];
-    const rv = Math.max(0, v - pv);          // 浮點攤分可能差幾毛,夾 0
+    const pv = procHours[h], mv = mtgHours[h];
+    const rv = Math.max(0, v - pv - mv);      // 浮點攤分可能差幾毛,夾 0
     const hh = String(h).padStart(2, '0');
+    const parts = [];
+    if (rv > 0.5) parts.push(`報告 $${fmtMoney(Math.round(rv))}`);
+    if (pv > 0.5) parts.push(`Procedure $${fmtMoney(Math.round(pv))}`);
+    if (mv > 0.5) parts.push(`會議 $${fmtMoney(Math.round(mv))}`);
     const tip = v > 0
       ? `${hh}:00–${String(h + 1).padStart(2, '0')}:00　$${fmtMoney(Math.round(v))}`
-        + (pv > 0 ? `\n　報告 $${fmtMoney(Math.round(rv))} ＋ Procedure $${fmtMoney(Math.round(pv))}` : '')
+        + (parts.length > 1 ? `\n　${parts.join(' ＋ ')}` : '')
       : '無可定位收入';
     wrap.appendChild(el('div', { class: 'hr-row' + (h === peak ? ' peak' : ''), title: tip },
       el('span', { class: 'hr-h' }, hh),
       el('div', { class: 'hr-bar-wrap' },
         el('div', { class: 'hr-seg hr-seg-read', style: `width:${((rv / max) * 100).toFixed(1)}%` }),
-        el('div', { class: 'hr-seg hr-seg-proc', style: `width:${((pv / max) * 100).toFixed(1)}%` })),
+        el('div', { class: 'hr-seg hr-seg-proc', style: `width:${((pv / max) * 100).toFixed(1)}%` }),
+        el('div', { class: 'hr-seg hr-seg-mtg',  style: `width:${((mv / max) * 100).toFixed(1)}%` })),
       el('span', { class: 'hr-v' }, v > 0 ? fmtMoney(Math.round(v)) : '')
     ));
   }
@@ -8368,6 +8498,7 @@ async function enterApp(user) {
   };
 
   $('preset-add').onclick = addPresetToToday;
+  $('day-meeting-add').onclick = addDayMeeting;
 
   $('overtime-hours').oninput = (e) => {
     getDay(state.currentDate).overtimeHours = Number(e.target.value) || 0;
