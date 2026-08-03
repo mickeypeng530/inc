@@ -2096,7 +2096,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.07.31c';
+const APP_VERSION = '2026.08.04';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5219,9 +5219,8 @@ function showProcPopover(anchorEl, date, procs) {
   setTimeout(() => document.addEventListener('mousedown', _procPopoverOutside, true), 0);
 }
 
-function renderMonthProcBreakdown() {
-  const month = state.currentMonth;
-  const t = $('month-procbreakdown');
+// 分項統計的**計算**(與渲染分離,便於測試 —— 見 tests/test_proc_count.js)
+function computeProcBreakdown(month) {
   const atomicMap = Object.fromEntries(state.data.settings.atomicItems.map(a => [a.id, a]));
   const buckets = {};
   let monthRevenue = 0;
@@ -5233,45 +5232,61 @@ function renderMonthProcBreakdown() {
     const l = String(s || '').toLowerCase();
     return MSK_KEYWORDS.some(k => l.includes(k));
   };
+  // 由單一 item 推 bucket(countsAs 歸戶;未登錄的 atomic 用 snapshot name + 關鍵字判 MSK)
+  const resolveBucket = (it) => {
+    const atom = atomicMap[it.atomicId];
+    if (atom) {
+      const bucketKey = atom.countsAs || atom.id;
+      const bucketAtom = atomicMap[bucketKey];
+      return { name: bucketAtom?.name || bucketKey, isMSK: !!bucketAtom?.isMSK };
+    }
+    let name = it.name || it.atomicId || '未知';
+    let isMSK = isMSKByName(name) || isMSKByName(it.atomicId);
+    // TAE 家族(tae / tae_spinal / tae_aorta / TAE+xxx)→ 合併到 'TAE' bucket
+    if (/^tae(?:[_+ ]|$)/i.test(it.atomicId || '') || /^TAE(?:[+ ]|$)/i.test(name)) {
+      name = 'TAE'; isMSK = false;
+    // DR 引流家族(dr_pcn / dr_ptcd / DR(xxx) / Drain subphernic/intraabdominal)→ 合併 'DR'
+    } else if (/^dr[_(]/i.test(it.atomicId || '') || /^(DR\(|Drain )/i.test(name)) {
+      name = 'DR'; isMSK = false;
+    }
+    return { name, isMSK };
+  };
+
+  // ⚠ 一筆 procedure 記錄 = 一次,歸到「主 item」——**不是逐 item 各計一次**。
+  // 舊版逐 item 套 includeInStats,導致組合項被算成兩次(2026-07 實測:50 筆被算成 58 次)。
+  // 病根是 includeInStats 設在 atomic 上,但「該不該獨立計次」取決於它出現在哪個 preset:
+  // `arthro` 既是獨立 preset(Arthro $360)又是 NB arthro 的成分,單一旗標無論怎麼設都是錯的。
+  // 主 item = 第一個「有計次資格」的 item(includeInStats !== false),全都沒資格才退回第一個。
+  // **絕對不可改用「金額最高的 item」** —— PICC+AV 是 picc $1,034 + av $2,100,取最高會選到 AV、
+  // 名字就錯了。2026-07-31 核對過全部 11 個組合 preset,第一個 item 都是主術式。
+  // 金額仍**照實全加**(含 includeInStats:false 的附屬項),維持「金額照實算 + 計次套規則」。
   for (const date of Object.keys(state.data.days)) {
     if (!date.startsWith(month + '-')) continue;
     for (const rec of (state.data.days[date].procedures || [])) {
-      for (const it of (rec.items || [])) {
-        const atom = atomicMap[it.atomicId];
-        const amt = Number(it.amount||0);
-        monthRevenue += amt;
-        // atom 不存在(import 來的新 aid 沒登錄到 catalog)→ 用 snapshot name 當 bucket
-        if (atom && atom.includeInStats === false) continue;
-        let bucketName, bucketIsMSK;
-        if (atom) {
-          const bucketKey = atom.countsAs || atom.id;
-          const bucketAtom = atomicMap[bucketKey];
-          bucketName = bucketAtom?.name || bucketKey;
-          bucketIsMSK = !!bucketAtom?.isMSK;
-        } else {
-          // unknown atom → 用 it.name(snapshot)當 bucket;MSK 用關鍵字判
-          bucketName = it.name || it.atomicId || '未知';
-          bucketIsMSK = isMSKByName(bucketName) || isMSKByName(it.atomicId);
-          // TAE 家族(tae / tae_spinal / tae_aorta / TAE+xxx)→ 合併到 'TAE' bucket
-          if (/^tae(?:[_+ ]|$)/i.test(it.atomicId || '') || /^TAE(?:[+ ]|$)/i.test(bucketName)) {
-            bucketName = 'TAE';
-            bucketIsMSK = false;
-          }
-          // DR 引流家族(dr_pcn / dr_ptcd / DR(xxx) / Drain subphernic/intraabdominal)→ 合併 'DR'
-          else if (/^dr[_(]/i.test(it.atomicId || '') || /^(DR\(|Drain )/i.test(bucketName)) {
-            bucketName = 'DR';
-            bucketIsMSK = false;
-          }
-        }
-        if (!buckets[bucketName]) buckets[bucketName] = { count: 0, amount: 0, isMSK: bucketIsMSK };
-        buckets[bucketName].count += 1;
-        buckets[bucketName].amount += amt;
-        totalCount += 1;
-        totalAmount += amt;
-        if (bucketIsMSK) { mskCount += 1; mskAmount += amt; }
-      }
+      const items = rec.items || [];
+      if (!items.length) continue;
+      const amt = items.reduce((s, it) => s + Number(it.amount || 0), 0);
+      monthRevenue += amt;
+      const primary = items.find(it => {
+        const a = atomicMap[it.atomicId];
+        return !(a && a.includeInStats === false);
+      }) || items[0];
+      const { name: bucketName, isMSK: bucketIsMSK } = resolveBucket(primary);
+      if (!buckets[bucketName]) buckets[bucketName] = { count: 0, amount: 0, isMSK: bucketIsMSK };
+      buckets[bucketName].count += 1;
+      buckets[bucketName].amount += amt;
+      totalCount += 1;
+      totalAmount += amt;
+      if (bucketIsMSK) { mskCount += 1; mskAmount += amt; }
     }
   }
+  return { buckets, monthRevenue, totalCount, totalAmount, mskCount, mskAmount };
+}
+
+function renderMonthProcBreakdown() {
+  const month = state.currentMonth;
+  const t = $('month-procbreakdown');
+  const { buckets, monthRevenue, totalCount, totalAmount, mskCount, mskAmount } = computeProcBreakdown(month);
 
   t.innerHTML = '';
 
