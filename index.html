@@ -1987,7 +1987,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 
     <!-- col 3: 會議(預設收合) -->
     <details class="panel collapsible-panel" id="panel-month-meeting">
-      <summary><h2>會議 <span style="font-weight:normal;font-size:9px;color:var(--ink-muted);letter-spacing:0.06em" id="meeting-month-label"></span></h2></summary>
+      <summary><h2>會議 <span style="font-weight:normal;font-size:9px;color:var(--ink-muted);letter-spacing:0.06em" id="meeting-month-label"></span></h2><button id="meeting-copy" class="btn-secondary" style="margin-left:auto;font-size:11px;padding:2px 8px" title="複製本月會議名單(日期／角色／名稱／當月總額)—— 給科內統計用,格式與「📥 匯入→會議」對稱" onclick="event.stopPropagation()">📋 名單</button></summary>
       <div id="meeting-container"></div>
       <div class="proc-total" id="meeting-total"><span>月會議合計</span><span class="stat-money" id="meeting-total-amount">0</span></div>
     </details>
@@ -2096,7 +2096,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.04';
+const APP_VERSION = '2026.08.04b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -7751,6 +7751,53 @@ function showMonthSheetModal() {
 }
 
 // --- TSV export ---
+// 會議名單匯出(給科內統計用,取代舊版直接從 Excel 複製名單的動作)。
+// 格式 = 日期 ⇥ 角色 ⇥ 會議名 ⇥ 當月總額,**與「📥 匯入 → 會議」的貼上格式完全對稱**
+// (parsePastedMeetings),所以匯出的內容貼回 Worknum 也認得,可當備份/搬移用。
+// · 分組用 catalogId → 設定頁改名不會讓同一個會議裂成兩列;匯入來的無 id 筆退回 role|name
+// · 同一天兩場同名會議 → 日期**重複列出**(如「8 8 15」)。看起來怪,但那是誠實的:
+//   去重會讓再匯入時 per = 總額÷場次 把每場金額算高,而舊 Excel 格式本來就表達不了這件事。
+function exportMeetingsTSV() {
+  const month = state.currentMonth;
+  const [y, m] = month.split('-').map(Number);
+  const dim = new Date(y, m, 0).getDate();
+  const groups = new Map();
+  for (let d = 1; d <= dim; d++) {
+    const date = `${month}-${String(d).padStart(2, '0')}`;
+    for (const mtg of (state.data.days[date]?.meetings || [])) {
+      const key = mtg.catalogId || `${mtg.role || ''}|${mtg.name || ''}`;
+      if (!groups.has(key)) groups.set(key, { role: '', name: '', days: [], amount: 0 });
+      const g = groups.get(key);
+      g.days.push(d);                       // d 由小到大掃,天然已排序
+      g.amount += Number(mtg.amount) || 0;
+      if (mtg.role) g.role = mtg.role;      // 以最後一筆為準(catalog 改過角色/名稱時)
+      if (mtg.name) g.name = mtg.name;
+    }
+  }
+  if (!groups.size) { toast('本月沒有會議紀錄', ''); return; }
+
+  const ROLE_ORDER = { '主講': 0, '參與': 1 };
+  const rows = [...groups.values()].sort((a, b) => {
+    const ra = ROLE_ORDER[a.role] ?? 2, rb = ROLE_ORDER[b.role] ?? 2;
+    if (ra !== rb) return ra - rb;
+    return a.days[0] - b.days[0];           // 同角色內按第一個日期
+  });
+  const lines = [];
+  let prevRole = null;
+  for (const g of rows) {
+    if (prevRole !== null && g.role !== prevRole) lines.push('');   // 角色之間空一列(沿用舊 Excel 版式)
+    prevRole = g.role;
+    lines.push([g.days.join(' '), g.role, g.name, g.amount].join('\t'));
+  }
+  const tsv = lines.join('\n');
+  const n = rows.reduce((s, g) => s + g.days.length, 0);
+  navigator.clipboard.writeText(tsv).then(() => {
+    toast(`✓ 已複製 ${month} 會議名單(${rows.length} 項 · ${n} 場)`, 'success');
+  }).catch(() => {
+    prompt('複製失敗,請手動複製:', tsv);
+  });
+}
+
 function exportDayTSV() {
   const day = peekDay(state.currentDate);   // 唯讀:純瀏覽不建檔(#7)
   const order = state.data.settings.sheetOrder.filter(o => o.enabled);
@@ -8529,6 +8576,7 @@ async function enterApp(user) {
   $('day-notes').oninput = (e) => { getDay(state.currentDate).notes = e.target.value; persist(); };
 
   $('export-day').onclick = exportDayTSV;
+  $('meeting-copy').onclick = exportMeetingsTSV;
   $('day-log').onclick = () => showActivityModal(state.currentDate);
   // ⏱ 本月操作總覽:打開面板才抓(lazy);換月時 renderMonthProcList 尾端會依快取旗標重抓
   $('panel-month-log')?.addEventListener('toggle', (e) => { if (e.target.open) renderMonthLog(); });
