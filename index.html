@@ -332,6 +332,25 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
    ⚠ 不要指定固定寬度:zh-TW 的 <input type="time"> 是 12 小時制「上午 09:00」,
    瀏覽器自算需要 ~97px;先前寫死 68px → 分鐘被切掉,只看到「上午 09」(2026-07-30 實測截圖)。
    一律交給 auto + flex-shrink:0(在 flex 容器裡不准被壓縮)。 */
+/* 計數類面板底部的自由筆記(框細,輸入即存) */
+.counts-note {
+  width: 100%;
+  margin-top: 8px;
+  padding: 5px 7px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-1);
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  resize: vertical;
+  min-height: 30px;
+  field-sizing: content;
+}
+.counts-note:focus { outline: none; border-color: var(--accent); }
+.counts-note::placeholder { color: var(--ink-muted); font-size: 11px; }
+
 .proc-time {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1894,6 +1913,10 @@ body:not(.mini-mode) #view-mini { display: none; }
     <div class="panel" id="panel-counts">
       <h2>計數類</h2>
       <div id="counts-container"></div>
+      <!-- ⚠ 刻意放在 #counts-container **外面**:那個容器每次 renderCountsPanel() 都會
+           innerHTML='' 整個重建,放進去打字會被砍掉(待打面板踩過同一個坑)。 -->
+      <textarea id="counts-note" class="counts-note" rows="2"
+        placeholder="筆記(例:CT NB 補影像 A0000、補 SONO)"></textarea>
     </div>
 
     <!-- col 2: Procedure (上) + 待打報告 (下) -->
@@ -2096,7 +2119,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.04b';
+const APP_VERSION = '2026.08.04c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3499,9 +3522,25 @@ function renderDayLabel() {
 }
 
 // --- Today: counts panel ---
+// 計數類筆記:只寫值,不重建 DOM;正在打字的那格跳過(同 refreshPendingPanel 的原則)
+function refreshCountsNote() {
+  const el = $('counts-note');
+  if (!el || el === document.activeElement) return;
+  el.value = peekDay(state.currentDate).countsNote || '';
+}
+function setCountsNote(val) {
+  const day = getDay(state.currentDate);
+  const v = String(val || '');
+  if (v) day.countsNote = v; else delete day.countsNote;   // 清空一律 delete(RTDB 巢狀 undefined 會 throw)
+  touchDay(state.currentDate);
+  // 打字輸入一律 debounce 400ms(中間值回音 race,見 CLAUDE.md)
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
+}
+
 function renderCountsPanel() {
   const day = peekDay(state.currentDate);   // 唯讀:純瀏覽不建檔(#7)
   const settings = state.data.settings;
+  refreshCountsNote();
   const c = $('counts-container');
   c.innerHTML = '';
   for (const grp of COUNTS_SCHEMA) {
@@ -8577,6 +8616,7 @@ async function enterApp(user) {
 
   $('export-day').onclick = exportDayTSV;
   $('meeting-copy').onclick = exportMeetingsTSV;
+  if ($('counts-note')) $('counts-note').oninput = (e) => setCountsNote(e.target.value);
   $('day-log').onclick = () => showActivityModal(state.currentDate);
   // ⏱ 本月操作總覽:打開面板才抓(lazy);換月時 renderMonthProcList 尾端會依快取旗標重抓
   $('panel-month-log')?.addEventListener('toggle', (e) => { if (e.target.open) renderMonthLog(); });
