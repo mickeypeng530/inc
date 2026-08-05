@@ -14,12 +14,13 @@ function grabFn(name) {
   throw new Error('括號沒配對 ' + name);
 }
 const api = new Function(`
+  ${grabFn('normalizeTime')}
   ${grabFn('spanMinutes')}
   ${grabFn('procDuration')}
   ${grabFn('mtgDuration')}
   ${grabFn('fmtDur')}
   ${grabFn('setProcTimeField')}
-  return { spanMinutes, procDuration, mtgDuration, fmtDur, setProcTimeField };
+  return { normalizeTime, spanMinutes, procDuration, mtgDuration, fmtDur, setProcTimeField };
 `)();
 
 let pass = 0, fail = 0;
@@ -68,5 +69,34 @@ console.log('[5] 清空一律 delete,不留 undefined(RTDB 遇巢狀 undefined �
 }
 
 console.log('');
+// ============================================================
+console.log('');
+console.log('[6] normalizeTime —— 自製時間欄的格式化(取代 native type=time)');
+// ------------------------------------------------------------
+// 換掉原生的兩個理由:①zh-TW 的 AM/PM 段選完不會自動跳,且段間無法程式化移動
+// ②分鐘只打一位數 value 就已合法(08:1 → 08:01),任何「填完就跳」都會提早觸發。
+{
+  const T = api.normalizeTime;
+  check('空 → 空字串', T('') === '' && T(null) === '' && T('   ') === '');
+  check('「8」→ 08:00', T('8') === '08:00', T('8'));
+  check('「12」→ 12:00', T('12') === '12:00', T('12'));
+  check('「830」→ 08:30', T('830') === '08:30', T('830'));
+  check('「0815」→ 08:15', T('0815') === '08:15', T('0815'));
+  check('「1430」→ 14:30', T('1430') === '14:30', T('1430'));
+  check('「2359」→ 23:59(邊界)', T('2359') === '23:59', T('2359'));
+  check('「0000」→ 00:00(邊界)', T('0000') === '00:00', T('0000'));
+  check('已格式化的「08:15」原樣通過', T('08:15') === '08:15', T('08:15'));
+  check('「8:5」→ 08:05', T('8:5') === '08:05', T('8:5'));
+  check('小時 24 → null(不合法)', T('2400') === null, String(T('2400')));
+  check('分鐘 60 → null(不合法)', T('0860') === null, String(T('0860')));
+  check('純文字 → null', T('abc') === null, String(T('abc')));
+  check('超過 4 位數只取前 4', T('12345') === '12:34', T('12345'));
+  // ⚠ 編輯既有值的關鍵路徑:「08:15」刪一個字 → 不可被判成不合法而清掉資料
+  check('編輯中的「08:5」→ 08:05(不可清空)', T('08:5') === '08:05', String(T('08:5')));
+  check('編輯中的「08:」→ 08:00', T('08:') === '08:00', String(T('08:')));
+  check('編輯中的「1:」→ 01:00', T('1:') === '01:00', String(T('1:')));
+  check('冒號版仍會驗範圍「25:00」→ null', T('25:00') === null, String(T('25:00')));
+}
+
 console.log(`===== ${pass} passed, ${fail} failed =====`);
 process.exit(fail ? 1 : 0);

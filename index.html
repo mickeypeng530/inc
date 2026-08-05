@@ -328,10 +328,9 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
 .hr-legend { display: flex; gap: 12px; align-items: center; font-size: 10px; color: var(--ink-muted); margin: 2px 0 4px; }
 .hr-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
 
-/* procedure 起訖時間(選填)。
-   ⚠ 不要指定固定寬度:zh-TW 的 <input type="time"> 是 12 小時制「上午 09:00」,
-   瀏覽器自算需要 ~97px;先前寫死 68px → 分鐘被切掉,只看到「上午 09」(2026-07-30 實測截圖)。
-   一律交給 auto + flex-shrink:0(在 flex 容器裡不准被壓縮)。 */
+/* 起訖時間欄(procedure / 會議共用)。
+   2026-08-05 從 <input type="time"> 改成純文字 → 沒有「上午/下午」段、沒有選擇器圖示,
+   顯示固定是 24 小時制的 5 個字,可以縮回窄寬度(先前為了塞下「上午 09:00」被迫放到 ~97px)。 */
 /* 計數類面板底部的自由筆記(框細,輸入即存) */
 .counts-note {
   width: 100%;
@@ -354,7 +353,9 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
 .proc-time {
   font-family: var(--font-mono);
   font-size: 11px;
-  padding: 1px 2px;
+  padding: 1px 3px;
+  width: 46px;
+  text-align: center;
   flex-shrink: 0;
   background: var(--bg-page);
   color: var(--ink-1);
@@ -362,6 +363,7 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
   border-radius: var(--r);
 }
 .proc-time:focus { outline: none; border-color: var(--accent); }
+.proc-time::placeholder { color: var(--ink-muted); }
 /* 有時間欄的那條明細列才切 flex(窄欄自動換行);純文字的 .proc-item-detail 維持 block */
 .proc-item-detail.has-time { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .proc-dur { font-family: var(--font-mono); font-size: 11px; color: var(--accent); white-space: nowrap; }
@@ -2119,7 +2121,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.05';
+const APP_VERSION = '2026.08.05b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3850,11 +3852,9 @@ function renderProceduresPanel() {
         ),
         el('div', { class: 'proc-item-detail has-time' },
           // 起訖時間(選填):填了才算耗時。放第二行,不擠壓病歷號/preset 那列
-          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: rec.startTime || '',
-            title: '開始時間(選填)', onchange: (e) => updateProcTime(i, 'startTime', e.target.value) }),
+          timeField(rec.startTime, '開始時間(選填)', (t) => updateProcTime(i, 'startTime', t)),
           el('span', null, ' – '),
-          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: rec.endTime || '',
-            title: '結束時間(選填)', onchange: (e) => updateProcTime(i, 'endTime', e.target.value) }),
+          timeField(rec.endTime, '結束時間(選填)', (t) => updateProcTime(i, 'endTime', t)),
           // 一律輸出(空字串也要),refreshProcDur 才找得到它就地更新
           el('span', { class: 'proc-dur', 'data-dur-key': `${state.currentDate}|${i}` },
             dur != null ? `⏱ ${fmtDur(dur)}` : ''),
@@ -3932,22 +3932,63 @@ function removeAddon(i) {
 // ⚠ 只在「聚焦當下是空的」才跳 —— 編輯既有值時絕不可搶焦點,否則就是「打到一半被彈走」
 //   那個老問題的翻版(待打面板/時間欄都踩過)。type=time 的 value 要整組合法才非空,
 //   所以 value 由空變非空 = 剛好填完,是安全的觸發點。
-// ⚠ 判「本來有沒有值」刻意不靠 focus 事件(視窗沒有焦點時 focus() 不會派送事件,
-//   在那種情況下守門會整個失效)。改用兩個都不依賴事件的來源:
-//   · getAttribute('value') = **render 當下**的值 → 一開始就有值 = 使用者在編輯,永不跳
-//   · dataset.had = 這一欄已經被填過(存檔後不重繪以保住焦點,所以要自己記)
-const TIME_ADVANCE = {
-  oninput: (e) => {
-    const el = e.target;
-    if (!el.value) return;                                  // type=time 要整組合法才非空
-    if (el.dataset.had || el.getAttribute('value')) return; // 編輯既有值 → 不可搶焦點
-    el.dataset.had = '1';
-    const wrap = el.closest('.proc-item-detail');
-    const pair = wrap ? [...wrap.querySelectorAll('.proc-time')] : [];
-    const nx = pair[pair.indexOf(el) + 1];
-    if (nx && !nx.value) nx.focus();                        // 結束已有值就別去打擾
-  },
-};
+// ===== 時間欄:純文字 + 自動格式化(2026-08-05 從 <input type="time"> 換掉)=====
+// 換掉的兩個實測理由:
+//  ① zh-TW 的 native time input 有「上午/下午」段,Chrome **不會**在選完 AM/PM 後自動
+//     跳到小時段,而且段與段之間**沒有任何 API 可以程式化移動**(合成的方向鍵
+//     isTrusted=false,原生元件不收)→ 鍵盤流一定斷在第一段,無解。
+//  ② 分鐘只打一位數時 value 就已經合法(08:1 被當成 08:01)→ 任何「填完就跳下一欄」
+//     的邏輯都會提早觸發、把第二位數吃掉。與先前「分的部分一個數字就跳掉」同一個坑。
+// 純文字版:連打 0815 → 08:15,**第 4 位數才跳**,兩個問題都不存在;順帶變 24 小時制、欄位更窄。
+//
+// 回傳 '' = 空(清掉)、null = 不合法、'HH:MM' = 正常
+function normalizeTime(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return '';
+  let h, m;
+  const c = s.indexOf(':');
+  if (c >= 0) {
+    // ⚠ 有冒號一定要照冒號切,不可先去掉非數字 —— 編輯既有值時「08:15」刪一個字變
+    // 「08:5」,去冒號會變 085 → 判成不合法 → 把使用者的資料清掉(測試抓到)。
+    h = s.slice(0, c).replace(/\D/g, '') || '0';
+    m = s.slice(c + 1).replace(/\D/g, '') || '0';
+  } else {
+    const d = s.replace(/\D/g, '');
+    if (!d) return null;
+    if (d.length <= 2) { h = d; m = '00'; }                 // 「8」→ 08:00
+    else if (d.length === 3) { h = d[0]; m = d.slice(1); }  // 「830」→ 08:30
+    else { h = d.slice(0, 2); m = d.slice(2, 4); }          // 「0815」→ 08:15
+  }
+  const H = Number(h), M = Number(m);
+  if (!(H >= 0 && H <= 23) || !(M >= 0 && M <= 59)) return null;
+  return String(H).padStart(2, '0') + ':' + String(M).padStart(2, '0');
+}
+// 建一個時間輸入欄。save(t) 由呼叫端提供(procedure / 會議各自的存檔函式)
+function timeField(value, title, save) {
+  return el('input', {
+    class: 'proc-time', type: 'text', inputmode: 'numeric', maxlength: '5',
+    placeholder: '--:--', title: title + ' —— 直接打 4 位數(0815),打滿自動跳下一欄',
+    value: value || '',
+    onfocus: countSelectFocus,      // 點進去全選 → 直接重打 4 位數就換掉,不用先刪
+    oninput: (e) => {
+      if (e.target.value.replace(/\D/g, '').length < 4) return;   // 打滿 4 位才動作
+      const t = normalizeTime(e.target.value);
+      if (!t) return;
+      e.target.value = t;
+      save(t);
+      const wrap = e.target.closest('.proc-item-detail');
+      const pair = wrap ? [...wrap.querySelectorAll('.proc-time')] : [];
+      const nx = pair[pair.indexOf(e.target) + 1];
+      if (nx && !nx.value) { nx.focus(); nx.select(); }           // 結束已有值就別去打擾
+    },
+    onchange: (e) => {            // 失焦 / Enter:把「8」「830」這種補完整
+      const t = normalizeTime(e.target.value);
+      if (t === null) { e.target.value = ''; save(''); return; }  // 不合法 → 清掉,不留髒值
+      e.target.value = t;
+      save(t);
+    },
+  });
+}
 
 // 'HH:MM' 兩點之間的分鐘數;跨午夜 +1440 不當負值。procedure 與會議共用。
 function spanMinutes(s, e) {
@@ -4025,11 +4066,9 @@ function renderDayMeetingPanel() {
         el('div', { class: 'proc-item-name' }, m.name || '?',
           el('span', { class: 'count-unitprice' }, m.role || '')),
         el('div', { class: 'proc-item-detail has-time' },
-          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: m.start || '',
-            title: '開始(選填)', onchange: (e) => updateMtgTime(i, 'start', e.target.value) }),
+          timeField(m.start, '開始(選填)', (t) => updateMtgTime(i, 'start', t)),
           el('span', null, '–'),
-          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: m.end || '',
-            title: '結束(選填)', onchange: (e) => updateMtgTime(i, 'end', e.target.value) }),
+          timeField(m.end, '結束(選填)', (t) => updateMtgTime(i, 'end', t)),
           el('span', { class: 'proc-dur', 'data-mdur-key': `${state.currentDate}|${i}` },
             dur != null ? `⏱ ${fmtDur(dur)}` : ''))
       ),
@@ -5548,11 +5587,9 @@ function renderMonthProcList() {
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
         el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail has-time' },
-          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: rec.startTime || '',
-            title: '開始時間(選填)', onchange: (e) => mpProcTime(date, i, 'startTime', e.target.value) }),
+          timeField(rec.startTime, '開始時間(選填)', (t) => mpProcTime(date, i, 'startTime', t)),
           el('span', null, ' – '),
-          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: rec.endTime || '',
-            title: '結束時間(選填)', onchange: (e) => mpProcTime(date, i, 'endTime', e.target.value) }),
+          timeField(rec.endTime, '結束時間(選填)', (t) => mpProcTime(date, i, 'endTime', t)),
           el('span', { class: 'proc-dur', 'data-dur-key': `${date}|${i}` },
             dur != null ? `⏱ ${fmtDur(dur)}` : ''),
           el('span', null, detail))),
@@ -5933,11 +5970,9 @@ function showDayProcModal(date) {
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
         el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail has-time' },
-          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: rec.startTime || '',
-            title: '開始時間(選填)', onchange: (e) => mpProcTime(date, i, 'startTime', e.target.value) }),
+          timeField(rec.startTime, '開始時間(選填)', (t) => mpProcTime(date, i, 'startTime', t)),
           el('span', null, ' – '),
-          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: rec.endTime || '',
-            title: '結束時間(選填)', onchange: (e) => mpProcTime(date, i, 'endTime', e.target.value) }),
+          timeField(rec.endTime, '結束時間(選填)', (t) => mpProcTime(date, i, 'endTime', t)),
           el('span', { class: 'proc-dur', 'data-dur-key': `${date}|${i}` },
             dur != null ? `⏱ ${fmtDur(dur)}` : ''),
           el('span', null, detail))),
