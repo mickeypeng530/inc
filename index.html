@@ -2121,7 +2121,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.05b';
+const APP_VERSION = '2026.08.05c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -4241,6 +4241,17 @@ function addPresetToToday() {
   persist();
   renderProceduresPanel();
   renderStatsPanel();
+  // 新增當下才記得起訖,晚一步就忘了 → 游標直接送到那一筆的「開始時間」
+  focusProcTime('#proc-list', '.proc-item', day.procedures.length - qty);
+}
+
+// 把游標送到第 idx 筆 procedure 的開始時間欄。
+// ⚠ addon(額外計費)的列排在 procedure 之後、且共用同一個 class,所以用索引取
+// 才不會抓到 addon 那行(它沒有時間欄)。
+function focusProcTime(listSel, rowSel, idx) {
+  const rows = document.querySelectorAll(`${listSel} ${rowSel}`);
+  const t = rows[idx] && rows[idx].querySelector('.proc-time');
+  if (t) { t.focus(); t.select(); }
 }
 
 function removeProc(i) {
@@ -6037,6 +6048,7 @@ function showDayProcModal(date) {
     storage.save(state.data);
     addSel.value = ''; addQty.value = '1'; addMed.value = '';
     mpRefresh();
+    focusProcTime('.dayproc-list', '.mp-row', day.procedures.length - qty);   // 同今日 tab:直接跳到開始時間
   } }, '加入');
   // 日型(平日/假日)—— 決定加班時數進哪個桶(平日目標 46h / 假日 16h)。
   // 放在月表這邊改:今日 tab 是當下輸入用,回頭補改或提早設定應該在看得到整月的地方做。
