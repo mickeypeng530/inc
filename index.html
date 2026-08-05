@@ -2119,7 +2119,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.04c';
+const APP_VERSION = '2026.08.05';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3850,10 +3850,10 @@ function renderProceduresPanel() {
         ),
         el('div', { class: 'proc-item-detail has-time' },
           // 起訖時間(選填):填了才算耗時。放第二行,不擠壓病歷號/preset 那列
-          el('input', { class: 'proc-time', type: 'time', value: rec.startTime || '',
+          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: rec.startTime || '',
             title: '開始時間(選填)', onchange: (e) => updateProcTime(i, 'startTime', e.target.value) }),
           el('span', null, ' – '),
-          el('input', { class: 'proc-time', type: 'time', value: rec.endTime || '',
+          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: rec.endTime || '',
             title: '結束時間(選填)', onchange: (e) => updateProcTime(i, 'endTime', e.target.value) }),
           // 一律輸出(空字串也要),refreshProcDur 才找得到它就地更新
           el('span', { class: 'proc-dur', 'data-dur-key': `${state.currentDate}|${i}` },
@@ -3927,6 +3927,28 @@ function removeAddon(i) {
 // 的 ISO 時刻」,而 registry.html 的 caseKey 拿它當組成部分(registry.html:580),
 // 動它會讓 registry 既存的 outcome 全部變孤兒。
 // 兩者語意不同:`time` = 你何時按下記錄;startTime/endTime = 術式實際何時做。
+// 時間欄自動跳欄:填完「開始」→ 自動跳到同一列的「結束」。
+// (段內的 上午/下午 → 時 → 分 是瀏覽器原生行為,不用管;這裡只補最後一跳)
+// ⚠ 只在「聚焦當下是空的」才跳 —— 編輯既有值時絕不可搶焦點,否則就是「打到一半被彈走」
+//   那個老問題的翻版(待打面板/時間欄都踩過)。type=time 的 value 要整組合法才非空,
+//   所以 value 由空變非空 = 剛好填完,是安全的觸發點。
+// ⚠ 判「本來有沒有值」刻意不靠 focus 事件(視窗沒有焦點時 focus() 不會派送事件,
+//   在那種情況下守門會整個失效)。改用兩個都不依賴事件的來源:
+//   · getAttribute('value') = **render 當下**的值 → 一開始就有值 = 使用者在編輯,永不跳
+//   · dataset.had = 這一欄已經被填過(存檔後不重繪以保住焦點,所以要自己記)
+const TIME_ADVANCE = {
+  oninput: (e) => {
+    const el = e.target;
+    if (!el.value) return;                                  // type=time 要整組合法才非空
+    if (el.dataset.had || el.getAttribute('value')) return; // 編輯既有值 → 不可搶焦點
+    el.dataset.had = '1';
+    const wrap = el.closest('.proc-item-detail');
+    const pair = wrap ? [...wrap.querySelectorAll('.proc-time')] : [];
+    const nx = pair[pair.indexOf(el) + 1];
+    if (nx && !nx.value) nx.focus();                        // 結束已有值就別去打擾
+  },
+};
+
 // 'HH:MM' 兩點之間的分鐘數;跨午夜 +1440 不當負值。procedure 與會議共用。
 function spanMinutes(s, e) {
   if (!s || !e) return null;
@@ -4003,10 +4025,10 @@ function renderDayMeetingPanel() {
         el('div', { class: 'proc-item-name' }, m.name || '?',
           el('span', { class: 'count-unitprice' }, m.role || '')),
         el('div', { class: 'proc-item-detail has-time' },
-          el('input', { class: 'proc-time', type: 'time', value: m.start || '',
+          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: m.start || '',
             title: '開始(選填)', onchange: (e) => updateMtgTime(i, 'start', e.target.value) }),
           el('span', null, '–'),
-          el('input', { class: 'proc-time', type: 'time', value: m.end || '',
+          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: m.end || '',
             title: '結束(選填)', onchange: (e) => updateMtgTime(i, 'end', e.target.value) }),
           el('span', { class: 'proc-dur', 'data-mdur-key': `${state.currentDate}|${i}` },
             dur != null ? `⏱ ${fmtDur(dur)}` : ''))
@@ -5526,10 +5548,10 @@ function renderMonthProcList() {
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
         el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail has-time' },
-          el('input', { class: 'proc-time', type: 'time', value: rec.startTime || '',
+          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: rec.startTime || '',
             title: '開始時間(選填)', onchange: (e) => mpProcTime(date, i, 'startTime', e.target.value) }),
           el('span', null, ' – '),
-          el('input', { class: 'proc-time', type: 'time', value: rec.endTime || '',
+          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: rec.endTime || '',
             title: '結束時間(選填)', onchange: (e) => mpProcTime(date, i, 'endTime', e.target.value) }),
           el('span', { class: 'proc-dur', 'data-dur-key': `${date}|${i}` },
             dur != null ? `⏱ ${fmtDur(dur)}` : ''),
@@ -5911,10 +5933,10 @@ function showDayProcModal(date) {
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
         el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail has-time' },
-          el('input', { class: 'proc-time', type: 'time', value: rec.startTime || '',
+          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: rec.startTime || '',
             title: '開始時間(選填)', onchange: (e) => mpProcTime(date, i, 'startTime', e.target.value) }),
           el('span', null, ' – '),
-          el('input', { class: 'proc-time', type: 'time', value: rec.endTime || '',
+          el('input', { class: 'proc-time', type: 'time', ...TIME_ADVANCE, value: rec.endTime || '',
             title: '結束時間(選填)', onchange: (e) => mpProcTime(date, i, 'endTime', e.target.value) }),
           el('span', { class: 'proc-dur', 'data-dur-key': `${date}|${i}` },
             dur != null ? `⏱ ${fmtDur(dur)}` : ''),
