@@ -2121,7 +2121,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.05c';
+const APP_VERSION = '2026.08.05d';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3407,15 +3407,32 @@ function calcMonthlyOvertime(month) {
 
 // ===== Renderers =====
 
+// renderAll 會整頁重建 → 正在輸入的欄位一定被砍掉,游標消失。
+// 這個症狀已經追過三個不同的病根(重繪 DOM / key 序回音 / 搶焦點),每修一個就冒出下一個 ——
+// 所以改成從結果端擋:重建前記住焦點,重建後還原。之後不管哪條路徑觸發重繪都不會再吃焦點。
+// 認欄位靠 data-focus-key(重建後是全新的 DOM 節點,物件參照一定失效)。
+// 只有標了 key 的欄位受保護;要保護新欄位就給它一個穩定唯一的 data-focus-key。
+function withFocusPreserved(fn) {
+  const a = document.activeElement;
+  const key = a && a.dataset ? a.dataset.focusKey : null;
+  let sel = null;
+  if (key) { try { sel = { s: a.selectionStart, e: a.selectionEnd }; } catch (_) {} }
+  fn();
+  if (!key) return;
+  const el = document.querySelector('[data-focus-key="' + (window.CSS && CSS.escape ? CSS.escape(key) : key) + '"]');
+  if (!el || el === document.activeElement) return;
+  el.focus();
+  if (sel) { try { el.setSelectionRange(sel.s, sel.e); } catch (_) {} }
+}
+
 function renderAll() {
-  renderDayLabel();
-  if (state.isMini) {
-    renderMini();
-    return;
-  }
-  renderToday();
-  renderMonth();
-  renderSettings();
+  withFocusPreserved(() => {
+    renderDayLabel();
+    if (state.isMini) { renderMini(); return; }
+    renderToday();
+    renderMonth();
+    renderSettings();
+  });
 }
 
 function renderMini() {
@@ -3852,9 +3869,9 @@ function renderProceduresPanel() {
         ),
         el('div', { class: 'proc-item-detail has-time' },
           // 起訖時間(選填):填了才算耗時。放第二行,不擠壓病歷號/preset 那列
-          timeField(rec.startTime, '開始時間(選填)', (t) => updateProcTime(i, 'startTime', t)),
+          timeField(rec.startTime, '開始時間(選填)', (t) => updateProcTime(i, 'startTime', t), `tp|${state.currentDate}|${i}|s`),
           el('span', null, ' – '),
-          timeField(rec.endTime, '結束時間(選填)', (t) => updateProcTime(i, 'endTime', t)),
+          timeField(rec.endTime, '結束時間(選填)', (t) => updateProcTime(i, 'endTime', t), `tp|${state.currentDate}|${i}|e`),
           // 一律輸出(空字串也要),refreshProcDur 才找得到它就地更新
           el('span', { class: 'proc-dur', 'data-dur-key': `${state.currentDate}|${i}` },
             dur != null ? `⏱ ${fmtDur(dur)}` : ''),
@@ -3964,9 +3981,13 @@ function normalizeTime(raw) {
   return String(H).padStart(2, '0') + ':' + String(M).padStart(2, '0');
 }
 // 建一個時間輸入欄。save(t) 由呼叫端提供(procedure / 會議各自的存檔函式)
-function timeField(value, title, save) {
+// key = data-focus-key,讓 renderAll 重建後能把游標放回原欄(withFocusPreserved)。
+// 各呼叫端必須給**全域唯一**的 key —— 月表清單與當天 modal 可能同時顯示同一天,
+// 用相同 key 會讓 querySelector 選到錯的那個。
+function timeField(value, title, save, key) {
   return el('input', {
     class: 'proc-time', type: 'text', inputmode: 'numeric', maxlength: '5',
+    'data-focus-key': key,
     placeholder: '--:--', title: title + ' —— 直接打 4 位數(0815),打滿自動跳下一欄',
     value: value || '',
     onfocus: countSelectFocus,      // 點進去全選 → 直接重打 4 位數就換掉,不用先刪
@@ -4066,9 +4087,9 @@ function renderDayMeetingPanel() {
         el('div', { class: 'proc-item-name' }, m.name || '?',
           el('span', { class: 'count-unitprice' }, m.role || '')),
         el('div', { class: 'proc-item-detail has-time' },
-          timeField(m.start, '開始(選填)', (t) => updateMtgTime(i, 'start', t)),
+          timeField(m.start, '開始(選填)', (t) => updateMtgTime(i, 'start', t), `mt|${state.currentDate}|${i}|s`),
           el('span', null, '–'),
-          timeField(m.end, '結束(選填)', (t) => updateMtgTime(i, 'end', t)),
+          timeField(m.end, '結束(選填)', (t) => updateMtgTime(i, 'end', t), `mt|${state.currentDate}|${i}|e`),
           el('span', { class: 'proc-dur', 'data-mdur-key': `${state.currentDate}|${i}` },
             dur != null ? `⏱ ${fmtDur(dur)}` : ''))
       ),
@@ -5598,9 +5619,9 @@ function renderMonthProcList() {
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
         el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail has-time' },
-          timeField(rec.startTime, '開始時間(選填)', (t) => mpProcTime(date, i, 'startTime', t)),
+          timeField(rec.startTime, '開始時間(選填)', (t) => mpProcTime(date, i, 'startTime', t), `ml|${date}|${i}|s`),
           el('span', null, ' – '),
-          timeField(rec.endTime, '結束時間(選填)', (t) => mpProcTime(date, i, 'endTime', t)),
+          timeField(rec.endTime, '結束時間(選填)', (t) => mpProcTime(date, i, 'endTime', t), `ml|${date}|${i}|e`),
           el('span', { class: 'proc-dur', 'data-dur-key': `${date}|${i}` },
             dur != null ? `⏱ ${fmtDur(dur)}` : ''),
           el('span', null, detail))),
@@ -5981,9 +6002,9 @@ function showDayProcModal(date) {
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
         el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail has-time' },
-          timeField(rec.startTime, '開始時間(選填)', (t) => mpProcTime(date, i, 'startTime', t)),
+          timeField(rec.startTime, '開始時間(選填)', (t) => mpProcTime(date, i, 'startTime', t), `md|${date}|${i}|s`),
           el('span', null, ' – '),
-          timeField(rec.endTime, '結束時間(選填)', (t) => mpProcTime(date, i, 'endTime', t)),
+          timeField(rec.endTime, '結束時間(選填)', (t) => mpProcTime(date, i, 'endTime', t), `md|${date}|${i}|e`),
           el('span', { class: 'proc-dur', 'data-dur-key': `${date}|${i}` },
             dur != null ? `⏱ ${fmtDur(dur)}` : ''),
           el('span', null, detail))),
