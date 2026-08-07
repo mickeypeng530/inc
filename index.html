@@ -2150,7 +2150,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.07c';
+const APP_VERSION = '2026.08.07d';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5401,7 +5401,8 @@ function renderMonth() {
   {
     const xhDays = days.filter(d => xhTotalCount(state.data.days[d]) > 0);
     if (xhDays.length) {
-      const open = state.xhMonthOpen !== false;   // 預設展開
+      // 預設收合 —— 金額已經在月收入摘要看得到了,明細只有要對帳時才需要攤開。
+      const open = state.xhMonthOpen === true;
       const head = el('tr', { class: 'pivot-bottom-row pivot-xh-head', style: 'cursor:pointer',
         title: '點一下收合／展開',
         onclick: () => { state.xhMonthOpen = !open; renderMonth(); } },
