@@ -1545,6 +1545,8 @@ select.btn-secondary option {
 .income-field-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .income-field-input { -moz-appearance: textfield; appearance: textfield; }
 .income-field-sub { font-size: 10px; color: var(--ink-muted); }
+/* 中興是另一本帳 —— 靠分隔線 + 標籤裡的「另計」表態,不能只靠位置暗示 */
+.income-divider { align-self: stretch; width: 1px; min-height: 40px; background: var(--border); margin: 0 4px; }
 .pivot-input {
   width: 100%;
   background: transparent;
@@ -2148,7 +2150,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.07';
+const APP_VERSION = '2026.08.07b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5421,7 +5423,7 @@ function renderMonth() {
             tr.appendChild(el('td', { class: weekCls(days[i]).trim() }, cells[i] ? String(cells[i]) : ''));
           t.appendChild(tr);
         }
-        // 每日中興金額(階梯是「當日」規則 → 逐日各自算,加總即當月)
+        // 每日中興金額(逐日各自算,加總即當月)
         const money = days.map(d => calcXhRevenue(state.data.days[d], state.data.settings));
         const mtr = el('tr', { class: 'pivot-bottom-row' },
           el('td', { class: 'row-label row-indent' }, '中興金額'),
@@ -5475,6 +5477,17 @@ function renderMonth() {
   }
   incomeFields.push(mkIncomeField('績效總額', '科上(含值班費)', mm.perfTotal, true, 'perfTotal'));
   incomeFields.push(mkIncomeField('最後稅前薪水', '醫院實付', mm.pretaxSalary, true, 'pretaxSalary'));
+  // 中興(外院)—— 放在醫院實付之後,用分隔線隔開。
+  // ⚠ 這筆**沒有**加進上面任何一個數字(我的 Total / 均日薪 / 績效總額 全都不含),
+  //    所以標籤要自己講清楚是「另計」;只靠分隔線的位置暗示,半年後會誤讀成已包含。
+  {
+    const xhDays = days.filter(d => xhTotalCount(state.data.days[d]) > 0);
+    if (xhDays.length) {
+      const xhRev = xhDays.reduce((s, d) => s + calcXhRevenue(state.data.days[d], state.data.settings), 0);
+      incomeFields.push(el('div', { class: 'income-divider' }));
+      incomeFields.push(mkIncomeField('中興(另計)', `${xhDays.length} 天 · 不含在上列`, xhRev, false, null));
+    }
+  }
   t.appendChild(el('tr', { class: 'pivot-bottom-row pivot-income-row' },
     el('td', { class: 'row-label' }, '月收入'),
     el('td', { class: 'col-total' }, ''),
