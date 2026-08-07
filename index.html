@@ -331,6 +331,25 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
 /* 起訖時間欄(procedure / 會議共用)。
    2026-08-05 從 <input type="time"> 改成純文字 → 沒有「上午/下午」段、沒有選擇器圖示,
    顯示固定是 24 小時制的 5 個字,可以縮回窄寬度(先前為了塞下「上午 09:00」被迫放到 ~97px)。 */
+/* === 中興醫院(外院)獨立計數 === */
+.xh-panel { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--r); background: var(--bg-panel); }
+.xh-panel > summary { padding: 7px 12px; cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; user-select: none; }
+.xh-panel > summary::-webkit-details-marker { display: none; }
+.xh-panel > summary::before { content: '▶'; font-size: 9px; color: var(--ink-muted); transition: transform .15s; }
+.xh-panel[open] > summary::before { transform: rotate(90deg); }
+.xh-panel > summary > h2 { margin: 0; padding: 0; background: none; border: none; font-size: 12px; }
+.xh-sum { font-weight: normal; font-size: 11px; color: var(--accent); font-family: var(--font-mono); margin-left: 4px; }
+#xh-container { padding: 0 12px 10px; }
+.xh-total { display: flex; justify-content: space-between; align-items: baseline;
+  margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border); font-size: 12px; }
+.xh-total .stat-money { font-family: var(--font-mono); font-size: 14px; color: var(--accent); font-weight: 600; }
+.xh-base { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.xh-base input { margin: 0; cursor: pointer; }
+.xh-hint { font-size: 10px; color: var(--ink-muted); margin-top: 4px; line-height: 1.5; }
+/* 月表的中興區塊:與主帳視覺分開,免得被誤讀成「我的 Total」的一部分 */
+.pivot-table .pivot-xh-head td { border-top: 2px solid var(--accent); background: var(--bg-page); }
+.pivot-table .pivot-xh-head .row-label { color: var(--accent); font-weight: 600; }
+
 /* 計數類面板底部的自由筆記(框細,輸入即存) */
 .counts-note {
   width: 100%;
@@ -1919,6 +1938,14 @@ body:not(.mini-mode) #view-mini { display: none; }
            innerHTML='' 整個重建,放進去打字會被砍掉(待打面板踩過同一個坑)。 -->
       <textarea id="counts-note" class="counts-note" rows="2"
         placeholder="筆記(例:CT NB 補影像 A0000、補 SONO)"></textarea>
+
+      <!-- 中興醫院(外院):自成一套帳,不進主帳的任何統計。
+           ⚠ 顯示由「有沒有資料」驅動,**不綁星期幾** —— 目前每週五,但改期或臨時多跑一趟
+           都不用動程式(沿用本專案「資料驅動,非綁特定日期」的既有原則)。 -->
+      <details class="collapsible-panel xh-panel" id="panel-xh">
+        <summary><h2>中興 <span class="xh-sum" id="xh-summary"></span></h2></summary>
+        <div id="xh-container"></div>
+      </details>
     </div>
 
     <!-- col 2: Procedure (上) + 待打報告 (下) -->
@@ -2121,7 +2148,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.05d';
+const APP_VERSION = '2026.08.07';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3285,6 +3312,48 @@ function calcCountTotal(day) {
   }
   return total;
 }
+// ===== 中興醫院(外院)=====
+// ⚠⚠ 這一整套刻意**不進** calcBaseRevenue / stampRevenue / getDayRevenue / dayReadingByCat /
+//     getMonthlyStats / TSV 匯出 / 貼上匯入 —— 主帳的任何數字都看不到它。
+//     隔離是結構性的(那些函式根本不讀 day.xh),不是靠「記得別加進去」。
+//     新增任何「掃 day 算錢」的地方時,預設就是不要碰 xh。
+const XH_SCHEMA = [
+  { key: 'mriBase', label: '基本 MRI',       priceKey: 'mriBase', base: true },
+  { key: 'mriC',    label: '額外 MRI 打藥',   priceKey: 'mriC'  },
+  { key: 'mriNc',   label: '額外 MRI 不打藥', priceKey: 'mriNc' },
+  { key: 'ca',      label: 'Ca',             priceKey: 'ca'    },
+  { key: 'ctC',     label: 'CT 打藥',         priceKey: 'ctC'   },
+  { key: 'ctNc',    label: 'CT 不打藥',       priceKey: 'ctNc'  },
+];
+// 每次去中興固定會有的基本份數(按「中興日」鈕一鍵填入)
+const XH_BASE_N = 10;
+const XH_PRICE_DEFAULT = { mriBase: 1000, mriC: 1000, mriNc: 800, ca: 200, ctC: 700, ctNc: 450 };
+function xhPrices(settings) { return { ...XH_PRICE_DEFAULT, ...((settings && settings.xhPrices) || {}) }; }
+function xhCount(day, key) { return Number(day && day.xh && day.xh[key]) || 0; }
+function xhTotalCount(day) { return XH_SCHEMA.reduce((s, it) => s + xhCount(day, it.key), 0); }
+
+// 計價 = 單純的「件數 × 單價」。
+// ⚠ 早期版本把「當日前 10 份 MRI $1,000」寫成階梯演算法(要判斷哪十份落在階梯內),
+//   使用者改成「基本十份自成一項、只數額外的」之後,階梯邏輯整個不需要了 ——
+//   基本份數直接是一個計數欄。不要再把階梯加回來。
+function calcXhRevenue(day, settings) {
+  const p = xhPrices(settings);
+  return XH_SCHEMA.reduce((s, it) => s + xhCount(day, it.key) * (Number(p[it.priceKey]) || 0), 0);
+}
+function setXhCount(key, val) {
+  const day = getDay(state.currentDate);
+  const v = Math.max(0, Math.round(Number(val) || 0));
+  if (!day.xh) day.xh = {};
+  if (v) day.xh[key] = v; else delete day.xh[key];
+  if (!Object.keys(day.xh).length) delete day.xh;   // 空了就整個拿掉(RTDB 不存空物件)
+  touchDay(state.currentDate);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
+}
+function bumpXh(key, delta) {
+  setXhCount(key, xhCount(peekDay(state.currentDate), key) + delta);
+  renderXhPanel();
+}
+
 function calcBaseRevenue(day, settings) {
   const p = settings.unitPrices;
   let r = 0;
@@ -3541,6 +3610,73 @@ function renderDayLabel() {
 }
 
 // --- Today: counts panel ---
+// 中興面板。刻意不顯示「每列小計」—— MRI 有階梯,逐列 v×單價 會誤導
+// (沒打藥那列前 10 份其實是 $1,000,不是 $800)。金額只在合計列與明細字串出現。
+function xhBreakdownText(day) {
+  const p = xhPrices(state.data.settings);
+  return XH_SCHEMA.filter(it => xhCount(day, it.key))
+    .map(it => `${it.label} ${xhCount(day, it.key)}`).join(' · ');
+}
+// 只改數字,不重建 DOM(直填時焦點在 input 上 —— 同 refreshCountMoney 的分工)
+function refreshXhTotal() {
+  const day = peekDay(state.currentDate);
+  const p = xhPrices(state.data.settings);
+  const n = xhTotalCount(day), rev = calcXhRevenue(day, state.data.settings);
+  const s = $('xh-summary'); if (s) s.textContent = n > 0 ? `${n} 件 · $${fmtMoney(rev)}` : '';
+  const t = $('xh-total-money'); if (t) t.textContent = '$' + fmtMoney(rev);
+  const h = $('xh-hint'); if (h) h.textContent = xhBreakdownText(day);
+  document.querySelectorAll('.xh-money[data-xh-key]').forEach(elm => {
+    const k = elm.getAttribute('data-xh-key'), v = xhCount(day, k);
+    const it = XH_SCHEMA.find(x => x.key === k);
+    elm.textContent = v > 0 ? '$' + fmtMoney(v * (Number(p[it.priceKey]) || 0)) : '';
+  });
+}
+function renderXhPanel() {
+  const c = $('xh-container'), panel = $('panel-xh');
+  if (!c || !panel) return;
+  const day = peekDay(state.currentDate);
+  const p = xhPrices(state.data.settings);
+  // 換日才決定開合(有資料就展開),之後尊重使用者手動收合 —— 否則每次重繪都跟他打架
+  if (state._xhOpenFor !== state.currentDate) {
+    state._xhOpenFor = state.currentDate;
+    panel.open = xhTotalCount(day) > 0;
+  }
+  c.innerHTML = '';
+  for (const it of XH_SCHEMA) {
+    // 基本份數是「有去就一定是滿的 10 份」→ 打勾比 ±1 快。
+    // 萬一某天不是 10(從月表或別處改過),label 直接把實際份數顯示出來,不會被打勾騙過去。
+    if (it.base) {
+      const v = xhCount(day, it.key);
+      c.appendChild(el('div', { class: 'count-row' },
+        el('label', { class: 'count-sublabel xh-base' },
+          el('input', { type: 'checkbox', checked: v > 0 ? 'checked' : undefined,
+            onchange: (e) => { setXhCount(it.key, e.target.checked ? XH_BASE_N : 0); renderXhPanel(); } }),
+          ` ${it.label} ${v && v !== XH_BASE_N ? v : XH_BASE_N} 份`,
+          el('span', { class: 'count-unitprice' }, `(${fmtMoney(p[it.priceKey])})`)),
+        el('span', { class: 'count-money xh-money', 'data-xh-key': it.key }, ''),
+        el('div', { class: 'count-controls' })
+      ));
+      continue;
+    }
+    c.appendChild(el('div', { class: 'count-row' },
+      el('span', { class: 'count-sublabel' }, it.label,
+        el('span', { class: 'count-unitprice' }, `(${fmtMoney(p[it.priceKey])})`)),
+      el('span', { class: 'count-money xh-money', 'data-xh-key': it.key }, ''),
+      el('div', { class: 'count-controls' },
+        el('button', { class: 'btn-step', tabindex: '-1', onclick: () => bumpXh(it.key, -1) }, '−'),
+        el('input', { class: 'count-input', type: 'number', inputmode: 'numeric', min: '0',
+          value: String(xhCount(day, it.key)), onfocus: countSelectFocus,
+          oninput: (e) => { setXhCount(it.key, e.target.value); refreshXhTotal(); } }),
+        el('button', { class: 'btn-step', tabindex: '-1', onclick: () => bumpXh(it.key, +1) }, '＋'))
+    ));
+  }
+  c.appendChild(el('div', { class: 'xh-total' },
+    el('span', null, '當日中興合計'),
+    el('span', { class: 'stat-money', id: 'xh-total-money' }, '')));
+  c.appendChild(el('div', { class: 'xh-hint', id: 'xh-hint' }, ''));
+  refreshXhTotal();
+}
+
 // 計數類筆記:只寫值,不重建 DOM;正在打字的那格跳過(同 refreshPendingPanel 的原則)
 function refreshCountsNote() {
   const el = $('counts-note');
@@ -4557,6 +4693,7 @@ function renderToday() {
   renderStatsPanel();
   renderPendingPanel();
   renderDayMeetingPanel();
+  renderXhPanel();
 }
 
 // --- Pending reports (待打) ---
@@ -5255,6 +5392,46 @@ function renderMonth() {
     el('td', { class: 'col-total' }, String(calcMonthlyOvertime(month).total)),
     el('td', { colspan: String(daysInMonth), class: 'pivot-ot-summary-cell' }, buildOtMerged(month))
   ));
+
+  // === 中興(外院)===
+  // 整段只在「本月真的有中興資料」時才出現 —— 平常不佔月表版面(目前每週五,但不綁星期幾)。
+  // ⚠ 這幾列與「我的Total」完全無關,金額不加進月收入摘要。標題列點一下可收合。
+  {
+    const xhDays = days.filter(d => xhTotalCount(state.data.days[d]) > 0);
+    if (xhDays.length) {
+      const open = state.xhMonthOpen !== false;   // 預設展開
+      const head = el('tr', { class: 'pivot-bottom-row pivot-xh-head', style: 'cursor:pointer',
+        title: '點一下收合／展開',
+        onclick: () => { state.xhMonthOpen = !open; renderMonth(); } },
+        el('td', { class: 'row-label' }, (open ? '▼ ' : '▶ ') + '中興'),
+        el('td', { class: 'col-total' }, String(xhDays.reduce((s, d) => s + xhTotalCount(state.data.days[d]), 0))),
+        el('td', { colspan: String(daysInMonth), class: 'pivot-ot-summary-cell' },
+          `${xhDays.length} 天 · 合計 $${fmtMoney(xhDays.reduce((s, d) => s + calcXhRevenue(state.data.days[d], state.data.settings), 0))}`)
+      );
+      t.appendChild(head);
+      if (open) {
+        for (const it of XH_SCHEMA) {
+          const cells = days.map(d => xhCount(state.data.days[d], it.key));
+          const sum = cells.reduce((a, b) => a + b, 0);
+          if (!sum) continue;                              // 整月都沒有的項目不列
+          const tr = el('tr', null,
+            el('td', { class: 'row-label row-indent' }, it.label),
+            el('td', { class: 'col-total' }, String(sum)));
+          for (let i = 0; i < cells.length; i++)
+            tr.appendChild(el('td', { class: weekCls(days[i]).trim() }, cells[i] ? String(cells[i]) : ''));
+          t.appendChild(tr);
+        }
+        // 每日中興金額(階梯是「當日」規則 → 逐日各自算,加總即當月)
+        const money = days.map(d => calcXhRevenue(state.data.days[d], state.data.settings));
+        const mtr = el('tr', { class: 'pivot-bottom-row' },
+          el('td', { class: 'row-label row-indent' }, '中興金額'),
+          el('td', { class: 'col-total' }, fmtMoney(money.reduce((a, b) => a + b, 0))));
+        for (let i = 0; i < money.length; i++)
+          mtr.appendChild(el('td', { class: weekCls(days[i]).trim() }, money[i] ? fmtMoney(money[i]) : ''));
+        t.appendChild(mtr);
+      }
+    }
+  }
 
   // 月收入摘要 — 我的Total(自動)/ 績效總額 / 最後稅前薪水
   const mm = state.data.monthlyMeta?.[month] || {};
