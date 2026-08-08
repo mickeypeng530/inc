@@ -3612,8 +3612,7 @@ function renderDayLabel() {
 }
 
 // --- Today: counts panel ---
-// 中興面板。刻意不顯示「每列小計」—— MRI 有階梯,逐列 v×單價 會誤導
-// (沒打藥那列前 10 份其實是 $1,000,不是 $800)。金額只在合計列與明細字串出現。
+// 中興面板。每列都顯示小計(件數 × 單價)—— 沒有階梯,逐列相乘就是對的。
 function xhBreakdownText(day) {
   const p = xhPrices(state.data.settings);
   return XH_SCHEMA.filter(it => xhCount(day, it.key))
