@@ -77,13 +77,13 @@ function check(name, cond, extra) {
 }
 const J = JSON.stringify;
 
-console.log('\n[1] 使用者的原始輸入:「326514 PICC」+ 換行 +「3D」→ 貼單日');
+console.log('\n[1] 使用者的原始輸入:「600001 PICC」+ 換行 +「3D」→ 貼單日');
 {
-  const p = api.parsePastedDayColumn('326514 PICC\n3D', '2026-07-26');
+  const p = api.parsePastedDayColumn('600001 PICC\n3D', '2026-07-26');
   check('判定為純術式清單(detailOnly)', p.detailOnly === true);
   check('PICC 解析出來(sheet 簡寫 → 組合價 3134)',
     p.procedures.length === 1 && p.procedures[0].presetName === 'PICC'
-      && p.procedures[0].items[0].amount === 3134 && p.procedures[0].medRecord === '326514',
+      && p.procedures[0].items[0].amount === 3134 && p.procedures[0].medRecord === '600001',
     J(p.procedures));
   check('3D 解析成額外計費', J(p.addons.map(a => [a.type, a.count])) === J([['d3', 1]]), J(p.addons));
   check('沒有警告(不再嚇人)', p.warnings.length === 0, J(p.warnings));
@@ -96,7 +96,7 @@ console.log('\n[2] detailOnly 套用 = 附加,不動既有資料');
     counts: { ct: { opd: 5 } }, procedures: [{ presetName: '既有NB', items: [{ amount: 733 }] }],
     meetings: [], irRevenue: 5000, overtimeHours: 3,
   };
-  const p = api.parsePastedDayColumn('326514 PICC\n3D', '2026-07-26');
+  const p = api.parsePastedDayColumn('600001 PICC\n3D', '2026-07-26');
   api.applyPastedDayColumn('2026-07-26', p);
   const d = st.data.days['2026-07-26'];
   check('既有 procedure 還在 + PICC 附加', d.procedures.length === 2 && d.procedures[0].presetName === '既有NB', J(d.procedures.map(x => x.presetName)));
@@ -109,7 +109,7 @@ console.log('\n[2] detailOnly 套用 = 附加,不動既有資料');
 console.log('\n[3] 真正的整欄貼上不受影響(有計數數字 → 照舊整天覆蓋)');
 {
   // 2 項計數 + detail1 + 日Total + 日IR + detail2(空) + 加班
-  const p = api.parsePastedDayColumn('3\n5\n326514 PICC\n12500\n3000\n\n8', '2026-07-26');
+  const p = api.parsePastedDayColumn('3\n5\n600001 PICC\n12500\n3000\n\n8', '2026-07-26');
   check('不是 detailOnly', !p.detailOnly);
   check('計數 2 項', p.filledCounts === 2, String(p.filledCounts));
   check('日 Total 12500 / IR 3000 / 加班 8', p.importedRevenue === 12500 && p.irRevenue === 3000 && p.overtimeHours === 8);
@@ -118,7 +118,7 @@ console.log('\n[3] 真正的整欄貼上不受影響(有計數數字 → 照舊�
 
 console.log('\n[4] modal「貼上匯入」也認 sheet 簡寫');
 {
-  const { rows } = api.parsePastedProcedures('326514 PICC\n1874176 Arthro\n999999 GB\n3D');
+  const { rows } = api.parsePastedProcedures('600001 PICC\n7000002 Arthro\n999999 GB\n3D');
   check('PICC → resolved(組合 3134)', rows[0].matched && rows[0].resolved && rows[0].resolved[0].items[0].amount === 3134, J(rows[0]));
   check('Arthro 走原本 preset 比對', rows[1].matched && rows[1].preset && rows[1].preset.id === 'arthro');
   check('GB → PTGBD(sheet 別名)', rows[2].matched && rows[2].resolved && rows[2].resolved[0].presetName === 'PTGBD', J(rows[2].name));
@@ -129,7 +129,7 @@ console.log('\n[4] modal「貼上匯入」也認 sheet 簡寫');
   const n = api.applyPastedProcedures('2026-07-27', { rows });
   const d = st.data.days['2026-07-27'];
   check('套用:3 筆 procedure + 1 addon', d.procedures.length === 3 && d.addons.length === 1, J({ p: d.procedures.length, a: d.addons }));
-  check('PICC 筆帶病歷號', d.procedures[0].medRecord === '326514');
+  check('PICC 筆帶病歷號', d.procedures[0].medRecord === '600001');
 }
 
 console.log('\n[5] 排行歸一:PICC+AV 與 PICC 是同一件事');

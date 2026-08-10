@@ -113,8 +113,8 @@ console.log('\n[6] 貼上文字的加價項辨識(msDetectAddon)');
 {
   check('3D', J(api.msDetectAddon('3D')) === J(['d3', 1]));
   check('資源共享*4 → count 4', J(api.msDetectAddon('資源共享*4')) === J(['source', 4]));
-  check('帶病歷號前綴 1371380 3D', J(api.msDetectAddon('1371380 3D')) === J(['d3', 1]));
-  check('PICC 不是加價項', api.msDetectAddon('1371380 PICC') === null);
+  check('帶病歷號前綴 7000001 3D', J(api.msDetectAddon('7000001 3D')) === J(['d3', 1]));
+  check('PICC 不是加價項', api.msDetectAddon('7000001 PICC') === null);
   check('空行 → null', api.msDetectAddon('  ') === null);
 }
 

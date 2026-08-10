@@ -143,20 +143,20 @@ console.log('\n[3] days 路徑:病歷號打字中,舊回音不得蓋掉');
 {
   const D = '2026-07-21';
   const mk = (mr) => ({ counts: {}, procedures: [{ presetId: 'p', medRecord: mr }], meetings: [], updatedAt: 't' + mr.length });
-  const data = { days: { [D]: mk('137') }, pending: {}, settings: {} };
+  const data = { days: { [D]: mk('700') }, pending: {}, settings: {} };
   api.setData(clone(data));
   api.setBase(api.snapshotOf(data));
 
-  // 打到 1371380,期間送出兩次
-  api.getData().days[D].procedures[0].medRecord = '13713';
-  api.noteSent('days/' + D, mk('13713'));
-  api.getData().days[D].procedures[0].medRecord = '1371380';
-  api.noteSent('days/' + D, mk('1371380'));
-  api.setBase(api.snapshotOf({ days: { [D]: mk('1371380') }, pending: {}, settings: {} }));
+  // 打到 7000001,期間送出兩次
+  api.getData().days[D].procedures[0].medRecord = '70000';
+  api.noteSent('days/' + D, mk('70000'));
+  api.getData().days[D].procedures[0].medRecord = '7000001';
+  api.noteSent('days/' + D, mk('7000001'));
+  api.setBase(api.snapshotOf({ days: { [D]: mk('7000001') }, pending: {}, settings: {} }));
 
   const before = renderCount;
-  api.applyIncoming({ days: { [D]: mk('13713') }, pending: {}, settings: {} });   // 過期回音
-  check('病歷號沒被截短', api.getData().days[D].procedures[0].medRecord === '1371380',
+  api.applyIncoming({ days: { [D]: mk('70000') }, pending: {}, settings: {} });   // 過期回音
+  check('病歷號沒被截短', api.getData().days[D].procedures[0].medRecord === '7000001',
         '實際 = ' + api.getData().days[D].procedures[0].medRecord);
   check('沒有 renderAll', renderCount === before);
 }

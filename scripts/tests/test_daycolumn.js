@@ -49,7 +49,7 @@ let pass = 0, fail = 0;
 const chk = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? '  → ' + JSON.stringify(e) : '')); } };
 
 // Excel 剪貼簿：含 \n 的 cell 會被 "..." 包住
-const DETAIL_0708 = '"507510 NB\n1736240 NB\n933657 NB\nG36487 NB\nY11134 NB"';
+const DETAIL_0708 = '"600003 NB\n7000003 NB\n600004 NB\nG60001 NB\nY60002 NB"';
 const COL_0708 = [
   '8',            // row1 日期
   '5', '', '', '', '', '28', '', '1', '1', '19', '', '', '2', '25',   // row2-15 計數
@@ -63,10 +63,10 @@ const COL_0708 = [
 const COL_0709 = [
   '9',
   '15', '1', '', '3', '2', '13', '1', '1', '1', '25', '', '1', '', '',
-  '339804 cTAME',
+  '600002 cTAME',
   '22466',
   '9400',
-  '"339804 cTAME & 1500 SONO\n資源共享\n3D"',
+  '"600002 cTAME & 1500 SONO\n資源共享\n3D"',
   '3',
 ].join('\r\n');
 
@@ -80,7 +80,7 @@ console.log('--- 7/8：5 筆 NB，detail 重複兩次不得變 10 筆 ---');
   chk('加班 = 1', p.overtimeHours === 1, p.overtimeHours);
   chk('procedure 恰 5 筆（未重複）', p.procedures.length === 5, p.procedures.length);
   chk('全部是 NB', p.procedures.every(x => x.presetName === 'NB'), p.procedures.map(x => x.presetName));
-  chk('病歷號正確', p.procedures.map(x => x.medRecord).join(',') === '507510,1736240,933657,G36487,Y11134', p.procedures.map(x => x.medRecord));
+  chk('病歷號正確', p.procedures.map(x => x.medRecord).join(',') === '600003,7000003,600004,G60001,Y60002', p.procedures.map(x => x.medRecord));
   const c = Object.fromEntries(p.counts.map(x => [x.key, x.value]));
   chk('CT主=5', c['ct.opd'] === 5, c);
   chk('BMD=28', c['bmd'] === 28, c);
@@ -98,7 +98,7 @@ console.log('--- 7/9：後面那格才有 資源共享 / 3D ---');
   chk('日 IR = 9400', p.irRevenue === 9400, p.irRevenue);
   chk('加班 = 3', p.overtimeHours === 3, p.overtimeHours);
   chk('procedure 恰 1 筆 cTAME（未重複）', p.procedures.length === 1 && p.procedures[0].presetName === 'cTAME', p.procedures.map(x => x.presetName));
-  chk('病歷號 339804', p.procedures[0] && p.procedures[0].medRecord === '339804', p.procedures[0]);
+  chk('病歷號 600002', p.procedures[0] && p.procedures[0].medRecord === '600002', p.procedures[0]);
   chk('抓到 2 個 addon', p.addons.length === 2, p.addons);
   chk('含 資源共享(source)', p.addons.some(a => a.type === 'source'), p.addons);
   chk('含 3D', p.addons.some(a => a.type === 'd3'), p.addons);
@@ -130,7 +130,7 @@ console.log('--- 該天沒有 procedure（detail 兩格皆空）---');
 
 console.log('--- parseDetailCell：& 附註不影響術式判定 ---');
 {
-  const r = parseDetailCell('339804 cTAME & 1500 SONO\n資源共享\n3D', '2026-07-09');
+  const r = parseDetailCell('600002 cTAME & 1500 SONO\n資源共享\n3D', '2026-07-09');
   chk('1 筆 procedure', r.procedures.length === 1, r.procedures.map(p => p.presetName));
   chk('判定為 cTAME', r.procedures[0].presetName === 'cTAME');
   chk('2 個 addon', r.addons.length === 2, r.addons);
