@@ -2156,7 +2156,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.11b';
+const APP_VERSION = '2026.08.11c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3958,6 +3958,10 @@ function renderCountsPanel() {
         subText,
         unitPrice > 0 ? el('span', { class: 'count-unitprice' }, `(${fmtMoney(unitPrice)})`) : null
       );
+      // 時間欄要放在 subLabel **裡面**，不能當同層兄弟 ——
+      // .count-sublabel 是 flex:1，同層多一個元素會吃掉它的寬度，
+      // 把金額與 ± 一起往左推，這列就跟其他列對不齊。
+      if (child.key === 'opd') subLabel.appendChild(dayTimeFields('opdStart', 'opdEnd', '門診', 'opd'));
 
       // 門診是「一整個上午」而不是一件件發生的 —— 件數一次補登,
       // log 上只會看到補登那一刻的假尖峰,門診那幾小時反而是空白。
@@ -3972,7 +3976,6 @@ function renderCountsPanel() {
             oninput: (e) => setCountAndRender(child.key, e.target.value), onfocus: countSelectFocus, onkeydown: countKeyNav }),
           el('button', { class: 'btn-step', tabindex: '-1', onclick: () => bumpCount(child.key, +1) }, '＋')
         )];
-      if (child.key === 'opd') rowKids.push(dayTimeFields('opdStart', 'opdEnd', '門診', 'opd'));
       groupEl.appendChild(el('div', { class: 'count-row' }, ...rowKids));
     }
     c.appendChild(groupEl);
