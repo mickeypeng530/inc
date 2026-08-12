@@ -41,10 +41,12 @@ const api = new Function('PRICES', `
   ${grabFn('normalizeTime')} ${grabFn('spanMinutes')}
   ${grabFn('xhPrices')} ${grabFn('xhCount')} ${grabFn('xhTotalCount')} ${grabFn('calcXhRevenue')}
   ${grabFn('parseXhRow')} ${grabFn('applyXhRow')}
+  ${grabFn('xhResolveKey')} ${grabFn('xhEventTime')} ${grabFn('parseXhEvents')} ${grabFn('parseXhPaste')}
   ${grabFn('dayDuration')}
   ${grabFn('getCount')} ${grabFn('specialOthersTotalRev')} ${grabFn('getSpecialOthers')}
   ${grabFn('calcBaseRevenue')}
   return { calcXhRevenue, xhTotalCount, calcBaseRevenue, parseXhRow, applyXhRow, dayDuration,
+           xhResolveKey, xhEventTime, parseXhEvents, parseXhPaste,
            DAYS, getDay, savedCount: () => saved, touchedList: () => touched };
 `)(PRICES);
 
@@ -187,6 +189,68 @@ console.log('[7] ⭐ 匯入也不碰主帳(隔離不是靠記得,是那條路徑
   check('但中興確實寫進去了', api.xhTotalCount(day) === 22, String(api.xhTotalCount(day)));
   check('中興金額 = 10000+2000+2400+800+700+900 = $16,800',
         api.calcXhRevenue(day, S) === 16800, String(api.calcXhRevenue(day, S)));
+}
+
+console.log('');
+console.log('[8] 逐筆時間 log —— 中興在現場即時按時會送這個');
+{
+  const E = api.parseXhEvents, K = api.xhResolveKey;
+  check('項目名認 key', K('mriNc') === 'mriNc' && K('MRINC') === 'mriNc');
+  check('項目名也認中文 label', K('額外 MRI 不打藥') === 'mriNc' && K('額外MRI不打藥') === 'mriNc');
+  check('不認得的回 null', K('CT NB') === null && K('') === null);
+
+  const t = api.xhEventTime;
+  check('HH:MM', t('09:32').time === '09:32');
+  check('HH:MM:SS', t('09:32:11').time === '09:32');
+  check('完整 ISO 也吃(並帶出日期)',
+        t('2026-08-07T01:32:00.000Z').time.length === 5 && !!t('2026-08-07T01:32:00.000Z').date);
+  check('看不出時間 → null', t('abc') === null && t('') === null);
+
+  const p = E('2026-08-07\t09:32\tmriNc\t1\n2026-08-07\t09:45\tca\t2\n2026-08-07\t10:03\tmriBase\t10');
+  check('件數由逐筆加總', p.counts.mriNc === 1 && p.counts.ca === 2 && p.counts.mriBase === 10, JSON.stringify(p.counts));
+  check('時段取首末筆', p.start === '09:32' && p.end === '10:03', `${p.start}/${p.end}`);
+  check('日期從列裡撿出來', p.date === '2026-08-07', String(p.date));
+  check('保留逐筆(要寫進 activity log)', p.events.length === 3);
+  check('逐筆已按時間排序', p.events[0].time === '09:32' && p.events[2].time === '10:03');
+
+  check('數量省略當 1', E('09:32\tmriNc').counts.mriNc === 1);
+  check('沒有日期欄也行', E('09:32\tmriNc\t1').date === null);
+  check('空白分隔也認', E('09:32 mriNc 1\n09:45 ca 2').counts.ca === 2);
+
+  const neg = E('09:32\tca\t2\n09:40\tca\t-1');
+  check('負數會抵銷(按錯改回來)', neg.counts.ca === 1, String(neg.counts.ca));
+  const allNeg = E('09:32\tca\t1\n09:40\tca\t-3');
+  check('淨值為負 → 夾 0 + 警告', allNeg.counts.ca === 0 && allNeg.warnings.some(w => /負/.test(w)),
+        JSON.stringify(allNeg.warnings));
+
+  const mixed = E('09:32\tmriNc\t1\n這行是垃圾\n09:45\tCT NB\t1\n09:50\tca\t1');
+  check('壞列跳過但不中斷', mixed.counts.mriNc === 1 && mixed.counts.ca === 1 && mixed.warnings.length === 2,
+        JSON.stringify(mixed.warnings));
+  check('完全解析不到 → error', !!E('全都是垃圾\n沒有東西').error);
+}
+
+console.log('');
+console.log('[9] parseXhPaste —— 一個入口自動分辨兩種格式');
+{
+  const P = api.parseXhPaste;
+  const row = P('2026-08-07\t09:30\t17:30\t10\t0\t5\t5\t0\t4');
+  check('彙總列 → mode=row', row.mode === 'row' && row.counts.mriBase === 10, row.mode);
+  const ev = P('09:32\tmriNc\t1\n09:45\tca\t2');
+  check('逐筆 → mode=events', ev.mode === 'events' && ev.events.length === 2, ev.mode);
+  check('⭐ 彙總列不會被誤判成逐筆(純數字沒有項目名)', P('10\t0\t5\t5\t0\t4').mode === 'row');
+}
+
+console.log('');
+console.log('[10] 逐筆匯入與彙總列走同一條寫入路徑');
+{
+  const D = '2026-08-21';
+  const p = api.parseXhPaste('2026-08-21\t09:32\tmriBase\t10\n2026-08-21\t11:00\tmriNc\t5\n2026-08-21\t15:20\tca\t5');
+  api.applyXhRow(D, p);
+  check('件數寫入', JSON.stringify(api.DAYS[D].xh) === JSON.stringify({ mriBase: 10, mriNc: 5, ca: 5 }),
+        JSON.stringify(api.DAYS[D].xh));
+  check('起訖用首末筆', api.DAYS[D].xhStart === '09:32' && api.DAYS[D].xhEnd === '15:20');
+  check('金額 = 10000 + 4000 + 1000 = $15,000', api.calcXhRevenue(api.DAYS[D], S) === 15000,
+        String(api.calcXhRevenue(api.DAYS[D], S)));
 }
 
 console.log('');

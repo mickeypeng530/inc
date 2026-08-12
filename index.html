@@ -2161,7 +2161,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.11d';
+const APP_VERSION = '2026.08.13';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3647,6 +3647,97 @@ function refreshXhTotal() {
     elm.textContent = v > 0 ? '$' + fmtMoney(v * (Number(p[it.priceKey]) || 0)) : '';
   });
 }
+// ---- 中興逐筆時間 log ----
+// 另一個專案若在現場即時按計數,就會送逐筆時間 —— 那是真的工作時刻,值得進 activity log
+// (事後補登的則不要送,那些時間戳是補登時刻,會把假設偽裝成量測)。
+// 一列一筆:`[日期] ⇥ 時間 ⇥ 項目 ⇥ 數量`。時間吃 HH:MM / HH:MM:SS / 完整 ISO;數量省略當 1,可負(按錯改回來)。
+// 刻意不建快取表 —— 只有 6 項,而且純函式才抽得進測試 harness
+// (harness 用大括號配對抽函式,IIFE const 接不了;為了測試去重寫一份對照表 = 假綠燈)。
+function xhResolveKey(raw) {
+  const k = String(raw == null ? '' : raw).trim();
+  if (!k) return null;
+  const lk = k.toLowerCase(), nk = k.replace(/\s+/g, '');
+  for (const it of XH_SCHEMA) {
+    if (it.key.toLowerCase() === lk) return it.key;
+    if (it.label.replace(/\s+/g, '') === nk) return it.key;
+  }
+  return null;
+}
+// 回傳 { time:'HH:MM', date:'YYYY-MM-DD'|null };看不出時間回 null
+function xhEventTime(raw) {
+  const v = String(raw == null ? '' : raw).trim();
+  if (!v) return null;
+  if (v.includes('T')) {                      // 完整 ISO → 轉「當地」時分(兩邊同時區)
+    const d = new Date(v);
+    if (isNaN(d)) return null;
+    const pad = (n) => String(n).padStart(2, '0');
+    return { time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+             date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` };
+  }
+  const mm = v.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!mm) return null;
+  const t = normalizeTime(`${mm[1]}:${mm[2]}`);
+  return t ? { time: t, date: null } : null;
+}
+function parseXhEvents(text) {
+  const out = { mode: 'events', date: null, start: '', end: '', counts: {}, events: [], warnings: [] };
+  for (const it of XH_SCHEMA) out.counts[it.key] = 0;
+  const lines = String(text || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  for (const line of lines) {
+    const f = (line.includes('\t') ? line.split('\t') : line.split(/\s+/)).map(x => x.trim()).filter(x => x !== '');
+    let i = 0;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(f[0] || '')) { if (!out.date) out.date = f[0]; i = 1; }
+    const tm = xhEventTime(f[i]);
+    if (!tm) { out.warnings.push(`跳過(看不出時間):${line}`); continue; }
+    if (tm.date && !out.date) out.date = tm.date;
+    const key = xhResolveKey(f[i + 1]);
+    if (!key) { out.warnings.push(`跳過(不是中興項目):${line}`); continue; }
+    const raw = f[i + 2];
+    const d = (raw == null || raw === '') ? 1 : Number(String(raw).replace(/,/g, ''));
+    if (!Number.isFinite(d) || d === 0) { out.warnings.push(`跳過(數量無效):${line}`); continue; }
+    out.events.push({ time: tm.time, key, d: Math.round(d) });
+  }
+  if (!out.events.length) return { error: '沒有解析到任何逐筆紀錄' };
+  out.events.sort((a, b) => a.time.localeCompare(b.time));
+  for (const e of out.events) out.counts[e.key] += e.d;
+  // 加減抵銷後可能是負的(送了沒合併的中間值)→ 夾 0 並提醒
+  for (const it of XH_SCHEMA) if (out.counts[it.key] < 0) {
+    out.warnings.push(`${it.label} 淨值為負,已當 0`);
+    out.counts[it.key] = 0;
+  }
+  out.start = out.events[0].time;
+  out.end = out.events[out.events.length - 1].time;
+  return out;
+}
+// 一個入口吃兩種格式:有認得出的項目名 = 逐筆;否則當單日彙總那一列。
+function parseXhPaste(text) {
+  const lines = String(text || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  const looksEvent = lines.some(l => {
+    const f = (l.includes('\t') ? l.split('\t') : l.split(/\s+/)).map(x => x.trim());
+    return f.some(x => xhResolveKey(x));
+  });
+  return looksEvent ? parseXhEvents(text) : Object.assign({ mode: 'row' }, parseXhRow(text));
+}
+// 逐筆寫進 activity log(兄弟節點,不進同步管線)。
+// ⚠ id 是**決定性的**(xh_<HHMM>_<key>_<idx>)且寫入前先清掉當天既有的 xh_ 筆 ——
+//    否則重複貼會變成兩倍,與計數那邊「取代當天」的語意不一致。
+// 失敗只吞掉不擋 —— 計數已經寫好了,activity log 是附加價值,不能拖垮主流程。
+function writeXhActivity(date, events) {
+  if (!activityPath || !fbDB) return;
+  const dayRef = ref(fbDB, `${activityPath}/${date}`);
+  const build = (existing) => {
+    const updates = {};
+    for (const k of Object.keys(existing || {})) if (k.startsWith('xh_')) updates[k] = null;
+    events.forEach((e, i) => {
+      const iso = new Date(`${date}T${e.time}:00`).toISOString();   // 當地時間 → UTC(不要自己加 Z)
+      updates[`xh_${e.time.replace(':', '')}_${e.key}_${i}`] = { t: iso, k: 'xh.' + e.key, d: e.d, src: 'xh' };
+    });
+    return updates;
+  };
+  withTimeout(get(dayRef), CLOUD_TIMEOUT_MS, '讀 activity log 逾時')
+    .then(snap => update(dayRef, build(snap.val())))
+    .catch(() => { try { update(dayRef, build(null)).catch(() => {}); } catch (e) {} });
+}
 // 中興單日匯入:一列 TSV「日期 ⇥ 起 ⇥ 訖 ⇥ 6 個件數」。
 // 日期與起訖都可省略 —— 只貼 6 個數字也認。判別靠「扣掉日期後還剩幾格」:
 // 剩 8 格 = 有起訖(可能是空字串),剩 6 格 = 只有件數。
@@ -3690,6 +3781,10 @@ function applyXhRow(date, p) {
   touchDay(date);
   storage.save(state.data);
 }
+function applyXhPaste(date, p) {
+  applyXhRow(date, p);                      // 計數/起訖:兩種格式共用同一條寫入路徑
+  if (p.mode === 'events' && p.events && p.events.length) writeXhActivity(date, p.events);
+}
 function showXhImportModal() {
   const overlay = el('div', { class: 'modal-overlay' });
   const close = () => overlay.remove();
@@ -3701,7 +3796,7 @@ function showXhImportModal() {
     preview.innerHTML = '';
     parsed = null;
     if (!ta.value.trim()) { preview.appendChild(el('div', { class: 'paste-count-hint' }, '貼上後這裡會顯示將寫入什麼')); return; }
-    const p = parseXhRow(ta.value);
+    const p = parseXhPaste(ta.value);
     if (p.error) { preview.appendChild(el('div', { class: 'paste-count-hint', style: 'color:var(--warn,#da3)' }, '⚠️ ' + p.error)); return; }
     parsed = p;
     target = p.date || state.currentDate;
@@ -3721,6 +3816,9 @@ function showXhImportModal() {
         el('td', { style: nv ? 'color:var(--accent);font-weight:600' : 'color:var(--ink-muted)' }, String(nv)),
         el('td', { style: 'color:var(--ink-muted)' }, ov ? String(ov) : '—')));
     }
+    if (p.mode === 'events')
+      preview.appendChild(el('div', { class: 'paste-count-hint' },
+        `逐筆 ${p.events.length} 筆 → 件數由逐筆加總、時段取首末筆;會一併寫進 ⏱ 操作記錄(重貼會取代,不會變兩倍)`));
     tbl.appendChild(el('tr', null, el('td', null, '時段'),
       el('td', null, (p.start || p.end) ? `${p.start || '?'}–${p.end || '?'}` : '—'),
       el('td', { style: 'color:var(--ink-muted)' }, (before.xhStart || before.xhEnd) ? `${before.xhStart || '?'}–${before.xhEnd || '?'}` : '—')));
@@ -3736,18 +3834,19 @@ function showXhImportModal() {
   const modal = el('div', { class: 'modal paste-modal' },
     el('h3', null, '📥 匯入中興(單日)'),
     el('p', { class: 'settings-hint', style: 'margin:4px 0 10px' },
-      '一列:日期 ⇥ 起 ⇥ 訖 ⇥ 基本MRI ⇥ MRI打藥 ⇥ MRI不打藥 ⇥ Ca ⇥ CT打藥 ⇥ CT不打藥。日期/起訖可省略。套用 = 取代當天的中興資料,不動主帳。'),
+      '兩種都吃:①彙總一列「日期 ⇥ 起 ⇥ 訖 ⇥ 6 個件數」 ②逐筆「[日期] ⇥ 時間 ⇥ 項目 ⇥ 數量」(件數自動加總、時段取首末筆)。套用 = 取代當天的中興資料,不動主帳。'),
     el('div', { class: 'paste-body' }, ta, preview),
     el('div', { class: 'modal-actions' },
       el('button', { class: 'btn-secondary', onclick: close }, '取消'),
       el('button', { class: 'btn-primary', onclick: () => {
         if (!parsed) { toast('沒有可套用的內容', ''); return; }
-        applyXhRow(target, parsed);
+        applyXhPaste(target, parsed);
         close();
         if ($('view-today').classList.contains('active')) renderToday();
         if ($('view-month').classList.contains('active')) renderMonth();
         renderStatsPanel();
-        toast(`✓ 已寫入 ${target} 的中興資料`, 'success');
+        toast(`✓ 已寫入 ${target} 的中興資料`
+          + (parsed.mode === 'events' ? `(逐筆 ${parsed.events.length} 筆)` : ''), 'success');
       } }, '套用')));
   overlay.appendChild(modal);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
