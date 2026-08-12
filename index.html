@@ -2150,7 +2150,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.07d';
+const APP_VERSION = '2026.08.11';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3249,6 +3249,10 @@ function activityLabel(k) {
     return '會議 ' + (c ? c.name : k.slice(4));
   }
   if (k.startsWith('addon.')) return k.slice(6) === 'd3' ? '3D' : '資源共享';
+  if (k.startsWith('xh.')) {
+    const it = XH_SCHEMA.find(x => x.key === k.slice(3));
+    return '中興 ' + (it ? it.label : k.slice(3));
+  }
   if (k.startsWith('special.') && SPECIAL_OTHER_CAT_MAP[k.slice(8)]) return 'Special ' + SPECIAL_OTHER_CAT_MAP[k.slice(8)].name;
   for (const grp of COUNTS_SCHEMA) for (const c of flatChildren(grp)) {
     if (c.key === k) return `${grp.group}${c.label ? ' ' + c.label : ''}`;
@@ -3344,10 +3348,16 @@ function calcXhRevenue(day, settings) {
 }
 function setXhCount(key, val) {
   const day = getDay(state.currentDate);
+  const before = xhCount(day, key);
   const v = Math.max(0, Math.round(Number(val) || 0));
   if (!day.xh) day.xh = {};
   if (v) day.xh[key] = v; else delete day.xh[key];
   if (!Object.keys(day.xh).length) delete day.xh;   // 空了就整個拿掉(RTDB 不存空物件)
+  // 中興也要進 activity log —— 不記的話那幾小時在 log 上是一整片空白,
+  // 「空檔 = 閒置」的分析會把當天最賺的時段判成偷懶。
+  // 2026-08-07 實例:12:04→19:00 那 6.9 小時「空檔」其實做了 24 件、$16,800。
+  // 打字中間值會在 logActivity 的 1.5s 緩衝內互相抵銷,只留淨變化(同計數直填)。
+  logActivity('xh.' + key, v - before);
   touchDay(state.currentDate);
   scheduleSave('saveDebounce', () => storage.save(state.data), 400);
 }
