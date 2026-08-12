@@ -388,7 +388,12 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
 .proc-item-detail.has-time { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .proc-dur { font-family: var(--font-mono); font-size: 11px; color: var(--accent); white-space: nowrap; }
 /* 計數列尾端的時段欄(門診 / 中興)—— 沒填就是一對空框,不押位子 */
-.day-time { margin-left: 6px; }
+/* .proc-item-detail 是區塊層級 → 在 sublabel 裡會自己佔一行(跑到「OPD看診」下面)。
+   改 inline-flex + 不換行,並靠 margin-left:auto 推到 sublabel 右緣 = 緊貼金額左邊。
+   ⚠ proc-item-detail 這個 class 不能拿掉 —— timeField 的自動跳欄靠 closest() 找它。 */
+.proc-item-detail.has-time.day-time { display: inline-flex; flex-wrap: nowrap; margin: 0 6px 0 0; }
+.count-sublabel.has-daytime { display: flex; align-items: center; gap: 4px; }
+.count-sublabel.has-daytime > .day-time { margin-left: auto; }
 .xh-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
 .btn-xh-import { padding: 2px 8px; font-size: 11px; }
 .day-time .proc-time { width: 46px; }
@@ -2156,7 +2161,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.11c';
+const APP_VERSION = '2026.08.11d';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3961,7 +3966,10 @@ function renderCountsPanel() {
       // 時間欄要放在 subLabel **裡面**，不能當同層兄弟 ——
       // .count-sublabel 是 flex:1，同層多一個元素會吃掉它的寬度，
       // 把金額與 ± 一起往左推，這列就跟其他列對不齊。
-      if (child.key === 'opd') subLabel.appendChild(dayTimeFields('opdStart', 'opdEnd', '門診', 'opd'));
+      if (child.key === 'opd') {
+        subLabel.classList.add('has-daytime');
+        subLabel.appendChild(dayTimeFields('opdStart', 'opdEnd', '門診', 'opd'));
+      }
 
       // 門診是「一整個上午」而不是一件件發生的 —— 件數一次補登,
       // log 上只會看到補登那一刻的假尖峰,門診那幾小時反而是空白。
