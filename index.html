@@ -1158,6 +1158,8 @@ select.btn-secondary option {
 .mini-cal-day.we { color: var(--ink-muted); }
 .mini-cal-day.today { outline: 1px solid var(--accent); }
 .mini-cal-day.booked { background: var(--accent); color: #0e0f12; font-weight: 600; }
+/* 帶註記的日子(例 (no IR))淡一階 —— 是附帶條件,不是整天不值班 */
+.mini-cal-day.booked-note { background: var(--accent); color: #0e0f12; opacity: .42; }
 .schedule-month-block.collapsed .schedule-month-body { display: none; }
 .schedule-duty-row {
   display: grid;
@@ -1199,6 +1201,7 @@ select.btn-secondary option {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
+.noduty-note { color: var(--ink-muted); }
 .schedule-overview-dates-line {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -2170,7 +2173,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.13f';
+const APP_VERSION = '2026.08.13g';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5121,6 +5124,19 @@ function noDutyOverviewText(month) {
   const t = aggregateNoDutyTokens(month);
   return t.length ? t.map(fmtNoDutyToken).join(', ') : '—';
 }
+// 註記(例 (no IR))用淡色 —— 它是附帶條件,不該跟日期搶注意力。
+// 這裡重建的是純顯示用的 span,沒有 input,不涉及焦點問題。
+function renderNoDutyOverviewInto(elm, month) {
+  const toks = aggregateNoDutyTokens(month);
+  elm.innerHTML = '';
+  if (!toks.length) { elm.textContent = '—'; return; }
+  toks.forEach((t, i) => {
+    if (i) elm.appendChild(document.createTextNode(', '));
+    const range = t.from === t.to ? `${t.from}` : `${t.from}-${t.to}`;
+    elm.appendChild(document.createTextNode(`${t.mon ? t.mon + '/' : ''}${range}`));
+    if (t.note) elm.appendChild(el('span', { class: 'noduty-note' }, ' ' + t.note));
+  });
+}
 // 天數:區間要展開才數得對(9/3-5 是 3 天);同月同日只算一次
 function aggregateNoDutyDates(month) {
   const days = new Set();
@@ -5160,7 +5176,7 @@ function renderScheduleBlock() {
   container.innerHTML = '';
   container.appendChild(renderScheduleMonthBlock(cur));
   container.appendChild(renderScheduleMonthBlock(nxt));
-  refreshMiniCalendar();
+  refreshNoDutyOverview();          // 統整列的內容由 refresh 填(註記要拆成淡色 span)
 }
 
 // 展開時旁邊的小月曆 —— 填日期時可以直接看「幾號星期幾」,不用另外開行事曆。
@@ -5197,11 +5213,15 @@ function refreshMiniCalendar(month) {
     const m = cal.getAttribute('data-cal-month');
     if (month && m !== month) return;
     const mm = Number(m.slice(5, 7));
-    const booked = new Set();
+    const booked = new Set(), noted = new Set();
     for (const t of aggregateNoDutyTokens(m))
-      if (t.mon === mm) for (let d = t.from; d <= t.to; d++) booked.add(d);
-    cal.querySelectorAll('[data-cal-day]').forEach(c =>
-      c.classList.toggle('booked', booked.has(Number(c.getAttribute('data-cal-day')))));
+      if (t.mon === mm) for (let d = t.from; d <= t.to; d++) (t.note ? noted : booked).add(d);
+    cal.querySelectorAll('[data-cal-day]').forEach(c => {
+      const d = Number(c.getAttribute('data-cal-day'));
+      // 同一天既有整天預約又有帶註記的 → 以「整天」為準(較強的那個)
+      c.classList.toggle('booked', booked.has(d));
+      c.classList.toggle('booked-note', !booked.has(d) && noted.has(d));
+    });
   });
 }
 function renderScheduleMonthBlock(month) {
@@ -5233,8 +5253,7 @@ function renderScheduleMonthBlock(month) {
   // 兩者可以互相矛盾 —— 同 includeInStats / 門診勾勾那個教訓。
   // (移除前確認過 monthlyMeta 沒有任何一個月填過 noDutyOverviewNote,零資料損失。)
   main.appendChild(el('div', { class: 'schedule-overview-row' },
-    el('span', { class: 'schedule-overview-dates-line', 'data-noduty-overview': month },
-      noDutyOverviewText(month))
+    el('span', { class: 'schedule-overview-dates-line', 'data-noduty-overview': month })
   ));
 
   // event 列表
@@ -5300,7 +5319,7 @@ function refreshNoDutyOverview(month) {
   document.querySelectorAll('[data-noduty-overview]').forEach(elm => {
     const m = elm.getAttribute('data-noduty-overview');
     if (month && m !== month) return;
-    elm.textContent = noDutyOverviewText(m);
+    renderNoDutyOverviewInto(elm, m);
     const head = elm.closest('.schedule-month-block');
     const sum = head && head.querySelector('.schedule-month-summary');
     if (sum) { const n = aggregateNoDutyDates(m).length; sum.textContent = n ? `${n} 天` : '—'; }
