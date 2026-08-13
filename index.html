@@ -2191,7 +2191,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.13i';
+const APP_VERSION = '2026.08.13j';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5174,9 +5174,10 @@ function renderScheduleBlock() {
   if (!container) return;
   const cur = state.currentMonth;
   const nxt = nextMonthOf(cur);
-  // 預設:本月開、下月收合
-  if (state.scheduleBlocks[cur] === undefined) state.scheduleBlocks[cur] = true;
-  if (state.scheduleBlocks[nxt] === undefined) state.scheduleBlocks[nxt] = false;
+  // 預設:**下月開、本月收合** —— 預約不值班是提前排的,本月多半已成定局。
+  // 只在「還沒手動動過」時套用(undefined 才設),使用者自己開合過就尊重他的選擇。
+  if (state.scheduleBlocks[nxt] === undefined) state.scheduleBlocks[nxt] = true;
+  if (state.scheduleBlocks[cur] === undefined) state.scheduleBlocks[cur] = false;
 
   // panel summary 旁的 dutyNote inline 編輯
   const dutyInline = $('schedule-duty-inline');
