@@ -2170,7 +2170,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.13e';
+const APP_VERSION = '2026.08.13f';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5168,13 +5168,15 @@ function renderScheduleBlock() {
 // 已預約的日子會標色:一邊打一邊對照,比事後檢查有用。
 function renderMiniCalendar(month) {
   const y = Number(month.slice(0, 4)), m = Number(month.slice(5, 7));
-  const lead = new Date(y, m - 1, 1).getDay();      // 0 = 週日
+  // 週一起始、週日排最右 → 前置空格要把 getDay()(0=週日)轉成「距離週一幾格」。
+  // 直接用 getDay() 會讓整排位移一格。
+  const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;
   const total = new Date(y, m, 0).getDate();        // 該月天數(下個月的第 0 天)
   const today = todayISO();
   const wrap = el('div', { class: 'mini-cal', 'data-cal-month': month });
   wrap.appendChild(el('div', { class: 'mini-cal-title' }, `${m} 月`));
   const grid = el('div', { class: 'mini-cal-grid' });
-  for (const w of ['日', '一', '二', '三', '四', '五', '六'])
+  for (const w of ['一', '二', '三', '四', '五', '六', '日'])
     grid.appendChild(el('div', { class: 'mini-cal-wd' }, w));
   for (let i = 0; i < lead; i++) grid.appendChild(el('div', { class: 'mini-cal-pad' }, ''));
   for (let d = 1; d <= total; d++) {
