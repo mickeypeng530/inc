@@ -1213,6 +1213,11 @@ select.btn-secondary option {
   padding: 3px 4px;
   font-size: 12px;
   font-family: var(--font-ui);
+  line-height: 1.5;
+  resize: vertical;              /* field-sizing 不支援時,至少可以自己拉 */
+  overflow-wrap: break-word;
+  field-sizing: content;         /* 內容變多自動長高(Chrome) */
+  min-height: 22px;
 }
 .schedule-month-note:focus { outline: none; border-bottom-color: var(--accent); }
 .schedule-overview-dates-line {
@@ -2186,7 +2191,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.13h';
+const APP_VERSION = '2026.08.13i';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5313,11 +5318,11 @@ function renderScheduleMonthBlock(month) {
   // 月層級備註(整月一句話)。與各日期後面的括號註記語意不同 ——
   // 那個是「這幾天有什麼附帶條件」,這個是「這個月整體要記的事」。
   // ⚠ 用新 key noDutyNote,不沿用已移除的 noDutyOverviewNote(名字會誤導,而且那欄零資料)。
-  const noteInput = el('input', {
-    class: 'schedule-month-note', type: 'text',
-    value: (state.data.monthlyMeta?.[month] || {}).noDutyNote || '',
-    placeholder: '本月備註',
+  // textarea 不是 input —— 備註寫長要自動換行、自動長高(field-sizing: content)
+  const noteInput = el('textarea', {
+    class: 'schedule-month-note', rows: '1', placeholder: '本月備註',
   });
+  noteInput.value = (state.data.monthlyMeta?.[month] || {}).noDutyNote || '';
   // 打字輸入一律 debounce 400 且共用 saveDebounce;不重建 DOM(同其他輸入欄)
   noteInput.addEventListener('input', (e) => {
     if (!state.data.monthlyMeta) state.data.monthlyMeta = {};
