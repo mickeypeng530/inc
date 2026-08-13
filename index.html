@@ -396,6 +396,9 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
 .count-sublabel.has-daytime > .day-time { margin-left: auto; }
 .xh-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
 .btn-xh-import { padding: 2px 8px; font-size: 11px; }
+.schedule-drag-handle { cursor: grab; color: var(--ink-muted); font-size: 12px; user-select: none; padding: 0 2px; letter-spacing: -2px; }
+.schedule-drag-handle:active { cursor: grabbing; }
+.schedule-event-row.dragging { opacity: .45; }
 .day-time .proc-time { width: 46px; }
 .proc-item span.drag-handle {   /* procedure 清單的拖曳把手(span 版;設定頁的是 td) */
   cursor: grab;
@@ -2161,7 +2164,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.13';
+const APP_VERSION = '2026.08.13b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5072,23 +5075,52 @@ function syncPendingFromCount(countKey, delta) {
 }
 
 // --- Schedule events (不值班預約) ---
-function aggregateNoDutyDates(month) {
-  const events = (state.data.scheduleEvents || []).filter(e => e.month === month && e.type === 'noDuty');
-  const dates = new Set();
-  for (const e of events) {
-    const tokens = (e.dates || '').split(/[\s,，、]+/).filter(Boolean);
-    for (const tok of tokens) {
-      const m = tok.match(/^(\d+)\s*-\s*(\d+)$/);
-      if (m) {
-        const a = Number(m[1]), b = Number(m[2]);
-        for (let d = Math.min(a,b); d <= Math.max(a,b); d++) dates.add(d);
-      } else {
-        const n = Number(tok);
-        if (n >= 1 && n <= 31) dates.add(n);
-      }
-    }
+// 日期是「一段一段的預約」,不是一堆散日 —— 統整列要保留使用者寫的區間與註記:
+//   下面兩列  `9/2` / `9/3-5, 9/6 (no IR)`
+//   上面統整  `9/2, 9/3-5, 9/6 (no IR)`
+// ⚠ **刻意不把相鄰的併起來**(9/2 + 9/3-5 不會變成 9/2-5)—— 那是兩筆不同的預約,
+//    併掉就看不出原本申請了幾次;要的是排序 + 去重 + 串起來,不是重新分段。
+const NODUTY_TOKEN_RE = /(?:(\d{1,2})\s*\/\s*)?(\d{1,2})(?:\s*[-–~]\s*(\d{1,2}))?\s*(\([^)]*\))?/g;
+function parseNoDutyTokens(text, defMonth) {
+  const out = [];
+  const dm = Number(String(defMonth || '').slice(5, 7)) || 0;
+  for (const m of String(text || '').matchAll(NODUTY_TOKEN_RE)) {
+    const mon = m[1] ? Number(m[1]) : dm;
+    const from = Number(m[2]);
+    const to = m[3] ? Number(m[3]) : from;
+    if (!(from >= 1 && from <= 31) || !(to >= 1 && to <= 31)) continue;
+    out.push({ mon, from: Math.min(from, to), to: Math.max(from, to), note: (m[4] || '').trim() });
   }
-  return [...dates].sort((a,b) => a-b);
+  return out;
+}
+function fmtNoDutyToken(t) {
+  const range = t.from === t.to ? `${t.from}` : `${t.from}-${t.to}`;
+  return `${t.mon ? t.mon + '/' : ''}${range}${t.note ? ' ' + t.note : ''}`;
+}
+// 統整:把該月所有列的 token 收齊 → 依(月, 起日)排序 → 去重 → 串成一行
+function aggregateNoDutyTokens(month) {
+  const events = (state.data.scheduleEvents || []).filter(e => e.month === month && (e.type || 'noDuty') === 'noDuty');
+  const toks = [];
+  for (const e of events) toks.push(...parseNoDutyTokens(e.dates, month));
+  toks.sort((a, b) => (a.mon - b.mon) || (a.from - b.from) || (a.to - b.to));
+  const seen = new Set(), out = [];
+  for (const t of toks) {
+    const k = fmtNoDutyToken(t);
+    if (seen.has(k)) continue;
+    seen.add(k); out.push(t);
+  }
+  return out;
+}
+function noDutyOverviewText(month) {
+  const t = aggregateNoDutyTokens(month);
+  return t.length ? t.map(fmtNoDutyToken).join(', ') : '—';
+}
+// 天數:區間要展開才數得對(9/3-5 是 3 天);同月同日只算一次
+function aggregateNoDutyDates(month) {
+  const days = new Set();
+  for (const t of aggregateNoDutyTokens(month))
+    for (let d = t.from; d <= t.to; d++) days.add(t.mon + '/' + d);
+  return [...days];
 }
 
 function nextMonthOf(month) {
@@ -5165,25 +5197,47 @@ function renderScheduleMonthBlock(month) {
   });
 
   body.appendChild(el('div', { class: 'schedule-overview-row' },
-    el('span', { class: 'schedule-overview-dates-line' }, dates.length ? dates.join(' ') : '—'),
+    el('span', { class: 'schedule-overview-dates-line', 'data-noduty-overview': month },
+      noDutyOverviewText(month)),
     noteInput
   ));
 
   // event 列表
   const grid = el('div', { class: 'schedule-event-grid' });
-  for (const ev of events) {
+  events.forEach((ev, pos) => {
     const idx = state.data.scheduleEvents.indexOf(ev);
-    const reasonInput = el('input', { type: 'text', value: ev.reason || '', placeholder: '理由+預約日期(例:OPD 13 27)' });
-    reasonInput.addEventListener('input', (e) => updateScheduleEvent(idx, 'reason', e.target.value, false));
-    const datesInput = el('input', { type: 'text', value: ev.dates || '', placeholder: '不值班日期(例:11-13, 25-27)' });
-    datesInput.addEventListener('input', (e) => updateScheduleEvent(idx, 'dates', e.target.value, false));
-    grid.appendChild(el('div', { class: 'schedule-event-row' },
-      reasonInput,
-      datesInput,
+    const reasonInput = el('input', { type: 'text', value: ev.reason || '', placeholder: '理由(例:OPD、開會)' });
+    reasonInput.addEventListener('input', (e) => updateScheduleEvent(idx, 'reason', e.target.value));
+    const datesInput = el('input', { type: 'text', value: ev.dates || '',
+      placeholder: '日期(例:9/2, 9/3-5, 9/6 (no IR))' });
+    datesInput.addEventListener('input', (e) => updateScheduleEvent(idx, 'dates', e.target.value));
+    // 把手才可拖 —— 整列 draggable 會讓 input 沒辦法選字
+    const handle = el('span', { class: 'schedule-drag-handle', title: '拖曳排序' }, '⋮⋮');
+    const row = el('div', { class: 'schedule-event-row', 'data-pos': String(pos) },
+      handle, reasonInput, datesInput,
       el('button', { class: 'btn-row-del', title: '刪除',
         onclick: () => deleteScheduleEvent(idx) }, '×')
-    ));
-  }
+    );
+    handle.addEventListener('mousedown', () => { row.draggable = true; });
+    row.addEventListener('dragend', () => { row.draggable = false; row.classList.remove('dragging'); });
+    row.addEventListener('dragstart', (e) => {
+      _schedDrag = { month, from: pos };
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', String(pos)); } catch (err) {}
+    });
+    row.addEventListener('dragover', (e) => {
+      if (!_schedDrag || _schedDrag.month !== month) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+    });
+    row.addEventListener('drop', (e) => {
+      if (!_schedDrag || _schedDrag.month !== month) return;
+      e.preventDefault();
+      moveScheduleEvent(month, _schedDrag.from, pos);
+      _schedDrag = null;
+    });
+    grid.appendChild(row);
+  });
   body.appendChild(grid);
 
   body.appendChild(el('button', { class: 'schedule-add-btn',
@@ -5193,15 +5247,41 @@ function renderScheduleMonthBlock(month) {
   return block;
 }
 
-function updateScheduleEvent(idx, field, value, rerender) {
+let _schedDrag = null;
+// ⚠ 打字中**不可以**重建 DOM。舊版在 debounce 裡對 dates 欄呼叫 renderScheduleBlock(),
+//    整塊重畫 → 正在打的那格被砍掉重建 → 焦點消失(同待打面板/計數欄的老坑)。
+//    統整列改用 refreshNoDutyOverview() 只改 textContent。
+//    debounce 也從 250 拉到 400 並共用 'saveDebounce' —— 各自計時會產生重疊寫入。
+function updateScheduleEvent(idx, field, value) {
   const e = state.data.scheduleEvents[idx];
   if (!e) return;
   e[field] = value;
-  scheduleSave('schedDebounce', () => {
-    storage.save(state.data);
-    if (field === 'dates') renderScheduleBlock();   // 更新統整
-  }, 250);
-  if (rerender) renderScheduleBlock();
+  if (field === 'dates') refreshNoDutyOverview(e.month);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
+}
+function refreshNoDutyOverview(month) {
+  document.querySelectorAll('[data-noduty-overview]').forEach(elm => {
+    const m = elm.getAttribute('data-noduty-overview');
+    if (month && m !== month) return;
+    elm.textContent = noDutyOverviewText(m);
+    const head = elm.closest('.schedule-month-block');
+    const sum = head && head.querySelector('.schedule-month-summary');
+    if (sum) { const n = aggregateNoDutyDates(m).length; sum.textContent = n ? `${n} 天` : '—'; }
+  });
+}
+// 拖曳排序:UI 只顯示該月的子集,但 scheduleEvents 是全域陣列 ——
+// 先取出該月各筆在全域的位置,重排值之後放回同一組位置,其他月份的順序完全不動。
+function moveScheduleEvent(month, from, to) {
+  if (from === to || from == null || to == null) return;
+  const all = state.data.scheduleEvents || [];
+  const slots = [];
+  all.forEach((e, i) => { if (e.month === month && (e.type || 'noDuty') === 'noDuty') slots.push(i); });
+  if (from < 0 || from >= slots.length || to < 0 || to >= slots.length) return;
+  const vals = slots.map(i => all[i]);
+  vals.splice(to, 0, vals.splice(from, 1)[0]);
+  slots.forEach((slot, k) => { all[slot] = vals[k]; });
+  storage.save(state.data);
+  renderScheduleBlock();
 }
 function deleteScheduleEvent(idx) {
   state.data.scheduleEvents.splice(idx, 1);
