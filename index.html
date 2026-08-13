@@ -1171,8 +1171,7 @@ select.btn-secondary option {
 }
 .schedule-duty-input:focus { outline: none; border-bottom-color: var(--accent); }
 .schedule-overview-row {
-  display: grid;
-  grid-template-columns: 2.2fr 1fr;
+  display: block;
   gap: 8px;
   align-items: center;
   padding: 5px 0;
@@ -1194,17 +1193,6 @@ select.btn-secondary option {
   line-height: 1.5;
   word-break: break-word;        /* 統整字串會長,寧可換行也不要撐破格線 */
 }
-.schedule-overview-note-input {
-  width: 100%;
-  background: transparent;
-  color: var(--ink-2);
-  border: none;
-  border-bottom: 1px solid var(--border);
-  padding: 2px 4px;
-  font-size: 12px;
-  font-family: var(--font-ui);
-}
-.schedule-overview-note-input:focus { outline: none; border-bottom-color: var(--accent); }
 .schedule-event-grid { display: flex; flex-direction: column; gap: 0; }
 .schedule-event-row {
   display: grid;
@@ -2168,7 +2156,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.13c';
+const APP_VERSION = '2026.08.13d';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5164,7 +5152,6 @@ function renderScheduleMonthBlock(month) {
   const isOpen = !!state.scheduleBlocks[month];
   const events = (state.data.scheduleEvents || []).filter(e => e.month === month && (e.type || 'noDuty') === 'noDuty');
   const dates = aggregateNoDutyDates(month);
-  const meta = state.data.monthlyMeta?.[month] || {};
 
   const block = el('div', { class: `schedule-month-block${isOpen ? '' : ' collapsed'}` });
 
@@ -5181,29 +5168,16 @@ function renderScheduleMonthBlock(month) {
 
   const body = el('div', { class: 'schedule-month-body' });
 
-  const ensureMeta = () => {
-    if (!state.data.monthlyMeta) state.data.monthlyMeta = {};
-    if (!state.data.monthlyMeta[month]) state.data.monthlyMeta[month] = {};
-    return state.data.monthlyMeta[month];
-  };
-
   // (本月值班數已移到 panel summary 標題列 — 下方僅保留「預約不值班」清單)
 
   // 統整 row
-  const noteInput = el('input', {
-    class: 'schedule-overview-note-input', type: 'text',
-    value: meta.noDutyOverviewNote || '',
-    placeholder: '備註(例:no IR)'
-  });
-  noteInput.addEventListener('input', (e) => {
-    ensureMeta().noDutyOverviewNote = e.target.value;
-    scheduleSave('noteDebounce', () => storage.save(state.data), 350);
-  });
-
+  // 這裡原本還有一個月層級的「備註(例:no IR)」輸入框,2026-08-13 移除:
+  // 註記現在跟著各自的日期走(`9/6 (no IR)`),月層級那格記的是同一件事卻沒有歸屬,
+  // 兩者可以互相矛盾 —— 同 includeInStats / 門診勾勾那個教訓。
+  // (移除前確認過 monthlyMeta 沒有任何一個月填過 noDutyOverviewNote,零資料損失。)
   body.appendChild(el('div', { class: 'schedule-overview-row' },
     el('span', { class: 'schedule-overview-dates-line', 'data-noduty-overview': month },
-      noDutyOverviewText(month)),
-    noteInput
+      noDutyOverviewText(month))
   ));
 
   // event 列表
