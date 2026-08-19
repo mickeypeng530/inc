@@ -50,3 +50,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# 效率分析備忘(含逐日收入數字,不上 public repo)
+分析_效率指標_待重驗.md
