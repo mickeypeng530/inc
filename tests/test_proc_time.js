@@ -98,5 +98,30 @@ console.log('[6] normalizeTime —— 自製時間欄的格式化(取代 native 
   check('冒號版仍會驗範圍「25:00」→ null', T('25:00') === null, String(T('25:00')));
 }
 
+console.log('');
+console.log('[7] 焦點保護:病歷號欄必須有 data-focus-key');
+// renderAll 重建 DOM 後,只有標了 data-focus-key 的欄位會被 withFocusPreserved 放回游標。
+// 病歷號欄漏標過(2026-08-20 修):打到一半重繪 → 焦點掉到 body → 後面打的字全部消失,
+// 而緊鄰的時間欄一直都有 key,所以症狀只出現在病歷號。
+// 行為在 DOM 層、單元測試搆不到,所以直接掃原始碼。
+{
+  const lines = src.split('\n');
+  // 只看 JS 的 el('input') 屬性(CSS 裡也有這個 class 名,會誤判)
+  const hits = lines.map((l, i) => ({ l, i })).filter(x => /class: '[^']*proc-item-medrec/.test(x.l));
+  check('找得到病歷號輸入欄(今日 / 月表清單 / 當天 modal)', hits.length >= 3, '實際 ' + hits.length + ' 處');
+  for (const x of hits) {
+    const block = lines.slice(x.i, x.i + 8).join('\n');   // el() 的屬性物件可能換行
+    check('第 ' + (x.i + 1) + ' 行的病歷號欄有 data-focus-key', /data-focus-key/.test(block));
+  }
+  // ⚠ key 必須全域唯一:月表清單與當天 modal 可能同時顯示同一天,前綴要分開
+  const keys = src.match(/data-focus-key':\s*`[^`]*\|mr`/g) || [];
+  check('三個入口的 mr key 各自不同', keys.length >= 3 && new Set(keys).size === keys.length,
+        JSON.stringify(keys));
+  // 病歷號不該進瀏覽器自動填入(隱私 + 下拉會吃按鍵)
+  const noAuto = hits.filter(x => !/autocomplete/.test(lines.slice(x.i, x.i + 8).join('\n')));
+  check('病歷號欄都關掉 autocomplete', noAuto.length === 0,
+        noAuto.map(x => '第 ' + (x.i + 1) + ' 行').join(', '));
+}
+
 console.log(`===== ${pass} passed, ${fail} failed =====`);
 process.exit(fail ? 1 : 0);

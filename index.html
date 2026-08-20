@@ -2191,7 +2191,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.13j';
+const APP_VERSION = '2026.08.20';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -4266,6 +4266,10 @@ function renderProceduresPanel() {
             value: rec.medRecord || '',
             placeholder: '病歷號',
             title: '可編輯病歷號',
+            // 重繪後把游標放回來。沒有 key 的欄位在 renderAll 時焦點會掉到 body,
+            // 之後打的字全部消失(旁邊的時間欄一直都有 key,只有這欄漏了)。
+            'data-focus-key': `tp|${state.currentDate}|${i}|mr`,
+            autocomplete: 'off',        // 病歷號不要進瀏覽器自動填入,下拉也不會吃按鍵
             oninput: (e) => updateProcMedRec(i, e.target.value),
           }),
           presetSel
@@ -6248,6 +6252,7 @@ function renderMonthProcList() {
       wrap.appendChild(el('div', { class: 'mp-row' },
         dateInput,
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
+          'data-focus-key': `ml|${date}|${i}|mr`, autocomplete: 'off',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
         el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail has-time' },
           timeField(rec.startTime, '開始時間(選填)', (t) => mpProcTime(date, i, 'startTime', t), `ml|${date}|${i}|s`),
@@ -6643,6 +6648,7 @@ function showDayProcModal(date) {
       listWrap.appendChild(el('div', { class: 'mp-row' },
         dateInput,
         el('input', { class: 'proc-item-medrec mp-medrec', type: 'text', value: rec.medRecord || '', placeholder: '病歷號',
+          'data-focus-key': `md|${date}|${i}|mr`, autocomplete: 'off',
           oninput: (e) => mpMedRec(date, i, e.target.value) }),
         el('div', { class: 'mp-mid' }, presetSel, el('div', { class: 'proc-item-detail has-time' },
           timeField(rec.startTime, '開始時間(選填)', (t) => mpProcTime(date, i, 'startTime', t), `md|${date}|${i}|s`),
@@ -6683,7 +6689,8 @@ function showDayProcModal(date) {
   addSel.appendChild(el('option', { value: '' }, '＋ 選 preset 新增…'));
   for (const p of presets) addSel.appendChild(el('option', { value: p.id }, p.name));
   const addQty = el('input', { type: 'number', min: '1', value: '1', class: 'mp-amt', title: '數量', style: 'width:52px' });
-  const addMed = el('input', { type: 'text', class: 'proc-item-medrec mp-medrec', placeholder: '病歷號' });
+  const addMed = el('input', { type: 'text', class: 'proc-item-medrec mp-medrec', placeholder: '病歷號',
+    'data-focus-key': 'md|add|mr', autocomplete: 'off' });
   const addBtn = el('button', { class: 'btn-secondary', onclick: () => {
     const preset = presets.find(p => p.id === addSel.value);
     if (!preset) { toast('請先選 preset', ''); return; }
