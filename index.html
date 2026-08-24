@@ -392,14 +392,19 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
    改 inline-flex + 不換行,並靠 margin-left:auto 推到 sublabel 右緣 = 緊貼金額左邊。
    ⚠ proc-item-detail 這個 class 不能拿掉 —— timeField 的自動跳欄靠 closest() 找它。 */
 .proc-item-detail.has-time.day-time { display: inline-flex; flex-wrap: nowrap; margin: 0 6px 0 0; }
-.count-sublabel.has-daytime { display: flex; align-items: center; gap: 4px; }
-.count-sublabel.has-daytime > .day-time { margin-left: auto; }
+.count-sublabel.has-daytime { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; row-gap: 2px; }
+/* ⚠ 一定要 flex-wrap + flex-shrink:0 —— .count-sublabel 是 flex:1 且 min-width:0(可以縮到 0),
+   沒有這兩條的話窄螢幕會把「結束」那格整個擠出去裁掉,只看得到起始欄
+   (自動跳欄仍會跳過去,但使用者看不到游標在哪)。放不下時整個時段區塊換到第二行。 */
+.count-sublabel.has-daytime > .day-time { margin-left: auto; flex-shrink: 0; }
 .xh-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
 .btn-xh-import { padding: 2px 8px; font-size: 11px; }
 .schedule-drag-handle { cursor: grab; color: var(--ink-muted); font-size: 12px; user-select: none; padding: 0 2px; letter-spacing: -2px; }
 .schedule-drag-handle:active { cursor: grabbing; }
 .schedule-event-row.dragging { opacity: .45; }
 .day-time .proc-time { width: 46px; }
+/* 很窄的時候先讓出耗時文字(那是算出來的,不是輸入欄),保住兩個輸入格 */
+@media (max-width: 700px) { .day-time .proc-dur { display: none; } }
 .proc-item span.drag-handle {   /* procedure 清單的拖曳把手(span 版;設定頁的是 td) */
   cursor: grab;
   color: var(--ink-muted);
@@ -2191,7 +2196,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.20';
+const APP_VERSION = '2026.08.24';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
