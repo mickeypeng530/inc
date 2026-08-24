@@ -20,7 +20,9 @@ const api = new Function(`
   ${grabFn('mtgDuration')}
   ${grabFn('fmtDur')}
   ${grabFn('setProcTimeField')}
-  return { normalizeTime, spanMinutes, procDuration, mtgDuration, fmtDur, setProcTimeField };
+  ${grabFn('opdSlots')} ${grabFn('opdSlotMinutes')} ${grabFn('opdTotalMinutes')} ${grabFn('migrateOpdSlots')}
+  return { normalizeTime, spanMinutes, procDuration, mtgDuration, fmtDur, setProcTimeField,
+           opdSlots, opdSlotMinutes, opdTotalMinutes, migrateOpdSlots };
 `)();
 
 let pass = 0, fail = 0;
@@ -121,6 +123,50 @@ console.log('[7] 焦點保護:病歷號欄必須有 data-focus-key');
   const noAuto = hits.filter(x => !/autocomplete/.test(lines.slice(x.i, x.i + 8).join('\n')));
   check('病歷號欄都關掉 autocomplete', noAuto.length === 0,
         noAuto.map(x => '第 ' + (x.i + 1) + ' 行').join(', '));
+}
+
+console.log('');
+console.log('[8] 門診多段時段(opdSlots)');
+// 零星約診常散在一天不同時段 → 一天一組起訖記不下來,改成陣列。
+// 舊資料是單一組 opdStart/opdEnd,必須無痛併進 opdSlots[0](使用者不用重填)。
+{
+  const M = api.migrateOpdSlots;
+
+  const a = M({ opdStart: '08:25', opdEnd: '12:03' });
+  check('舊的單一組 → opdSlots[0]',
+        JSON.stringify(a.opdSlots) === JSON.stringify([{ s: '08:25', e: '12:03' }]), JSON.stringify(a));
+  check('遷移後舊欄位要清掉(否則兩份會漂移)', !('opdStart' in a) && !('opdEnd' in a), JSON.stringify(a));
+
+  check('只有開始也搬', JSON.stringify(M({ opdStart: '09:00' }).opdSlots) === JSON.stringify([{ s: '09:00' }]));
+  check('只有結束也搬', JSON.stringify(M({ opdEnd: '09:00' }).opdSlots) === JSON.stringify([{ e: '09:00' }]));
+  check('沒有舊欄位 → 不動', !('opdSlots' in M({ counts: {} })));
+  check('已經是新格式 → 不動',
+        JSON.stringify(M({ opdSlots: [{ s: '09:00', e: '10:00' }] }).opdSlots)
+        === JSON.stringify([{ s: '09:00', e: '10:00' }]));
+  // 理論上不該同時存在,但真的遇到要把舊的排前面(它是比較早的那段)
+  const mix = M({ opdStart: '08:00', opdEnd: '09:00', opdSlots: [{ s: '14:00', e: '15:00' }] });
+  check('新舊並存 → 舊的插到最前面', mix.opdSlots.length === 2 && mix.opdSlots[0].s === '08:00',
+        JSON.stringify(mix.opdSlots));
+  check('遷移可重複執行(第二次不再多一段)',
+        JSON.stringify(M(M({ opdStart: '08:25', opdEnd: '12:03' })).opdSlots)
+        === JSON.stringify([{ s: '08:25', e: '12:03' }]));
+
+  const T = api.opdTotalMinutes;
+  check('兩段加總 = 218 + 20 = 238 分',
+        T({ opdSlots: [{ s: '08:25', e: '12:03' }, { s: '15:00', e: '15:20' }] }) === 238,
+        String(T({ opdSlots: [{ s: '08:25', e: '12:03' }, { s: '15:00', e: '15:20' }] })));
+  check('只填一半的那段不計(不當 0 也不當整天)',
+        T({ opdSlots: [{ s: '09:00', e: '09:30' }, { s: '15:00' }] }) === 30,
+        String(T({ opdSlots: [{ s: '09:00', e: '09:30' }, { s: '15:00' }] })));
+  check('空陣列 → 0', T({ opdSlots: [] }) === 0);
+  check('沒有欄位 → 0', T({}) === 0 && T(undefined) === 0);
+  check('壞值不爆', T({ opdSlots: [{ s: 'abc', e: 'zzz' }] }) === 0);
+  check('跨午夜那段仍算得出來(值班門診)',
+        T({ opdSlots: [{ s: '23:40', e: '00:20' }] }) === 40,
+        String(T({ opdSlots: [{ s: '23:40', e: '00:20' }] })));
+
+  check('opdSlots() 對非陣列一律回空陣列',
+        api.opdSlots({ opdSlots: 'x' }).length === 0 && api.opdSlots(undefined).length === 0);
 }
 
 console.log(`===== ${pass} passed, ${fail} failed =====`);

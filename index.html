@@ -403,6 +403,10 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
 .schedule-drag-handle:active { cursor: grabbing; }
 .schedule-event-row.dragging { opacity: .45; }
 .day-time .proc-time { width: 46px; }
+.opd-slots { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.btn-opd-slot { background: transparent; border: 1px dashed var(--border); color: var(--ink-muted);
+  cursor: pointer; font-size: 11px; line-height: 1; padding: 2px 5px; border-radius: 3px; flex-shrink: 0; }
+.btn-opd-slot:hover { border-color: var(--accent); color: var(--accent); }
 /* 很窄的時候先讓出耗時文字(那是算出來的,不是輸入欄),保住兩個輸入格 */
 @media (max-width: 700px) { .day-time .proc-dur { display: none; } }
 .proc-item span.drag-handle {   /* procedure 清單的拖曳把手(span 版;設定頁的是 td) */
@@ -2196,7 +2200,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.24';
+const APP_VERSION = '2026.08.24b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2771,6 +2775,7 @@ function _normalizeData(data) {
     if (!Array.isArray(d.addons)) d.addons = [];
     // 每筆 procedure 內的 items 也要保
     d.procedures.forEach(p => { if (!Array.isArray(p.items)) p.items = []; });
+    migrateOpdSlots(d);          // 舊的單一組 opdStart/opdEnd → opdSlots[0](2026-08-24)
   }
   runMigrations(data);
   return data;
@@ -4102,7 +4107,7 @@ function renderCountsPanel() {
       // 把金額與 ± 一起往左推，這列就跟其他列對不齊。
       if (child.key === 'opd') {
         subLabel.classList.add('has-daytime');
-        subLabel.appendChild(dayTimeFields('opdStart', 'opdEnd', '門診', 'opd'));
+        subLabel.appendChild(opdSlotFields());
       }
 
       // 門診是「一整個上午」而不是一件件發生的 —— 件數一次補登,
@@ -4460,6 +4465,70 @@ function refreshDayDur() {
     const d = dayDuration(peekDay(state.currentDate), sf, ef);
     elm.textContent = d != null ? `⏱ ${fmtDur(d)}` : '';
   });
+}
+// ---- 門診時段:多段 ----
+// 零星約診常散在一天不同時段(opd=1~2 的日子有 52 天,比真門診日 56 天還多),
+// 一天一組起訖記不下來。改成陣列而不是「固定兩組」的理由:固定兩組會把「2」這個數字
+// 散到每一個消費端(耗時、⏱ 攤開、覆蓋率、月表),每一處都是一個會忘記第二組的地方;
+// 陣列則是各自一個迴圈,沒有東西要記。專案裡 procedures/meetings/addons 也都是陣列。
+function opdSlots(day) { return Array.isArray(day && day.opdSlots) ? day.opdSlots : []; }
+function opdSlotMinutes(sl) { return spanMinutes(sl && sl.s, sl && sl.e); }
+function opdTotalMinutes(day) {
+  return opdSlots(day).reduce((n, x) => { const m = opdSlotMinutes(x); return n + (m > 0 ? m : 0); }, 0);
+}
+// 舊的單一組 opdStart/opdEnd → 併進 opdSlots[0]。具名函式才抽得進測試 harness。
+function migrateOpdSlots(d) {
+  if (!d || (!d.opdStart && !d.opdEnd)) return d;
+  const arr = Array.isArray(d.opdSlots) ? d.opdSlots.slice() : [];
+  arr.unshift({ ...(d.opdStart ? { s: d.opdStart } : {}), ...(d.opdEnd ? { e: d.opdEnd } : {}) });
+  d.opdSlots = arr;
+  delete d.opdStart; delete d.opdEnd;
+  return d;
+}
+function setOpdSlot(i, field, val) {
+  const day = getDay(state.currentDate);
+  const arr = Array.isArray(day.opdSlots) ? day.opdSlots : (day.opdSlots = []);
+  while (arr.length <= i) arr.push({});
+  const v = String(val || '').trim();
+  if (v) arr[i][field] = v; else delete arr[i][field];   // 清空一律 delete(RTDB 巢狀 undefined 會 throw)
+  // ⚠ 這裡**不做**中間空段的壓縮 —— 打字中 splice 會讓後面那段的 index 位移,
+  //    data-focus-key 跟著變,游標就掉了。空的那列留著當「可以直接打」的空位。
+  if (arr.every(x => !x.s && !x.e)) delete day.opdSlots;  // 全空才整個拿掉(RTDB 不存空陣列)
+  touchDay(state.currentDate);
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
+}
+function addOpdSlot() {
+  const day = getDay(state.currentDate);
+  const arr = Array.isArray(day.opdSlots) ? day.opdSlots : (day.opdSlots = []);
+  arr.push({});
+  renderCountsPanel();
+}
+// 只改字,不重建 DOM(同 refreshDayDur 的分工)
+function refreshOpdDur() {
+  const day = peekDay(state.currentDate);
+  document.querySelectorAll('[data-opddur]').forEach(elm => {
+    const m = opdSlotMinutes(opdSlots(day)[Number(elm.getAttribute('data-opddur'))]);
+    elm.textContent = m != null && m > 0 ? `⏱ ${fmtDur(m)}` : '';
+  });
+}
+function opdSlotFields() {
+  const day = peekDay(state.currentDate);
+  const arr = opdSlots(day);
+  const rows = arr.length ? arr : [{}];
+  const wrap = el('span', { class: 'opd-slots' });
+  rows.forEach((sl, i) => {
+    const m = opdSlotMinutes(sl);
+    wrap.appendChild(el('span', { class: 'proc-item-detail has-time day-time' },
+      timeField(sl.s, '門診開始', v => { setOpdSlot(i, 's', v); refreshOpdDur(); }, `opd|${i}|s`),
+      el('span', null, '–'),
+      timeField(sl.e, '門診結束', v => { setOpdSlot(i, 'e', v); refreshOpdDur(); }, `opd|${i}|e`),
+      el('span', { class: 'proc-dur', 'data-opddur': String(i) }, m != null && m > 0 ? `⏱ ${fmtDur(m)}` : '')
+    ));
+  });
+  // 加一段:刻意用按鈕而不是「打完自動長出下一列」—— 後者要在打字中重建 DOM
+  wrap.appendChild(el('button', { class: 'btn-opd-slot', title: '再加一段門診時間',
+    onclick: addOpdSlot }, '＋'));
+  return wrap;
 }
 function dayTimeFields(sf, ef, label, fkey) {
   const day = peekDay(state.currentDate);
@@ -6366,7 +6435,7 @@ function getHourlyRevenue(date, entries) {
     const k = String(r.k || '');
     if (k.startsWith('proc.') || k.startsWith('mtg.')) continue;   // 走下面的起訖攤開,避免重複計
     // 門診件數是一次補登的 —— 有填起訖就改走下面攤開,不要留在補登那一刻的假尖峰
-    if (k === 'opd' && dayDuration(day, 'opdStart', 'opdEnd') > 0) continue;
+    if (k === 'opd' && opdTotalMinutes(day) > 0) continue;
     let unit = 0;
     if (k.startsWith('addon.')) {
       const type = k.slice(6);
@@ -6401,9 +6470,16 @@ function getHourlyRevenue(date, entries) {
     placed += amt;
   }
   {
-    const dur = dayDuration(day, 'opdStart', 'opdEnd');
+    // 多段門診:收入按各段時長比例攤到各段(不是平均分,長的那段本來就做比較多)
+    const total = opdTotalMinutes(day);
     const amt = getCount(day, 'opd') * (getUnitPriceForKey('opd', s) || 0);
-    if (amt && dur > 0) { spread(day.opdStart, dur, amt, opdHours); placed += amt; }
+    if (amt && total > 0) {
+      for (const sl of opdSlots(day)) {
+        const m = opdSlotMinutes(sl);
+        if (m > 0) spread(sl.s, m, amt * (m / total), opdHours);
+      }
+      placed += amt;
+    }
   }
   return { hours, procHours, mtgHours, opdHours, placed, unplaced };
 }
