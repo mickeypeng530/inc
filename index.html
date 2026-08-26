@@ -2200,7 +2200,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.24b';
+const APP_VERSION = '2026.08.26';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -6986,7 +6986,7 @@ function getMonthlyStats() {
   return months.map(m => {
     let total = 0, ir = 0, ot = 0, ctN = 0, mrN = 0, xrN = 0, bmdN = 0, daysActive = 0;
     let procIRraw = 0, mskIR = 0, procNraw = 0, mskNraw = 0;  // 逐筆金額/筆數
-    let rdCt = 0, rdMr = 0, rdXr = 0, rdBmd = 0, rdSp = 0, rdOther = 0, estTotal = 0;  // 各類報告估算 + 估算總收入
+    let rdCt = 0, rdMr = 0, rdXr = 0, rdBmd = 0, rdSp = 0, rdOther = 0, rdOpd = 0, estTotal = 0;  // 各類報告估算 + 估算總收入
     let boneIR = 0, opdRev = 0;  // Bone biopsy 收入(從 MSK 扣)、OPD 看診收入
     const nonMskTypeSet = new Set();  // 非MSK-IR 的不同 procedure 類型(能力廣度)
     for (const date of Object.keys(state.data.days)) {
@@ -6997,7 +6997,11 @@ function getMonthlyStats() {
       ir += getDayProcRevenue(day);
       ot += Number(day.overtimeHours || 0);
       const rc = dayReadingByCat(day, settings.unitPrices);
-      rdCt += rc.ct; rdMr += rc.mr; rdXr += rc.xray; rdBmd += rc.bmd; rdSp += rc.special; rdOther += rc.consult + rc.sono + rc.opd;
+      rdCt += rc.ct; rdMr += rc.mr; rdXr += rc.xray; rdBmd += rc.bmd; rdSp += rc.special;
+      // ⚠ 門診拆出來自成一項,不要併進「其他」——
+      //   它佔報告桶約 6%,而且是**看診不是閱片**(一整段連續時間、有自己的 opdSlots 起訖),
+      //   併進去會讓「其他」這個名字名不副實(近 12 個月門診佔其他約 90%)。
+      rdOther += rc.consult + rc.sono; rdOpd += rc.opd;
       opdRev += rc.opd;
       estTotal += calcBaseRevenue(day, settings) + calcProcRevenue(day) + calcAddonRevenue(day);
       ctN += getGroupSum(day, 'CT'); mrN += getGroupSum(day, 'MR');
@@ -7047,7 +7051,7 @@ function getMonthlyStats() {
       opdRev, boneIR, opdRelated: opdRev + Math.max(0, mskIR - boneIR),
       opdRelatedPct: total > 0 ? (opdRev + Math.max(0, mskIR - boneIR)) / total * 100 : 0,
       // D2a 各類報告收入(counts×單價 估算)
-      rdCt, rdMr, rdXr, rdBmd, rdSp, rdOther,
+      rdCt, rdMr, rdXr, rdBmd, rdSp, rdOther, rdOpd,
       // D2c 估算 total vs sheet 實收 total
       estTotal, estDiffPct: total > 0 ? (estTotal - total) / total * 100 : null,
       // D1b 真效率:收入 ÷ 總工時(平日數×9h + 加班;排除未結帳)
@@ -7234,7 +7238,9 @@ function getProcStats() {
   const byAmt = byCount.slice().sort((a, b) => b.amt - a.amt);
   return { sorted: byCount, byAmt, totalProc, totalAmt };
 }
-// 單日各類報告(閱片)收入 = counts × 單價
+// 單日「各計數類」收入 = counts × 單價。
+// ⚠ 名字裡的 reading 是歷史包袱 —— 它其實含 opd(看診)與 consult(會診),兩者都不是閱片。
+//   改名要動 4 個呼叫點,不值得;分析時記得 opd 這一類要另外看(佔整桶約 6%)。
 function dayReadingByCat(d, p) {
   return {
     ct:   getCount(d,'ct.opd')*p.ct.opd + getCount(d,'ct.er_adm_self')*p.ct.er_adm_self + getCount(d,'ct.ldct_health')*p.ct.ldct_health + getCount(d,'ct.ph')*(p.ct.ph||0),
@@ -7564,13 +7570,15 @@ function renderStats() {
 
   // === D2a 各類報告收入逐月趨勢(看哪類在成長/萎縮)===
   html += chartPanel('各類報告收入趨勢',
-    '<i style="background:#e3a23b"></i>CT <i style="background:#58a6ff"></i>MR <i style="background:#3fb950"></i>X-ray <i style="background:#a371f7"></i>BMD <i style="background:#e06c9f"></i>Special',
+    '<i style="background:#e3a23b"></i>CT <i style="background:#58a6ff"></i>MR <i style="background:#3fb950"></i>X-ray <i style="background:#a371f7"></i>BMD <i style="background:#e06c9f"></i>Special <i style="background:#d29922"></i>門診',
     'rdtrend', labels, [
       { name: 'CT', values: rows.map(r => r.rdCt), color: '#e3a23b' },
       { name: 'MR', values: rows.map(r => r.rdMr), color: '#58a6ff' },
       { name: 'X-ray', values: rows.map(r => r.rdXr), color: '#3fb950' },
       { name: 'BMD', values: rows.map(r => r.rdBmd), color: '#a371f7' },
       { name: 'Special', values: rows.map(r => r.rdSp), color: '#e06c9f' },
+      // 門診用與圓餅圖「OPD看診」同色(#d29922),兩張圖對得起來
+      { name: '門診', values: rows.map(r => r.rdOpd), color: '#d29922' },
     ], 720, 210);
 
   // === D2c 估算(counts×單價+逐筆) vs 權威值(匯入月=sheet實收、近月=手算IR)對帳 ===
