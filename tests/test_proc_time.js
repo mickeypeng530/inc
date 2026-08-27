@@ -169,5 +169,52 @@ console.log('[8] 門診多段時段(opdSlots)');
         api.opdSlots({ opdSlots: 'x' }).length === 0 && api.opdSlots(undefined).length === 0);
 }
 
+console.log('');
+console.log('[9] 時間欄的焦點設計不變式(掃原始碼,行為在 DOM 層測不到)');
+{
+  const BT = String.fromCharCode(96);
+  const calls = [...src.matchAll(new RegExp('timeField\\(([^' + BT + ']*)' + BT + '([^' + BT + ']+)' + BT + '\\)', 'g'))];
+  check('抓得到 timeField 呼叫點', calls.length >= 10, '實際 ' + calls.length + ' 個');
+
+  // ① key 樣板必須互不重複 —— 重複的話 querySelector 會選到錯的那格
+  //    (月表清單 ml| 與當天 modal md| 可能同時顯示同一天,前綴就是為此分開)
+  const tpl = calls.map(m => m[2].replace(/\$\{[^}]+\}/g, '<v>'));
+  const dup = [...new Set(tpl.filter((k, i) => tpl.indexOf(k) !== i))];
+  check('key 樣板互不重複', dup.length === 0, dup.join(', '));
+
+  // ② callback 不可以直接重建 DOM
+  const badCb = calls.filter(m => /\b(render[A-Z]\w*|mpRefresh)\s*\(/.test(m[1]));
+  check('沒有 timeField callback 直接呼叫 render', badCb.length === 0, String(badCb.length) + ' 個');
+
+  // ③ 那些 setter / refresh 只能改值,不能動結構
+  const body = (fn) => {
+    const i = src.indexOf('function ' + fn + '(');
+    if (i < 0) return null;
+    let d = 0, st = false;
+    for (let j = i; j < src.length; j++) {
+      const c = src[j];
+      if (c === '{') { d++; st = true; }
+      else if (c === '}') { d--; if (st && d === 0) return src.slice(i, j + 1); }
+    }
+    return null;
+  };
+  for (const fn of ['updateProcTime', 'mpProcTime', 'updateMtgTime', 'setOpdSlot', 'setDayTime',
+                    'refreshProcDur', 'refreshMtgDur', 'refreshOpdDur', 'refreshDayDur']) {
+    const b = body(fn);
+    const hits = b && b.match(/innerHTML|appendChild|replaceChildren|\brender[A-Z]\w*\(|mpRefresh\(/);
+    check(fn + ' 只改值不重建 DOM', !!b && !hits, b ? (hits ? hits[0] : '') : '找不到函式');
+  }
+
+  // ④ ⭐ 含時間欄的面板必須包 withFocusPreserved。
+  //    2026-08-26 的實例:Special 金額欄是 onblur → renderCountsPanel(),
+  //    在那裡打完字直接點進門診時間欄,blur 會先重建、把剛點進去的格子砍掉。
+  //    這是從結果端擋,不是逐一修觸發點。
+  for (const fn of ['renderCountsPanel', 'renderMonth']) {
+    const b = body(fn);
+    check(fn + ' 有包 withFocusPreserved', !!b && /withFocusPreserved\(/.test(b),
+          b ? b.split('\n')[1] : '找不到');
+  }
+}
+
 console.log(`===== ${pass} passed, ${fail} failed =====`);
 process.exit(fail ? 1 : 0);

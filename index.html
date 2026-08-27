@@ -2200,7 +2200,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.26';
+const APP_VERSION = '2026.08.26b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3960,7 +3960,13 @@ function setCountsNote(val) {
   scheduleSave('saveDebounce', () => storage.save(state.data), 400);
 }
 
-function renderCountsPanel() {
+// ⚠ 包 withFocusPreserved:這個面板裡有門診時段的時間欄,而隔壁 Special 的金額/數量欄
+//    是 onblur → renderCountsPanel()。在 Special 打完字**直接點進時間欄**時,blur 會先觸發
+//    重建,把剛點進去的那格砍掉 → 焦點消失。
+//    照專案既有原則從結果端擋(同 renderAll 的處理),不去逐一修觸發點 ——
+//    「打字中焦點消失」這個症狀已經追過四個不同病根,每修一個就冒出下一個。
+function renderCountsPanel() { withFocusPreserved(renderCountsPanelInner); }
+function renderCountsPanelInner() {
   const day = peekDay(state.currentDate);   // 唯讀:純瀏覽不建檔(#7)
   const settings = state.data.settings;
   refreshCountsNote();
@@ -5517,7 +5523,9 @@ function setMonthCellIR(date, val) {
   scheduleSave('monthSaveDebounce', () => storage.save(state.data), 400);
 }
 
-function renderMonth() {
+// 同上:月表裡有 procedure 的時間欄(ml|…),而加班/收入格是 onblur → renderMonth()。
+function renderMonth() { withFocusPreserved(renderMonthInner); }
+function renderMonthInner() {
   const month = state.currentMonth;
   // 填年/月下拉(取代原 month-picker)
   const yearSel = $('month-year-sel');
