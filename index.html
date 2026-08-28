@@ -399,6 +399,8 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
 .count-sublabel.has-daytime > .day-time { margin-left: auto; flex-shrink: 0; }
 .xh-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
 .btn-xh-import { padding: 2px 8px; font-size: 11px; }
+/* 判讀時段是自動算的,做成不可編輯的說明字,跟手填的在院欄位視覺分開 */
+.xh-readspan { font-family: var(--font-mono); font-size: 10px; color: var(--ink-muted); }
 .schedule-drag-handle { cursor: grab; color: var(--ink-muted); font-size: 12px; user-select: none; padding: 0 2px; letter-spacing: -2px; }
 .schedule-drag-handle:active { cursor: grabbing; }
 .schedule-event-row.dragging { opacity: .45; }
@@ -2200,7 +2202,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.26b';
+const APP_VERSION = '2026.08.28';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3719,8 +3721,16 @@ function xhEventTime(raw) {
   const t = normalizeTime(`${mm[1]}:${mm[2]}`);
   return t ? { time: t, date: null } : null;
 }
+// 逐筆清單裡的兩個保留字:只帶時間、沒有數量。
+// 到達 ≠ 第一筆 —— 中間有啟程/準備/找片子,那段是跑外院的固定成本。
+function xhMetaKey(raw) {
+  const k = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (k === 'arrive' || k === '到達' || k === '到') return 'arrive';
+  if (k === 'leave' || k === '離開' || k === '走') return 'leave';
+  return null;
+}
 function parseXhEvents(text) {
-  const out = { mode: 'events', date: null, start: '', end: '', counts: {}, events: [], warnings: [] };
+  const out = { mode: 'events', date: null, start: '', end: '', arrive: '', leave: '', counts: {}, events: [], warnings: [] };
   for (const it of XH_SCHEMA) out.counts[it.key] = 0;
   const lines = String(text || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
   for (const line of lines) {
@@ -3730,6 +3740,8 @@ function parseXhEvents(text) {
     const tm = xhEventTime(f[i]);
     if (!tm) { out.warnings.push(`跳過(看不出時間):${line}`); continue; }
     if (tm.date && !out.date) out.date = tm.date;
+    const meta = xhMetaKey(f[i + 1]);
+    if (meta) { out[meta] = tm.time; continue; }      // arrive / leave:只記時間,不算件數
     const key = xhResolveKey(f[i + 1]);
     if (!key) { out.warnings.push(`跳過(不是中興項目):${line}`); continue; }
     const raw = f[i + 2];
@@ -3811,16 +3823,35 @@ function parseXhRow(text) {
 }
 // 取代當天(不是累加)。⚠ 只寫 xh / xhStart / xhEnd —— 中興與主帳的隔離是結構性的,
 // 匯入不是例外:counts / procedures / revenue 一概不碰。
+// 兩組時間,語意不同,**互不覆蓋**:
+//   xhArrive / xhLeave = 在中興的時間(人填的,或逐筆裡的 arrive/leave 保留字)
+//   xhStart  / xhEnd   = 判讀時段(逐筆首末筆,自動算)
+// ⚠ 2026-08-28 之前逐筆匯入會用首末筆覆蓋 xhStart,把使用者手填的到達時間洗掉
+//   (08-14/21/28 三次的 xhStart 都剛好等於首筆時間)。現在人填的那組除非
+//   這次貼上真的帶了 arrive/leave,否則**一律不動**。
 function applyXhRow(date, p) {
   const day = getDay(date);
   const xh = {};
   for (const it of XH_SCHEMA) { const v = Number(p.counts[it.key]) || 0; if (v > 0) xh[it.key] = v; }
   if (Object.keys(xh).length) day.xh = xh; else delete day.xh;
-  if (p.start) day.xhStart = p.start; else delete day.xhStart;
-  if (p.end) day.xhEnd = p.end; else delete day.xhEnd;
+
+  if (p.mode === 'events') {
+    // 判讀時段:機器算的,每次重貼都以最新為準
+    if (p.start) day.xhStart = p.start; else delete day.xhStart;
+    if (p.end) day.xhEnd = p.end; else delete day.xhEnd;
+    // 在院時段:只有這次貼上真的帶了才寫,沒帶就保留原本手填的
+    if (p.arrive) day.xhArrive = p.arrive;
+    if (p.leave) day.xhLeave = p.leave;
+  } else {
+    // 彙總列是人補登的 → 那兩格是「在院時間」,不是判讀時段
+    if (p.start) day.xhArrive = p.start; else delete day.xhArrive;
+    if (p.end) day.xhLeave = p.end; else delete day.xhLeave;
+  }
   touchDay(date);
   storage.save(state.data);
 }
+function xhReadMinutes(day) { return spanMinutes(day && day.xhStart, day && day.xhEnd); }   // 判讀時段
+function xhOnSiteMinutes(day) { return spanMinutes(day && day.xhArrive, day && day.xhLeave); }
 function applyXhPaste(date, p) {
   applyXhRow(date, p);                      // 計數/起訖:兩種格式共用同一條寫入路徑
   if (p.mode === 'events' && p.events && p.events.length) writeXhActivity(date, p.events);
@@ -3907,7 +3938,16 @@ function renderXhPanel() {
   c.innerHTML = '';
   c.appendChild(el('div', { class: 'xh-toolbar' },
     el('span', { class: 'count-sublabel' }, '時段',
-      dayTimeFields('xhStart', 'xhEnd', '中興', 'xh')),
+      dayTimeFields('xhArrive', 'xhLeave', '中興到達', 'xh')),
+    // 判讀時段是逐筆算出來的,唯讀 —— 手填的是「在院」那組,兩者不可混
+    (() => {
+      const rd = xhReadMinutes(day), on = xhOnSiteMinutes(day);
+      if (rd == null) return null;
+      const prep = (on != null && day.xhArrive) ? spanMinutes(day.xhArrive, day.xhStart) : null;
+      return el('span', { class: 'xh-readspan' },
+        `判讀 ${day.xhStart}–${day.xhEnd}(${fmtDur(rd)})`
+        + (prep != null && prep > 0 ? ` · 準備 ${fmtDur(prep)}` : ''));
+    })(),
     el('button', { class: 'btn-secondary btn-xh-import', title: '貼上另一個專案複製的中興當日資料(取代當天)',
       onclick: showXhImportModal }, '📥 匯入')));
   for (const it of XH_SCHEMA) {

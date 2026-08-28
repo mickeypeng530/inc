@@ -41,12 +41,13 @@ const api = new Function('PRICES', `
   ${grabFn('normalizeTime')} ${grabFn('spanMinutes')}
   ${grabFn('xhPrices')} ${grabFn('xhCount')} ${grabFn('xhTotalCount')} ${grabFn('calcXhRevenue')}
   ${grabFn('parseXhRow')} ${grabFn('applyXhRow')}
-  ${grabFn('xhResolveKey')} ${grabFn('xhEventTime')} ${grabFn('parseXhEvents')} ${grabFn('parseXhPaste')}
+  ${grabFn('xhResolveKey')} ${grabFn('xhEventTime')} ${grabFn('xhMetaKey')} ${grabFn('parseXhEvents')} ${grabFn('parseXhPaste')}
+  ${grabFn('xhReadMinutes')} ${grabFn('xhOnSiteMinutes')}
   ${grabFn('dayDuration')}
   ${grabFn('getCount')} ${grabFn('specialOthersTotalRev')} ${grabFn('getSpecialOthers')}
   ${grabFn('calcBaseRevenue')}
   return { calcXhRevenue, xhTotalCount, calcBaseRevenue, parseXhRow, applyXhRow, dayDuration,
-           xhResolveKey, xhEventTime, parseXhEvents, parseXhPaste,
+           xhResolveKey, xhEventTime, xhMetaKey, parseXhEvents, parseXhPaste, xhReadMinutes, xhOnSiteMinutes,
            DAYS, getDay, savedCount: () => saved, touchedList: () => touched };
 `)(PRICES);
 
@@ -148,9 +149,13 @@ console.log('[6] applyXhRow —— 取代當天,不是累加');
   check('寫入 xh', JSON.stringify(api.DAYS[D].xh) === JSON.stringify({ mriBase: 10, mriNc: 5, ca: 5, ctNc: 4 }),
         JSON.stringify(api.DAYS[D].xh));
   check('0 的項目不留在物件裡', !('mriC' in api.DAYS[D].xh), JSON.stringify(api.DAYS[D].xh));
-  check('寫入起訖', api.DAYS[D].xhStart === '09:30' && api.DAYS[D].xhEnd === '17:30');
-  check('時長算得出來(09:30→17:30 = 8 時)', api.dayDuration(api.DAYS[D], 'xhStart', 'xhEnd') === 480,
-        String(api.dayDuration(api.DAYS[D], 'xhStart', 'xhEnd')));
+  // ⚠ 2026-08-28 起語意改了:彙總列是**人補登**的 → 那兩格是「在院時段」(xhArrive/xhLeave),
+  //    不是判讀時段(xhStart/xhEnd,只有逐筆匯入才會算)。到達 ≠ 第一筆報告。
+  check('彙總列的起訖 → 在院時段', api.DAYS[D].xhArrive === '09:30' && api.DAYS[D].xhLeave === '17:30',
+        `${api.DAYS[D].xhArrive}/${api.DAYS[D].xhLeave}`);
+  check('彙總列不產生判讀時段', !('xhStart' in api.DAYS[D]), JSON.stringify(Object.keys(api.DAYS[D])));
+  check('在院時長(09:30→17:30 = 8 時)', api.xhOnSiteMinutes(api.DAYS[D]) === 480,
+        String(api.xhOnSiteMinutes(api.DAYS[D])));
 
   // 再貼一次同一列 → 結果相同(可重複貼)
   const before = JSON.stringify(api.DAYS[D].xh);
@@ -162,7 +167,7 @@ console.log('[6] applyXhRow —— 取代當天,不是累加');
   check('取代語意:舊的 mriNc/ca/ctNc 要消失',
         JSON.stringify(api.DAYS[D].xh) === JSON.stringify({ mriBase: 10 }), JSON.stringify(api.DAYS[D].xh));
   check('起訖留空 → 整個 delete(不留 undefined,RTDB 巢狀 undefined 會 throw)',
-        !('xhStart' in api.DAYS[D]) && !('xhEnd' in api.DAYS[D]), JSON.stringify(Object.keys(api.DAYS[D])));
+        !('xhArrive' in api.DAYS[D]) && !('xhLeave' in api.DAYS[D]), JSON.stringify(Object.keys(api.DAYS[D])));
 
   // 全 0 → 整段拿掉
   api.applyXhRow(D, api.parseXhRow('2026-08-07\t\t\t0\t0\t0\t0\t0\t0'));
@@ -254,5 +259,64 @@ console.log('[10] 逐筆匯入與彙總列走同一條寫入路徑');
 }
 
 console.log('');
+console.log('');
+console.log('[11] 到達 / 離開:兩組時間語意不同,互不覆蓋');
+// 病根(2026-08-28 修):逐筆匯入一律用首末筆覆蓋 xhStart,把手填的到達時間洗掉 ——
+// 08-14/21/28 三次的 xhStart 都剛好等於首筆時間。到達 ≠ 第一筆,中間有啟程/準備。
+{
+  const M = api.xhMetaKey;
+  check('arrive 保留字', M('arrive') === 'arrive' && M('到達') === 'arrive' && M('ARRIVE') === 'arrive');
+  check('leave 保留字', M('leave') === 'leave' && M('離開') === 'leave');
+  check('一般項目不會被誤判成保留字', M('mriBase') === null && M('') === null);
+
+  const p = api.parseXhEvents(
+    '2026-08-28\t12:40\tarrive\n' +
+    '2026-08-28\t12:53\tmriBase\t1\n' +
+    '2026-08-28\t13:05\tmriBase\t1\n' +
+    '2026-08-28\t16:18\tctNc\t1\n' +
+    '2026-08-28\t16:30\tleave');
+  check('arrive/leave 解析出來', p.arrive === '12:40' && p.leave === '16:30', `${p.arrive}/${p.leave}`);
+  check('⭐ 保留字不算成件數', p.counts.mriBase === 2 && p.counts.ctNc === 1, JSON.stringify(p.counts));
+  check('⭐ 判讀時段仍取首末「報告」筆,不含 arrive/leave',
+        p.start === '12:53' && p.end === '16:18', `${p.start}/${p.end}`);
+  check('保留字不進 events', p.events.length === 3, String(p.events.length));
+  check('保留字不產生警告', p.warnings.length === 0, JSON.stringify(p.warnings));
+  check('位置不拘(leave 排最前面也認)',
+        api.parseXhEvents('2026-08-28\t16:30\tleave\n2026-08-28\t12:53\tmriBase\t1').leave === '16:30');
+  check('沒送 arrive/leave → 空字串', api.parseXhEvents('12:53\tmriBase\t1').arrive === '');
+}
+
+console.log('');
+console.log('[12] applyXhRow:人填的在院時段不可以被匯入洗掉');
+{
+  const D = '2026-09-04';
+  const day = api.getDay(D);
+  day.xhArrive = '12:40'; day.xhLeave = '16:30';          // 使用者先手填在院時段
+
+  // 沒帶 arrive/leave 的逐筆匯入
+  api.applyXhRow(D, api.parseXhEvents('2026-09-04\t12:53\tmriBase\t1\n2026-09-04\t16:18\tctNc\t1'));
+  check('⭐ 手填的在院時段原封不動', day.xhArrive === '12:40' && day.xhLeave === '16:30',
+        `${day.xhArrive}/${day.xhLeave}`);
+  check('判讀時段照首末筆算', day.xhStart === '12:53' && day.xhEnd === '16:18',
+        `${day.xhStart}/${day.xhEnd}`);
+  check('在院時長 = 230 分', api.xhOnSiteMinutes(day) === 230, String(api.xhOnSiteMinutes(day)));
+  check('判讀時長 = 205 分', api.xhReadMinutes(day) === 205, String(api.xhReadMinutes(day)));
+
+  // 這次帶了 arrive/leave → 才可以更新
+  api.applyXhRow(D, api.parseXhEvents(
+    '2026-09-04\t12:30\tarrive\n2026-09-04\t12:53\tmriBase\t1\n' +
+    '2026-09-04\t16:18\tctNc\t1\n2026-09-04\t16:45\tleave'));
+  check('這次有帶 → 才覆蓋', day.xhArrive === '12:30' && day.xhLeave === '16:45',
+        `${day.xhArrive}/${day.xhLeave}`);
+
+  // 彙總列是人補登的 → 那兩格是在院時間,不是判讀時段
+  const D2 = '2026-09-11';
+  api.applyXhRow(D2, api.parseXhPaste('2026-09-11\t12:40\t16:30\t10\t0\t5\t5\t0\t4'));
+  const d2 = api.DAYS[D2];
+  check('⭐ 彙總列的起訖 → 在院時段(不是判讀)',
+        d2.xhArrive === '12:40' && d2.xhLeave === '16:30', JSON.stringify(d2));
+  check('彙總列沒有逐筆 → 不該有判讀時段', !('xhStart' in d2) && !('xhEnd' in d2), JSON.stringify(Object.keys(d2)));
+}
+
 console.log(`===== ${pass} passed, ${fail} failed =====`);
 process.exit(fail ? 1 : 0);
