@@ -21,10 +21,14 @@ function grabLine(prefix) {
 }
 
 let EVENTS = [];
-const api = new Function('getEvents', 'setEvents', `
+const META = {};
+let SAVES = 0;
+const api = new Function('getEvents', 'setEvents', 'META', 'bumpSave', `
   const state = { data: { get scheduleEvents() { return getEvents(); },
-                          set scheduleEvents(v) { setEvents(v); } } };
+                          set scheduleEvents(v) { setEvents(v); },
+                          monthlyMeta: META } };
   const storage = { save: () => {} };
+  const scheduleSave = (key, fn, ms) => bumpSave(key, ms);
   const renderScheduleBlock = () => {};
   const document = { querySelectorAll: () => [] };
   ${grabLine('const NODUTY_TOKEN_RE')}
@@ -34,9 +38,14 @@ const api = new Function('getEvents', 'setEvents', `
   ${grabFn('noDutyOverviewText')}
   ${grabFn('aggregateNoDutyDates')}
   ${grabFn('moveScheduleEvent')}
+  ${grabLine('const DUTY_CYCLE')}
+  ${grabFn('dutyDaysOf')} ${grabFn('cycleDutyDay')} ${grabFn('dutySummary')}
+  ${grabFn('dutyConflicts')} ${grabFn('scheduleHeadText')}
   return { parseNoDutyTokens, fmtNoDutyToken, aggregateNoDutyTokens,
-           noDutyOverviewText, aggregateNoDutyDates, moveScheduleEvent };
-`)(() => EVENTS, (v) => { EVENTS = v; });
+           noDutyOverviewText, aggregateNoDutyDates, moveScheduleEvent,
+           cycleDutyDay, dutyDaysOf, dutySummary, dutyConflicts, scheduleHeadText };
+`)(() => EVENTS, (v) => { EVENTS = v; }, META, (key, ms) => { SAVES++; LAST_SAVE = { key, ms }; });
+let LAST_SAVE = null;
 
 let pass = 0, fail = 0;
 function check(n, c, x) { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (x ? '  → ' + x : '')); } }
@@ -123,6 +132,47 @@ console.log('[6] 拖曳排序 —— 只動該月,其他月份順序不受影響
   check('from === to 不動', EVENTS.map(e => e.id).join(',') === before);
   api.moveScheduleEvent('2026-09', 9, 0);
   check('超出範圍不動也不爆', EVENTS.map(e => e.id).join(',') === before);
+}
+
+console.log('');
+console.log('[7] 值班日:點一下輪流切換 IR → 報告 → IR+報告 → 清除');
+{
+  const C = (iso) => api.cycleDutyDay(M, iso);
+  check('第 1 下 → ir', C('2026-09-03') === 'ir');
+  check('第 2 下 → rpt', C('2026-09-03') === 'rpt');
+  check('第 3 下 → both', C('2026-09-03') === 'both');
+  check('第 4 下 → 清除', C('2026-09-03') === '');
+  check('⭐ 清到空 → dutyDays 整個 delete(RTDB 不存空物件,留著會對不上回音)',
+        !('dutyDays' in (META[M] || {})), JSON.stringify(META[M]));
+  check('存檔走 debounce 400 + saveDebounce(連點 = 中間值)',
+        LAST_SAVE && LAST_SAVE.key === 'saveDebounce' && LAST_SAVE.ms === 400, JSON.stringify(LAST_SAVE));
+  C('2026-09-17');
+  check('⭐ key 是完整 ISO 日期(數字 key 會被 RTDB 轉成陣列)',
+        Object.keys(api.dutyDaysOf(M)).join() === '2026-09-17', JSON.stringify(api.dutyDaysOf(M)));
+  check('別月的日期不寫進本月', api.cycleDutyDay(M, '2026-10-01') === '' && !META['2026-10']);
+  META[M].dutyDays['2026-09-20'] = 'weird';
+  check('不認得的值 → 點一下清掉', C('2026-09-20') === '' && !('2026-09-20' in api.dutyDaysOf(M)));
+  delete META[M];
+}
+
+console.log('');
+console.log('[8] 值班統計 + 與預約不值班的衝突');
+{
+  META[M] = { dutyDays: { '2026-09-02': 'ir', '2026-09-06': 'ir', '2026-09-10': 'rpt', '2026-09-12': 'both' } };
+  const s = api.dutySummary(M);
+  check('IR 2 / 報告 1 / 雙 1 / 共 4', s.ir === 2 && s.rpt === 1 && s.both === 1 && s.total === 4, JSON.stringify(s));
+  setRows('9/2', '9/3-5, 9/6 (no IR)', '9/10 (下午)', '9/12 (no IR)');
+  check('⭐ 整天不值班卻排 IR → 衝突(9/2)', api.dutyConflicts(M).includes(2), JSON.stringify(api.dutyConflicts(M)));
+  check('⭐ (no IR) 卻排 IR → 衝突(9/6)', api.dutyConflicts(M).includes(6));
+  check('⭐ (no IR) 卻排 IR+報告 → 衝突(9/12)', api.dutyConflicts(M).includes(12));
+  check('其他註記 + 報告值班 → 不算衝突(9/10)', !api.dutyConflicts(M).includes(10));
+  check('共 3 個衝突', api.dutyConflicts(M).length === 3, JSON.stringify(api.dutyConflicts(M)));
+  META[M].dutyDays = { '2026-09-06': 'rpt' };
+  check('(no IR) 排報告 → 不衝突', api.dutyConflicts(M).length === 0);
+  // 不值班天數:9/2 + 9/3-5 + 9/6 + 9/10 + 9/12 = 7
+  check('標題列摘要「值班 1 · 不值 7 天」', api.scheduleHeadText(M) === '值班 1 · 不值 7 天', api.scheduleHeadText(M));
+  delete META[M]; setRows('');
+  check('都沒有 → —', api.scheduleHeadText(M) === '—');
 }
 
 console.log('');

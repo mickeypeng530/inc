@@ -1168,9 +1168,23 @@ select.btn-secondary option {
 }
 .mini-cal-day.we { color: var(--ink-muted); }
 .mini-cal-day.today { outline: 1px solid var(--accent); }
-.mini-cal-day.booked { background: var(--accent); color: #0e0f12; font-weight: 600; }
+/* 編碼分兩層,才能同一格同時看出「排了值班」與「預約了不值班」(= 衝突):
+   值班 = 實心色塊(IR 紅 / 報告 綠 / IR+報告 紫);不值班 = 灰底 + 刪除線。
+   不值班原本是 accent 琥珀色實心,跟 IR 紅太近,改成不佔色相的灰。 */
+.mini-cal-day { cursor: pointer; }
+.mini-cal-day:hover { box-shadow: inset 0 0 0 1px var(--ink-muted); }
+.mini-cal-day.booked { background: var(--border); color: var(--ink-muted); text-decoration: line-through; }
 /* 帶註記的日子(例 (no IR))淡一階 —— 是附帶條件,不是整天不值班 */
-.mini-cal-day.booked-note { background: var(--accent); color: #0e0f12; opacity: .42; }
+.mini-cal-day.booked-note { text-decoration: line-through; text-decoration-color: var(--ink-muted); }
+.mini-cal-day.duty-ir   { background: #f85149; color: #0e0f12; font-weight: 600; }
+.mini-cal-day.duty-rpt  { background: #3fb950; color: #0e0f12; font-weight: 600; }
+.mini-cal-day.duty-both { background: #a371f7; color: #0e0f12; font-weight: 600; }
+/* 外框不用內框:IR 本身是紅底,紅色內框會隱形 */
+.mini-cal-day.conflict  { box-shadow: 0 0 0 2px var(--danger); position: relative; z-index: 1; text-decoration: line-through; }
+.mini-cal-legend { font-family: var(--font-mono); font-size: 9px; color: var(--ink-muted); margin-top: 4px; line-height: 1.6; max-width: 153px; }
+.mini-cal-legend .sw { display: inline-block; width: 8px; height: 8px; border-radius: 1px; margin-right: 2px; vertical-align: -1px; }
+.mini-cal-legend .lg { margin-right: 6px; white-space: nowrap; }
+.mini-cal-legend .warn { color: var(--danger); }
 .schedule-month-block.collapsed .schedule-month-body { display: none; }
 .schedule-duty-row {
   display: grid;
@@ -2202,7 +2216,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.08.28';
+const APP_VERSION = '2026.09.16';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5341,14 +5355,79 @@ function renderMiniCalendar(month) {
   for (let d = 1; d <= total; d++) {
     const dow = new Date(y, m - 1, d).getDay();
     const iso = `${month}-${String(d).padStart(2, '0')}`;
-    grid.appendChild(el('div', {
+    const cell = el('div', {
       class: 'mini-cal-day' + (dow === 0 || dow === 6 ? ' we' : '') + (iso === today ? ' today' : ''),
       'data-cal-day': String(d),
       title: iso,
-    }, String(d)));
+    }, String(d));
+    // 點一下切值班種類。只切 class(refreshMiniCalendar),不重建 —— 連點三下才到 IR+報告,
+    // 重建會讓連點中途的 click 落在已被移除的節點上
+    cell.addEventListener('click', () => { cycleDutyDay(month, iso); refreshMiniCalendar(month); });
+    grid.appendChild(cell);
   }
   wrap.appendChild(grid);
+  wrap.appendChild(el('div', { class: 'mini-cal-legend', 'data-cal-legend': month }));
   return wrap;
+}
+
+// --- 值班日(已排好的班)---
+// 存 monthlyMeta[月].dutyDays = { 'YYYY-MM-DD': 'ir' | 'rpt' | 'both' }
+// ⚠ key 用完整 ISO 日期,不用 '3' / '17':RTDB 遇到大多是整數的 key 會把物件轉成**陣列**讀回來。
+// ⚠ 不寫進 days[date]:那是「實際紀錄」,未來日期建檔會被統計/同步守門/桌寵當成真的一天。
+const DUTY_CYCLE = ['', 'ir', 'rpt', 'both'];
+const DUTY_LABEL = { ir: 'IR', rpt: '報告', both: 'IR+報告' };
+function dutyDaysOf(month) {
+  const m = (state.data.monthlyMeta || {})[month];
+  return (m && m.dutyDays) || {};
+}
+function cycleDutyDay(month, iso) {
+  if (String(iso).slice(0, 7) !== month) return '';
+  const cur = dutyDaysOf(month)[iso] || '';
+  const next = DUTY_CYCLE[(DUTY_CYCLE.indexOf(cur) + 1) % DUTY_CYCLE.length];   // 不認得的值 → 清掉
+  if (!state.data.monthlyMeta) state.data.monthlyMeta = {};
+  const meta = state.data.monthlyMeta[month] || (state.data.monthlyMeta[month] = {});
+  if (next) {
+    if (!meta.dutyDays) meta.dutyDays = {};
+    meta.dutyDays[iso] = next;
+  } else if (meta.dutyDays) {
+    delete meta.dutyDays[iso];                                  // 清空一律 delete
+    if (!Object.keys(meta.dutyDays).length) delete meta.dutyDays;
+  }
+  // 連點切換 = 產生中間值 → 同打字輸入走 debounce 400 + 共用 saveDebounce(回音 race)
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
+  return next;
+}
+function dutySummary(month) {
+  const s = { ir: 0, rpt: 0, both: 0, total: 0 };
+  for (const [iso, t] of Object.entries(dutyDaysOf(month)))
+    if (iso.slice(0, 7) === month && s[t] !== undefined) { s[t]++; s.total++; }
+  return s;
+}
+// 衝突:整天預約不值班卻排到班;或註記含 no IR 卻排到 IR。回傳日(數字)陣列
+function dutyConflicts(month) {
+  const mm = Number(month.slice(5, 7));
+  const full = new Set(), noIR = new Set();
+  for (const t of aggregateNoDutyTokens(month)) {
+    if (t.mon !== mm) continue;
+    for (let d = t.from; d <= t.to; d++) {
+      if (!t.note) full.add(d);
+      else if (/no\s*IR/i.test(t.note)) noIR.add(d);
+    }
+  }
+  const out = [];
+  for (const [iso, t] of Object.entries(dutyDaysOf(month))) {
+    if (iso.slice(0, 7) !== month) continue;
+    const d = Number(iso.slice(8, 10));
+    if (full.has(d) || (noIR.has(d) && (t === 'ir' || t === 'both'))) out.push(d);
+  }
+  return out.sort((a, b) => a - b);
+}
+function scheduleHeadText(month) {
+  const n = aggregateNoDutyDates(month).length, s = dutySummary(month);
+  const parts = [];
+  if (s.total) parts.push(`值班 ${s.total}`);
+  if (n) parts.push(`不值 ${n} 天`);
+  return parts.length ? parts.join(' · ') : '—';
 }
 // 只切 class,不重建 DOM —— 打字中會被呼叫(同 refreshNoDutyOverview 的分工)
 function refreshMiniCalendar(month) {
@@ -5359,12 +5438,34 @@ function refreshMiniCalendar(month) {
     const booked = new Set(), noted = new Set();
     for (const t of aggregateNoDutyTokens(m))
       if (t.mon === mm) for (let d = t.from; d <= t.to; d++) (t.note ? noted : booked).add(d);
+    const duty = dutyDaysOf(m), conflicts = new Set(dutyConflicts(m));
     cal.querySelectorAll('[data-cal-day]').forEach(c => {
       const d = Number(c.getAttribute('data-cal-day'));
+      const iso = `${m}-${String(d).padStart(2, '0')}`;
+      const t = duty[iso] || '';
       // 同一天既有整天預約又有帶註記的 → 以「整天」為準(較強的那個)
-      c.classList.toggle('booked', booked.has(d));
-      c.classList.toggle('booked-note', !booked.has(d) && noted.has(d));
+      // 有排值班時實心色塊優先,不值班的灰底讓位(衝突另外用紅框標)
+      c.classList.toggle('booked', !t && booked.has(d));
+      c.classList.toggle('booked-note', !t && !booked.has(d) && noted.has(d));
+      for (const k of ['ir', 'rpt', 'both']) c.classList.toggle('duty-' + k, t === k);
+      c.classList.toggle('conflict', conflicts.has(d));
+      c.title = iso + (t ? ` · ${DUTY_LABEL[t]}值班` : '') + (conflicts.has(d) ? ' · ⚠ 與預約不值班衝突' : '');
     });
+    const legend = cal.querySelector('[data-cal-legend]');
+    if (legend) {
+      const s = dutySummary(m);
+      const sw = (bg, extra = '') => `<span class="sw" style="background:${bg};${extra}"></span>`;
+      legend.innerHTML =
+        `<span class="lg">${sw('#f85149')}IR ${s.ir}</span>` +
+        `<span class="lg">${sw('#3fb950')}報告 ${s.rpt}</span>` +
+        `<span class="lg">${sw('#a371f7')}IR+報告 ${s.both}</span>` +
+        `<span class="lg">${sw('var(--border)')}不值班</span>` +
+        (conflicts.size ? `<br><span class="warn">⚠ 衝突 ${[...conflicts].map(d => mm + '/' + d).join(', ')}</span>` : '') +
+        `<br>點日期切換:IR → 報告 → IR+報告 → 清除`;
+    }
+    const block = cal.closest('.schedule-month-block');
+    const sum = block && block.querySelector('.schedule-month-summary');
+    if (sum) sum.textContent = scheduleHeadText(m);
   });
 }
 function renderScheduleMonthBlock(month) {
@@ -5375,8 +5476,8 @@ function renderScheduleMonthBlock(month) {
   const block = el('div', { class: `schedule-month-block${isOpen ? '' : ' collapsed'}` });
 
   const head = el('div', { class: 'schedule-month-head' },
-    el('span', { class: 'schedule-month-title' }, `${Number(month.slice(5,7))}月 預約不值班`),
-    el('span', { class: 'schedule-month-summary' }, dates.length ? `${dates.length} 天` : '—'),
+    el('span', { class: 'schedule-month-title' }, `${Number(month.slice(5,7))}月 值班 / 預約不值班`),
+    el('span', { class: 'schedule-month-summary' }, scheduleHeadText(month)),
     el('span', null, isOpen ? '▼' : '▶')
   );
   head.addEventListener('click', () => {
@@ -5482,10 +5583,7 @@ function refreshNoDutyOverview(month) {
     const m = elm.getAttribute('data-noduty-overview');
     if (month && m !== month) return;
     renderNoDutyOverviewInto(elm, m);
-    const head = elm.closest('.schedule-month-block');
-    const sum = head && head.querySelector('.schedule-month-summary');
-    if (sum) { const n = aggregateNoDutyDates(m).length; sum.textContent = n ? `${n} 天` : '—'; }
-    refreshMiniCalendar(m);
+    refreshMiniCalendar(m);          // 標題列摘要也由它更新(含值班數)
   });
 }
 // 拖曳排序:UI 只顯示該月的子集,但 scheduleEvents 是全域陣列 ——
