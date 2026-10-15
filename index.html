@@ -2216,7 +2216,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.09.16';
+const APP_VERSION = '2026.10.15';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2871,7 +2871,11 @@ async function guardDayUpdates(updates) {
       return;
     }
     const baseStr = (lastSynced && lastSynced.days[date]) || 'null';
-    if (JSON.stringify(cloudDay ?? null) === baseStr) return;   // 沒人動過 → 照原樣寫
+    // ⚠ 必須用 canonJSON,不可裸 stringify(2026-10-15 病歷號回溯的病根之一):
+    // 存檔完成後 lastSynced = nextSnap 是**本機形態**(插入序、帶空容器),雲端讀回來是
+    // RTDB 形態(字典序、空容器被丟掉)→ 裸比對永遠不相等 → 每次存檔都誤判「有人動過」
+    // 走合併分支。guardTopUpdates 早就這樣改了,這裡漏了。
+    if (canonJSON(cloudDay) === canonJSON(JSON.parse(baseStr))) return;   // 沒人動過 → 照原樣寫
     const m = merge3(JSON.parse(baseStr), updates[p], cloudDay || {});
     m.updatedAt = new Date().toISOString();
     stampRevenue(m);   // 合併後內容變了 → revenue 重算再寫,雲端不會留下過期的衍生值
@@ -2910,6 +2914,9 @@ async function guardTopUpdates(updates) {
 // 髒路徑寫入(經 Tier 2 守門)
 async function _writeDirty(updates, nextSnap) {
   const mySeq = ++syncSeq;
+  // 守門會把 updates[p] 換成合併結果 → 先留住「送出那一刻的本機內容」,
+  // 回來時才分得出使用者在往返期間又改了什麼(見下方合併回寫)
+  const sentLocal = { ...updates };
   try {
     // 兩個守門各自一趟 get,並行跑不疊加延遲(它們動 updates 的不同 key,不互相干擾)
     const [merged, mergedTop] = await Promise.all([guardDayUpdates(updates), guardTopUpdates(updates)]);
@@ -2923,17 +2930,36 @@ async function _writeDirty(updates, nextSnap) {
     if (mySeq !== syncSeq) return;
     // 合併結果回寫本地 + 基準,讓本機/雲端收斂(否則下次 diff 會再把舊值推上去)
     if (merged.size || mergedTop) {
+      // ⚠ 不可以直接 `state.data.days[date] = m`(2026-10-15 病歷號回溯的病根):
+      // m 是**送出那一刻**的內容,而 get + update 往返期間使用者可能還在打字 →
+      // 直接覆蓋會把那幾個字蓋掉 + renderAll 重建欄位,之後的 debounce 存的是被蓋過的值,
+      // 永久遺失。改成再做一次三方合併:base=送出時的本機 / local=現在的本機 / cloud=m ——
+      // 往返期間改過的欄位以現在為準,沒改的才收下合併結果(對方的新值)。
+      // 基準記 m(= 雲端現在的內容),所以本機多出來的那幾個字下次 diff 會被推上去。
+      let changed = false;
+      const settle = (sent, cur, m) => {
+        if (cur === undefined) return m;
+        const out = merge3(sent, cur, m);
+        // RTDB 不存空容器 → 合併結果會缺 meetings:[] 這類 key;本機原本有就留著
+        for (const k of Object.keys(cur))
+          if (!(k in out) && cur[k] && typeof cur[k] === 'object' && !Object.keys(cur[k]).length) out[k] = cur[k];
+        if (canonJSON(out) !== canonJSON(cur)) changed = true;
+        return out;
+      };
       for (const [date, m] of merged) {
-        state.data.days[date] = m;
+        const res = settle(sentLocal['days/' + date], state.data.days[date], m);
+        stampRevenue(res);
+        state.data.days[date] = res;
         nextSnap.days[date] = JSON.stringify(m);
       }
       if (mergedTop) {
-        state.data.pending = mergedTop;
+        state.data.pending = settle(sentLocal.pending, state.data.pending, mergedTop);
         nextSnap.top.pending = JSON.stringify(mergedTop);
       }
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data)); } catch (e) {}
       console.info(`Tier2:${merged.size} 天${mergedTop ? ' + pending' : ''}與雲端合併(對方較新的欄位已保留)`);
-      renderAll();
+      // 只有對方真的帶來新東西才重繪 —— 重繪 = 重建正在打字的欄位
+      if (changed) renderAll();
     }
     lastSynced = nextSnap;
   } catch (e) {
