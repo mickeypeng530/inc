@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title> </title>
+<!-- favicon:內嵌 SVG(單檔,不多一個檔案)。刻意不放文字/$ —— 標題也是刻意留白(38e9eea),分頁上不露出用途 -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2317191e'/%3E%3Crect x='7' y='17' width='4.5' height='8' rx='1' fill='%23e9a23b'/%3E%3Crect x='13.75' y='12' width='4.5' height='13' rx='1' fill='%23e9a23b'/%3E%3Crect x='20.5' y='7' width='4.5' height='18' rx='1' fill='%23e9a23b'/%3E%3C/svg%3E">
 <!-- 外部資源:先握手,省掉 DNS + TLS 往返 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -2216,7 +2218,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.10.15';
+const APP_VERSION = '2026.10.23';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
