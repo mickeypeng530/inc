@@ -316,6 +316,14 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
   color: var(--ink-muted);
   margin-left: 3px;
 }
+/* 會議角色:可點切換主講/參與(逐場) */
+.mtg-role-btn {
+  font-family: var(--font-mono); font-size: 10px; margin-left: 6px; padding: 0 6px;
+  border: 1px solid var(--border); border-radius: 8px; background: transparent;
+  color: var(--ink-muted); cursor: pointer; line-height: 16px;
+}
+.mtg-role-btn:hover { border-color: var(--ink-cap); color: var(--ink-1); }
+.mtg-role-btn.speaker { border-color: var(--accent); color: var(--accent); }
 /* === 每小時產值(⏱ 操作記錄 modal 內)=== */
 .hr-row { display: flex; align-items: center; gap: 6px; font-size: 11px; line-height: 1.5; }
 .hr-h { font-family: var(--font-mono); color: var(--ink-muted); width: 26px; flex-shrink: 0; text-align: right; }
@@ -2218,7 +2226,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.10.23';
+const APP_VERSION = '2026.10.29';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -4684,7 +4692,10 @@ function renderDayMeetingPanel() {
     list.appendChild(el('li', { class: 'proc-item' },
       el('div', { style: 'flex:1;min-width:0' },
         el('div', { class: 'proc-item-name' }, m.name || '?',
-          el('span', { class: 'count-unitprice' }, m.role || '')),
+          // 角色跟著「這一場」走,不是跟著目錄 —— 同一個會議這次主講、下次參與(2026-10-29)
+          el('button', { class: 'mtg-role-btn' + (m.role === '主講' ? ' speaker' : ''),
+            title: '點一下切換主講 / 參與(金額會跟著帶預設值,之後仍可改)',
+            onclick: () => toggleDayMeetingRole(i) }, m.role || '參與')),
         el('div', { class: 'proc-item-detail has-time' },
           timeField(m.start, '開始(選填)', (t) => updateMtgTime(i, 'start', t), `mt|${state.currentDate}|${i}|s`),
           el('span', null, '–'),
@@ -4692,7 +4703,12 @@ function renderDayMeetingPanel() {
           el('span', { class: 'proc-dur', 'data-mdur-key': `${state.currentDate}|${i}` },
             dur != null ? `⏱ ${fmtDur(dur)}` : ''))
       ),
-      el('span', { class: 'proc-item-amount-input', style: 'border:none;text-align:right' }, fmtMoney(m.amount || 0)),
+      // onchange(失焦/Enter 才存),同 procedure 金額欄 —— 不是逐鍵事件,不受中間值回音影響
+      el('input', { class: 'proc-item-amount-input', type: 'number', min: '0', inputmode: 'numeric',
+        value: String(Number(m.amount) || 0), title: '可編輯金額',
+        'data-focus-key': `mt|${state.currentDate}|${i}|amt`,
+        onfocus: countSelectFocus,
+        onchange: (e) => updateDayMeetingAmount(i, e.target.value) }),
       el('button', { class: 'btn-del', title: '刪除', onclick: () => removeDayMeeting(i) }, '×')
     ));
   }
@@ -4717,6 +4733,40 @@ function addDayMeeting() {
   logActivity('mtg.' + c.id, 1);
   persist();
   renderDayMeetingPanel();
+  renderStatsPanel();
+}
+// 某個角色的預設金額:跟目錄同角色 → 目錄金額;不同角色 → 主講 $3000 / 參與 $500
+// (與 sheet 匯入 parseMonthSheetTSV 的既有慣例一致,使用者 2026-10-29 選定)
+const MTG_ROLE_DEFAULT = { '主講': 3000, '參與': 500 };
+function mtgRoleAmount(cat, role) {
+  if (cat && cat.role === role) return Number(cat.amount) || 0;
+  return MTG_ROLE_DEFAULT[role] ?? 0;
+}
+// 切換一場會議的角色,金額帶該角色的預設值(之後仍可手改)。回傳新角色
+function toggleMeetingRole(rec, catalog) {
+  const role = rec.role === '主講' ? '參與' : '主講';
+  const cat = (catalog || []).find(c => c.id === rec.catalogId);
+  rec.role = role;
+  rec.amount = mtgRoleAmount(cat, role);
+  return role;
+}
+function toggleDayMeetingRole(i) {
+  const day = getDay(state.currentDate);
+  const rec = day.meetings && day.meetings[i];
+  if (!rec) return;
+  toggleMeetingRole(rec, state.data.settings.meetingCatalog);
+  persist();
+  renderDayMeetingPanel();
+  renderMeetingPanel();
+  renderStatsPanel();
+}
+function updateDayMeetingAmount(i, val) {
+  const day = getDay(state.currentDate);
+  const rec = day.meetings && day.meetings[i];
+  if (!rec) return;
+  rec.amount = Math.max(0, Number(val) || 0);
+  persist();
+  renderMeetingPanel();
   renderStatsPanel();
 }
 function removeDayMeeting(i) {
@@ -4955,8 +5005,10 @@ function setMeetingDates(month, catalogId, datesStr) {
       if (!dayRec.meetings) dayRec.meetings = [];
       const old = kept[d];
       if (old && old.length) {
-        // 原樣放回(保住 start/end 與同日重複場次);角色/金額跟隨 catalog 最新值
-        for (const o of old) dayRec.meetings.push({ ...o, role: info.role, name: info.name, amount: info.amount });
+        // 原樣放回(保住 start/end、同日重複場次、**這一場的角色與金額**);只有名稱跟隨 catalog。
+        // ⚠ 2026-10-29 前這裡會把角色/金額重設成 catalog 值 —— 角色改成逐場切換後,那等於
+        //    「碰一下月表日期字串,今日 tab 切過的主講就無聲變回參與」(同起訖時間那個坑)。
+        for (const o of old) dayRec.meetings.push({ ...o, name: info.name });
       } else {
         dayRec.meetings.push({ catalogId: info.id, role: info.role, name: info.name, amount: info.amount });
       }
@@ -5016,10 +5068,14 @@ function renderMeetingPanel() {
     if (count === 0 && !forceShow) return null;  // 當月沒發生 → 不顯示(只留有日期的)
     // total 用當月 day.meetings 實際 amount 加總(import 權威),不用 count×catalog
     let total = 0;
+    const odd = [];   // 角色跟目錄不同的場次(今日 tab 逐場切換過的)→ 在這列標出來
     for (let dd = 1; dd <= daysInMonth; dd++) {
       const rec = state.data.days[`${month}-${String(dd).padStart(2, '0')}`];
       if (!rec) continue;
-      for (const mt of (rec.meetings || [])) if (mt.catalogId === catalogId) total += Number(mt.amount || 0);
+      for (const mt of (rec.meetings || [])) if (mt.catalogId === catalogId) {
+        total += Number(mt.amount || 0);
+        if (mt.role && mt.role !== info.role) odd.push(`${dd} ${mt.role}`);
+      }
     }
     const input = el('input', {
       class: 'meeting-dates', type: 'text',
@@ -5030,7 +5086,8 @@ function renderMeetingPanel() {
     return el('div', { class: 'meeting-preset-row' },
       el('span', { class: 'meeting-name', title: `[${info.role}] ${info.name}` }, info.name),
       input,
-      el('span', { class: 'meeting-count' }, count ? `×${count}` : ''),
+      el('span', { class: 'meeting-count', title: odd.length ? '角色與目錄不同的場次:' + odd.join('、') : '' },
+        count ? `×${count}` + (odd.length ? ` · ${odd.map(s => s.split(' ')[1]).filter((v, k, a) => a.indexOf(v) === k).join('/')}${odd.length}` : '') : ''),
       el('span', { class: 'meeting-amount' }, total ? fmtMoney(total) : '')
     );
   }
@@ -8807,7 +8864,8 @@ function exportMeetingsTSV() {
   for (let d = 1; d <= dim; d++) {
     const date = `${month}-${String(d).padStart(2, '0')}`;
     for (const mtg of (state.data.days[date]?.meetings || [])) {
-      const key = mtg.catalogId || `${mtg.role || ''}|${mtg.name || ''}`;
+      // 同一個會議這個月有主講也有參與 → 分成兩列(貼回 parsePastedMeetings 時靠 名稱+角色 對回)
+      const key = `${mtg.catalogId || mtg.name || ''}|${mtg.role || ''}`;
       if (!groups.has(key)) groups.set(key, { role: '', name: '', days: [], amount: 0 });
       const g = groups.get(key);
       g.days.push(d);                       // d 由小到大掃,天然已排序
@@ -9158,6 +9216,18 @@ function dragReorder(arr, i, rerender, tag = 'td', beforeSave = null) {
   return { handle, attach };
 }
 
+// preset 換品項時價格要跟著換(2026-10-29 修)。
+// 舊版只在 amount 為 0/空 時才帶預設價,但「+ 加項目」會先塞清單第一項(PCN $3000)
+// → amount 從來不是 0 → 換成任何品項都卡在 $3000。
+// 規則:目前價格 = 舊品項的預設價(或 0/空)= 沒手動改過 → 換成新品項預設價;改過就保留。
+function applyPresetItemAtom(it, atoms, newId) {
+  const prev = atoms.find(x => x.id === it.atomicId);
+  const next = atoms.find(x => x.id === newId);
+  const amt = Number(it.amount);
+  const untouched = it.amount == null || !amt || (prev && amt === Number(prev.amount));
+  it.atomicId = newId;
+  if (next && untouched) it.amount = Number(next.amount) || 0;
+}
 function renderSettingsPresets() {
   const t = $('settings-presets');
   t.innerHTML = '';
@@ -9197,9 +9267,7 @@ function renderSettingsPresets() {
       const itemsBox = el('div', { class: 'preset-items-edit' });
       for (const [j, it] of p.items.entries()) {
         const atomSel = el('select', { onchange: (e) => {
-          it.atomicId = e.target.value;
-          const a = atoms.find(x => x.id === it.atomicId);
-          if (a && (it.amount == null || it.amount === 0)) it.amount = a.amount;
+          applyPresetItemAtom(it, atoms, e.target.value);
           storage.save(state.data); renderSettingsPresets(); renderProceduresPanel();
         } });
         for (const a of atoms) {
