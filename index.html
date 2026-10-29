@@ -324,6 +324,11 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
 }
 .mtg-role-btn:hover { border-color: var(--ink-cap); color: var(--ink-1); }
 .mtg-role-btn.speaker { border-color: var(--accent); color: var(--accent); }
+.meeting-name.clickable, .meeting-count.clickable { cursor: pointer; }
+/* 有例外標示(「×3 主講1」)時欄位要能長寬、不折行 —— 讓名稱欄去縮(它本來就有 ellipsis) */
+.meeting-preset-row .meeting-count { min-width: 28px; width: auto !important; white-space: nowrap; }
+.mtg-odd { color: var(--accent); font-size: 11px; }
+.meeting-name.clickable:hover { text-decoration: underline dotted; }
 /* === 每小時產值(⏱ 操作記錄 modal 內)=== */
 .hr-row { display: flex; align-items: center; gap: 6px; font-size: 11px; line-height: 1.5; }
 .hr-h { font-family: var(--font-mono); color: var(--ink-muted); width: 26px; flex-shrink: 0; text-align: right; }
@@ -2226,7 +2231,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.10.29';
+const APP_VERSION = '2026.10.29b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -5083,11 +5088,17 @@ function renderMeetingPanel() {
       title: '輸入該月日期，空格/逗號分隔（如:3 15 22）',
     });
     input.addEventListener('change', (e) => setMeetingDates(month, catalogId, e.target.value.trim()));
+    // 點名稱 / 場次數 → 逐場清單改角色與金額(角色是逐場的,拖整列只能整月一起改,粒度不對)
+    const openOcc = count ? () => showMonthMeetingModal(month, catalogId) : null;
     return el('div', { class: 'meeting-preset-row' },
-      el('span', { class: 'meeting-name', title: `[${info.role}] ${info.name}` }, info.name),
+      el('span', { class: 'meeting-name' + (count ? ' clickable' : ''),
+        title: `[${info.role}] ${info.name}` + (count ? '\n點一下逐場改主講 / 參與' : ''),
+        onclick: openOcc }, info.name),
       input,
-      el('span', { class: 'meeting-count', title: odd.length ? '角色與目錄不同的場次:' + odd.join('、') : '' },
-        count ? `×${count}` + (odd.length ? ` · ${odd.map(s => s.split(' ')[1]).filter((v, k, a) => a.indexOf(v) === k).join('/')}${odd.length}` : '') : ''),
+      el('span', { class: 'meeting-count' + (count ? ' clickable' : ''), onclick: openOcc,
+        title: (odd.length ? '角色與目錄不同的場次:' + odd.join('、') + '\n' : '') + (count ? '點一下逐場改主講 / 參與' : '') },
+        count ? `×${count}` : '',
+        odd.length ? el('span', { class: 'mtg-odd' }, ` ${odd.map(s => s.split(' ')[1]).filter((v, k, a) => a.indexOf(v) === k).join('/')}${odd.length}`) : null),
       el('span', { class: 'meeting-amount' }, total ? fmtMoney(total) : '')
     );
   }
@@ -6848,6 +6859,58 @@ async function showActivityModal(date) {
 
 // 月表編輯模式:點 Special(Other)格 → 編輯該天的 special.others(種類/金額/數量)。
 // 對應「貼 sheet 後種類未指定」的事後修正 —— 不用再切回今日 tab 一天一天找。
+// 月表會議列 → 該月這個會議的每一場,逐場切角色 / 改金額(2026-10-29)
+// 與今日 tab 同一顆角色標籤、同一套金額規則(toggleMeetingRole / mtgRoleAmount)。
+// 刻意不做「全部改主講」(使用者明確不要)。
+function showMonthMeetingModal(month, catalogId) {
+  const mount = $('modal-mount');
+  const overlay = el('div', { class: 'modal-overlay' });
+  const listWrap = el('div', { class: 'dayproc-list' });
+  const totalEl = el('span', { class: 'stat-money' }, '0');
+  const info = getMeetingInfo(month, catalogId);
+  const close = () => overlay.remove();
+  const saveAndRefresh = (date) => {
+    touchDay(date); storage.save(state.data);
+    renderMeetingPanel(); renderDayMeetingPanel(); renderStatsPanel(); render();
+  };
+  const render = () => {
+    listWrap.innerHTML = '';
+    const [y, m] = month.split('-').map(Number);
+    const dim = new Date(y, m, 0).getDate();
+    let total = 0, n = 0;
+    for (let d = 1; d <= dim; d++) {
+      const date = `${month}-${String(d).padStart(2, '0')}`;
+      const mtgs = state.data.days[date]?.meetings || [];
+      mtgs.forEach((rec) => {
+        if (rec.catalogId !== catalogId) return;
+        n++; total += Number(rec.amount) || 0;
+        listWrap.appendChild(el('div', { class: 'mp-row' },
+          el('span', { style: 'font-family:var(--font-mono);font-size:12px;min-width:84px' }, `${m}/${d}(${weekdayCh(date).slice(1)})`),
+          el('button', { class: 'mtg-role-btn' + (rec.role === '主講' ? ' speaker' : ''),
+            title: '點一下切換主講 / 參與(金額會跟著帶預設值,之後仍可改)',
+            onclick: () => { toggleMeetingRole(rec, state.data.settings.meetingCatalog); saveAndRefresh(date); } },
+            rec.role || '參與'),
+          el('span', { style: 'flex:1' }),
+          el('input', { class: 'proc-item-amount-input mp-amt', type: 'number', min: '0', inputmode: 'numeric',
+            value: String(Number(rec.amount) || 0), title: '金額(可改)', onfocus: countSelectFocus,
+            onchange: (e) => { rec.amount = Math.max(0, Number(e.target.value) || 0); saveAndRefresh(date); } })
+        ));
+      });
+    }
+    if (!n) listWrap.appendChild(el('div', { style: 'text-align:center;color:var(--ink-muted);padding:14px' }, '這個月沒有這個會議'));
+    totalEl.textContent = fmtMoney(total);
+  };
+  const modal = el('div', { class: 'modal paste-modal' },
+    el('h3', null, `${info ? info.name : catalogId} — ${Number(month.slice(5, 7))} 月`),
+    listWrap,
+    el('div', { class: 'proc-total' }, el('span', null, '本月合計'), totalEl),
+    el('div', { class: 'modal-actions' }, el('button', { class: 'btn-primary', onclick: close }, '完成'))
+  );
+  render();
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  mount.appendChild(overlay);
+}
 function showDaySpecialModal(date) {
   const mount = $('modal-mount');
   const overlay = el('div', { class: 'modal-overlay' });
