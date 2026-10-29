@@ -103,5 +103,77 @@ console.log('\n[3] 匯出依角色分列,貼回 parsePastedMeetings 角色與金
   check('貼回:主講那列每場 $3000', sp && sp.per === 3000, rows);
 }
 
+// ---- 月表:一列 = 會議 × 角色,依實際角色分區;整列切換;日期欄依角色寫入 ----
+function monthApi(days) {
+  return new Function('CAT', 'DAYS', `
+    const state = { data: { days: DAYS, settings: { meetingCatalog: CAT } } };
+    const touched = [];
+    const touchDay = (d) => { touched.push(d); if (!state.data.days[d]) state.data.days[d] = { meetings: [] }; return state.data.days[d]; };
+    const storage = { save(){} };
+    const renderMeetingPanel = () => {}, renderDayMeetingPanel = () => {}, renderStatsPanel = () => {};
+    ${grabLine('const MTG_ROLE_DEFAULT')}
+    ${grabFn('mtgRoleAmount')} ${grabFn('toggleMeetingRole')} ${grabFn('getMeetingInfo')}
+    ${grabFn('monthMeetingGroups')} ${grabFn('toggleMonthMeetingRole')} ${grabFn('setMeetingDates')}
+    return { monthMeetingGroups, toggleMonthMeetingRole, setMeetingDates, state, touched };
+  `)(CAT, days);
+}
+const occ = (api, d) => (api.state.data.days[d]?.meetings || []).map(m => `${m.catalogId}:${m.role}:${m.amount}`).join(',');
+
+console.log('\n[4] ⭐ 分區依實際角色(使用者回報:29 號主講卻排在「參與」底下)');
+{
+  const api = monthApi({
+    '2026-10-29': { meetings: [{ catalogId: 'case', role: '主講', name: '案例討論會', amount: 3000 }] },
+    '2026-10-06': { meetings: [{ catalogId: 'case', role: '參與', name: '案例討論會', amount: 500 }] },
+    '2026-10-07': { meetings: [{ catalogId: 'ortho', name: '骨科手術案例討論', amount: 3000 }] },   // 舊紀錄沒有 role 欄
+  });
+  const g = api.monthMeetingGroups('2026-10');
+  check('⭐ 案例討論會 29 號 → 主講那一列', g.has('case|主講') && g.get('case|主講').days.join() === '29', [...g.keys()]);
+  check('同月混合 → 自動拆兩列(參與那列只有 6 號)', g.get('case|參與') && g.get('case|參與').days.join() === '6', [...g.keys()]);
+  check('沒有 role 欄的舊紀錄 → 視為目錄角色(主講)', g.has('ortho|主講'), [...g.keys()]);
+  check('每列金額只加自己角色的', g.get('case|主講').total === 3000 && g.get('case|參與').total === 500);
+}
+
+console.log('\n[5] ⭐ 整列切換:這個月這個角色的每一場一起切,別的角色那列不動');
+{
+  const api = monthApi({
+    '2026-10-06': { meetings: [{ catalogId: 'case', role: '參與', name: '案例討論會', amount: 500, start: '07:30', end: '08:30' }] },
+    '2026-10-13': { meetings: [{ catalogId: 'case', role: '參與', name: '案例討論會', amount: 500 }] },
+    '2026-10-20': { meetings: [{ catalogId: 'case', role: '主講', name: '案例討論會', amount: 3000 }] },
+    '2026-11-03': { meetings: [{ catalogId: 'case', role: '參與', name: '案例討論會', amount: 500 }] },
+  });
+  const to = api.toggleMonthMeetingRole('2026-10', 'case', '參與');
+  check('回傳新角色 主講', to === '主講', to);
+  check('⭐ 6、13 號都變主講 $3000', occ(api, '2026-10-06') === 'case:主講:3000' && occ(api, '2026-10-13') === 'case:主講:3000',
+        [occ(api, '2026-10-06'), occ(api, '2026-10-13')]);
+  check('起訖時間保住', api.state.data.days['2026-10-06'].meetings[0].start === '07:30');
+  check('原本就主講的 20 號不被切成參與', occ(api, '2026-10-20') === 'case:主講:3000', occ(api, '2026-10-20'));
+  check('別的月份不動', occ(api, '2026-11-03') === 'case:參與:500', occ(api, '2026-11-03'));
+  check('只蓋有改到的天的 updatedAt', api.touched.join() === '2026-10-06,2026-10-13', api.touched);
+  check('合併成同一列 case|主講 ×3', api.monthMeetingGroups('2026-10').get('case|主講').days.length === 3);
+  check('沒有東西可切 → null', api.toggleMonthMeetingRole('2026-10', 'case', '參與') === null);
+  // 舊紀錄沒有 role 欄位(目錄角色是主講)→ 也要切得動
+  const b = monthApi({ '2026-10-07': { meetings: [{ catalogId: 'ortho', name: '骨科手術案例討論', amount: 3000 }] } });
+  check('沒有 role 欄的舊紀錄也切得動(主講 → 參與 $500)',
+        b.toggleMonthMeetingRole('2026-10', 'ortho', '主講') === '參與' && occ(b, '2026-10-07') === 'ortho:參與:500', occ(b, '2026-10-07'));
+}
+
+console.log('\n[6] ⭐ 日期欄依角色寫入:在主講那列打日期 → 建成主講;刪日期只刪這個角色的');
+{
+  const api = monthApi({
+    '2026-10-06': { meetings: [{ catalogId: 'case', role: '參與', name: '案例討論會', amount: 500 }] },
+    '2026-10-29': { meetings: [{ catalogId: 'case', role: '主講', name: '案例討論會', amount: 3000, start: '12:00', end: '13:00' }] },
+  });
+  api.setMeetingDates('2026-10', 'case', '29 30', '主講');
+  check('⭐ 新加的 30 號建成主講 $3000(不是目錄的參與 $500)', occ(api, '2026-10-30') === 'case:主講:3000', occ(api, '2026-10-30'));
+  check('29 號原樣保住(含起訖)', occ(api, '2026-10-29') === 'case:主講:3000' && api.state.data.days['2026-10-29'].meetings[0].start === '12:00');
+  check('⭐ 參與那列的 6 號完全不受影響', occ(api, '2026-10-06') === 'case:參與:500', occ(api, '2026-10-06'));
+  api.setMeetingDates('2026-10', 'case', '30', '主講');
+  check('從主講那列刪掉 29 → 只刪 29 的主講場次', occ(api, '2026-10-29') === '' && occ(api, '2026-10-06') === 'case:參與:500',
+        [occ(api, '2026-10-29'), occ(api, '2026-10-06')]);
+  api.setMeetingDates('2026-10', 'case', '', '參與');
+  check('清空參與那列 → 主講的 30 號還在', occ(api, '2026-10-06') === '' && occ(api, '2026-10-30') === 'case:主講:3000',
+        [occ(api, '2026-10-06'), occ(api, '2026-10-30')]);
+}
+
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
 process.exit(fail ? 1 : 0);

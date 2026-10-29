@@ -327,7 +327,9 @@ body.mini-mode .app-version { display: none; }   /* 迷你視窗太窄,不顯示
 .meeting-name.clickable, .meeting-count.clickable { cursor: pointer; }
 /* 有例外標示(「×3 主講1」)時欄位要能長寬、不折行 —— 讓名稱欄去縮(它本來就有 ellipsis) */
 .meeting-preset-row .meeting-count { min-width: 28px; width: auto !important; white-space: nowrap; }
-.mtg-odd { color: var(--accent); font-size: 11px; }
+.meeting-preset-row .mtg-role-btn { margin-left: 0; flex-shrink: 0; }
+@keyframes mtgFlash { from { background: rgba(233,162,59,.35); } to { background: transparent; } }
+.meeting-preset-row.mtg-flash { animation: mtgFlash 1.4s ease-out; }
 .meeting-name.clickable:hover { text-decoration: underline dotted; }
 /* === 每小時產值(⏱ 操作記錄 modal 內)=== */
 .hr-row { display: flex; align-items: center; gap: 6px; font-size: 11px; line-height: 1.5; }
@@ -2231,7 +2233,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.10.29b';
+const APP_VERSION = '2026.10.29c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -4949,19 +4951,6 @@ function removeMeeting(i) {
 }
 
 // --- Meeting batch-entry panel (monthly) ---
-function getMeetingDatesStr(month, catalogId) {
-  const [y, m] = month.split('-').map(Number);
-  const daysInMonth = new Date(y, m, 0).getDate();
-  const dates = [];
-  for (let d = 1; d <= daysInMonth; d++) {
-    const date = `${month}-${String(d).padStart(2,'0')}`;
-    const dayRec = state.data.days[date];
-    if (!dayRec) continue;
-    if ((dayRec.meetings || []).some(mtg => mtg.catalogId === catalogId)) dates.push(d);
-  }
-  return dates.join(' ');
-}
-
 // 取會議資訊:先查 meetingCatalog,沒有(例如匯入的 imp_xxx)就從該月 day.meetings[] 撈
 function getMeetingInfo(month, catalogId) {
   const cat = state.data.settings.meetingCatalog.find(c => c.id === catalogId);
@@ -4980,13 +4969,17 @@ function getMeetingInfo(month, catalogId) {
   return null;
 }
 
-function setMeetingDates(month, catalogId, datesStr) {
+// role(選填,2026-10-29):月表一列 = 「會議 × 角色」→ 只動該角色的場次,新加的日期建成該角色。
+// 不給 role = 舊行為(該會議所有場次)。角色欄空白的舊紀錄視為目錄角色。
+function setMeetingDates(month, catalogId, datesStr, role) {
   const [y, m] = month.split('-').map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
   const dates = datesStr.split(/[\s,，、]+/).map(Number).filter(d => d >= 1 && d <= daysInMonth);
 
   // 清除前先抓會議資訊(imported imp_xxx 也撈得到)
   const info = getMeetingInfo(month, catalogId);
+  const roleOf = (mtg) => mtg.role || (info ? info.role : '參與');
+  const isMine = (mtg) => mtg.catalogId === catalogId && (!role || roleOf(mtg) === role);
 
   // ⚠ 先把既有的同 catalogId 紀錄留下來(連 start/end 一起),重建時原樣放回。
   // 舊版是純 wipe-and-rebuild:使用者只要再碰一次日期字串(哪怕重打同樣內容),
@@ -4996,10 +4989,10 @@ function setMeetingDates(month, catalogId, datesStr) {
     const date = `${month}-${String(d).padStart(2,'0')}`;
     const dayRec = state.data.days[date];
     if (!dayRec) continue;
-    const mine = (dayRec.meetings || []).filter(mtg => mtg.catalogId === catalogId);
+    const mine = (dayRec.meetings || []).filter(isMine);
     if (mine.length) kept[d] = mine;
     const before = (dayRec.meetings || []).length;
-    dayRec.meetings = (dayRec.meetings || []).filter(mtg => mtg.catalogId !== catalogId);
+    dayRec.meetings = (dayRec.meetings || []).filter(mtg => !isMine(mtg));
     // 真的刪到才蓋 updatedAt —— 沒動到的天不可留痕跡(#7)
     if (dayRec.meetings.length !== before) touchDay(date);
   }
@@ -5014,6 +5007,8 @@ function setMeetingDates(month, catalogId, datesStr) {
         // ⚠ 2026-10-29 前這裡會把角色/金額重設成 catalog 值 —— 角色改成逐場切換後,那等於
         //    「碰一下月表日期字串,今日 tab 切過的主講就無聲變回參與」(同起訖時間那個坑)。
         for (const o of old) dayRec.meetings.push({ ...o, name: info.name });
+      } else if (role) {
+        dayRec.meetings.push({ catalogId: info.id, role, name: info.name, amount: mtgRoleAmount(info, role) });
       } else {
         dayRec.meetings.push({ catalogId: info.id, role: info.role, name: info.name, amount: info.amount });
       }
@@ -5038,6 +5033,62 @@ function calcMonthlyMeetingRevenue(month) {
   return total;
 }
 
+// 月表會議:一列 = 「會議 × 角色」的整個月,依**實際角色**分到主講/參與區(2026-10-29)。
+// 舊版依寫死的 MAIN_PRESET_MEETINGS 決定在哪一區 → 切成主講的場次仍排在「參與」底下。
+// 歷史 206 組「會議×月」沒有一組同月混合角色,所以整列切換 ≈ 逐場切換;
+// 真的混合時自動拆成兩列(同匯出 exportMeetingsTSV 的分法)。
+function monthMeetingGroups(month) {
+  const [y, m] = month.split('-').map(Number);
+  const dim = new Date(y, m, 0).getDate();
+  const infoCache = {};
+  const groups = new Map();
+  for (let d = 1; d <= dim; d++) {
+    for (const mt of (state.data.days[`${month}-${String(d).padStart(2, '0')}`]?.meetings || [])) {
+      if (!mt.catalogId) continue;
+      if (!(mt.catalogId in infoCache)) infoCache[mt.catalogId] = getMeetingInfo(month, mt.catalogId);
+      const info = infoCache[mt.catalogId];
+      const role = (mt.role || (info && info.role)) === '主講' ? '主講' : '參與';
+      const key = mt.catalogId + '|' + role;
+      if (!groups.has(key)) groups.set(key, { catalogId: mt.catalogId, role, days: [], total: 0 });
+      const g = groups.get(key);
+      g.days.push(d);                          // 同日兩場 → 日期重複列出(同匯出)
+      g.total += Number(mt.amount) || 0;
+    }
+  }
+  return groups;
+}
+// 整列切換:這個月該會議、該角色的每一場一起切,金額依 mtgRoleAmount。回傳新角色(沒東西可切 → null)
+function toggleMonthMeetingRole(month, catalogId, role) {
+  const info = getMeetingInfo(month, catalogId);
+  const cat = state.data.settings.meetingCatalog;
+  const [y, m] = month.split('-').map(Number);
+  const dim = new Date(y, m, 0).getDate();
+  let to = null;
+  for (let d = 1; d <= dim; d++) {
+    const date = `${month}-${String(d).padStart(2, '0')}`;
+    let hit = false;
+    for (const rec of (state.data.days[date]?.meetings || [])) {
+      if (rec.catalogId !== catalogId) continue;
+      const cur = (rec.role || (info && info.role)) === '主講' ? '主講' : '參與';
+      if (cur !== role) continue;
+      rec.role = cur;                            // 角色欄空白的舊紀錄先補上,toggle 才切得對
+      to = toggleMeetingRole(rec, cat);
+      hit = true;
+    }
+    if (hit) touchDay(date);
+  }
+  return to;
+}
+function onToggleMonthMeetingRow(month, catalogId, role) {
+  const to = toggleMonthMeetingRole(month, catalogId, role);
+  if (!to) return;
+  storage.save(state.data);
+  renderMeetingPanel(); renderDayMeetingPanel(); renderStatsPanel();
+  // 列會跳到另一區 → 閃一下,讓眼睛找得到
+  const row = document.querySelector(`[data-mtg-row="${CSS.escape(catalogId + '|' + to)}"]`);
+  if (row) { row.classList.add('mtg-flash'); row.scrollIntoView({ block: 'nearest' }); }
+}
+
 function renderMeetingPanel() {
   const month = state.currentMonth;
   const container = $('meeting-container');
@@ -5046,103 +5097,71 @@ function renderMeetingPanel() {
   if (labelEl) labelEl.textContent = `(${month})`;
 
   const catalog = state.data.settings.meetingCatalog;
-  const mainIds = new Set([
-    ...MAIN_PRESET_MEETINGS.speaker,
-    ...MAIN_PRESET_MEETINGS.participant,
-  ]);
-
-  const [y, m] = month.split('-').map(Number);
-  const daysInMonth = new Date(y, m, 0).getDate();
-  const activeExtraIds = new Set();
-  for (let d = 1; d <= daysInMonth; d++) {
-    const date = `${month}-${String(d).padStart(2,'0')}`;
-    const dayRec = state.data.days[date];
-    if (!dayRec) continue;
-    for (const mtg of (dayRec.meetings || [])) {
-      if (mtg.catalogId && !mainIds.has(mtg.catalogId)) activeExtraIds.add(mtg.catalogId);
-    }
+  const rows = [...monthMeetingGroups(month).values()];
+  const has = new Set(rows.map(r => r.catalogId));
+  // 常用會議當月沒有場次 → 空列放在目錄預設角色那一區,可以直接打日期
+  // (舊版 `.map(makeRow)` 把陣列 index 當成 forceShow 傳進去 → 每區第一個空的被藏、其他空的顯示)
+  for (const id of MAIN_PRESET_MEETINGS.speaker) if (!has.has(id)) { rows.push({ catalogId: id, role: '主講', days: [], total: 0 }); has.add(id); }
+  for (const id of MAIN_PRESET_MEETINGS.participant) if (!has.has(id)) { rows.push({ catalogId: id, role: '參與', days: [], total: 0 }); has.add(id); }
+  // 「＋ 新增會議」加的空列:要記在 render 之外(舊版是區域變數,一重繪就消失 → 按了沒反應)
+  if (!state.mtgAddIds) state.mtgAddIds = {};
+  for (const id of (state.mtgAddIds[month] || [])) if (!has.has(id)) {
+    const c = catalog.find(x => x.id === id);
+    if (c) { rows.push({ catalogId: id, role: c.role === '主講' ? '主講' : '參與', days: [], total: 0 }); has.add(id); }
   }
 
   container.innerHTML = '';
+  const order = [...MAIN_PRESET_MEETINGS.speaker, ...MAIN_PRESET_MEETINGS.participant];
+  const rank = (r) => { const i = order.indexOf(r.catalogId); return i < 0 ? 999 : i; };
 
-  function makeRow(catalogId, forceShow) {
-    const info = getMeetingInfo(month, catalogId);
+  function makeRow(r) {
+    const info = getMeetingInfo(month, r.catalogId);
     if (!info) return null;
-    const datesStr = getMeetingDatesStr(month, catalogId);
-    const count = datesStr.trim() ? datesStr.trim().split(/\s+/).length : 0;
-    if (count === 0 && !forceShow) return null;  // 當月沒發生 → 不顯示(只留有日期的)
-    // total 用當月 day.meetings 實際 amount 加總(import 權威),不用 count×catalog
-    let total = 0;
-    const odd = [];   // 角色跟目錄不同的場次(今日 tab 逐場切換過的)→ 在這列標出來
-    for (let dd = 1; dd <= daysInMonth; dd++) {
-      const rec = state.data.days[`${month}-${String(dd).padStart(2, '0')}`];
-      if (!rec) continue;
-      for (const mt of (rec.meetings || [])) if (mt.catalogId === catalogId) {
-        total += Number(mt.amount || 0);
-        if (mt.role && mt.role !== info.role) odd.push(`${dd} ${mt.role}`);
-      }
-    }
+    const count = r.days.length;
     const input = el('input', {
       class: 'meeting-dates', type: 'text',
-      value: datesStr, placeholder: '日期',
-      title: '輸入該月日期，空格/逗號分隔（如:3 15 22）',
+      value: r.days.join(' '), placeholder: '日期',
+      title: `輸入該月日期,空格/逗號分隔(如:3 15 22)—— 新加的日期記成「${r.role}」`,
     });
-    input.addEventListener('change', (e) => setMeetingDates(month, catalogId, e.target.value.trim()));
-    // 點名稱 / 場次數 → 逐場清單改角色與金額(角色是逐場的,拖整列只能整月一起改,粒度不對)
-    const openOcc = count ? () => showMonthMeetingModal(month, catalogId) : null;
-    return el('div', { class: 'meeting-preset-row' },
+    input.addEventListener('change', (e) => setMeetingDates(month, r.catalogId, e.target.value.trim(), r.role));
+    const openOcc = count ? () => showMonthMeetingModal(month, r.catalogId) : null;
+    return el('div', { class: 'meeting-preset-row', 'data-mtg-row': r.catalogId + '|' + r.role },
+      // 點標籤 = 這一列(這個月、這個角色)全部切換 → 整列跳到另一區;空列沒有東西可切,標籤只佔位對齊
+      el('button', { class: 'mtg-role-btn' + (r.role === '主講' ? ' speaker' : ''),
+        style: count ? '' : 'visibility:hidden',
+        title: `點一下:這個月這 ${count} 場全部改成${r.role === '主講' ? '參與' : '主講'}(金額帶預設值)`,
+        onclick: () => onToggleMonthMeetingRow(month, r.catalogId, r.role) }, r.role),
       el('span', { class: 'meeting-name' + (count ? ' clickable' : ''),
-        title: `[${info.role}] ${info.name}` + (count ? '\n點一下逐場改主講 / 參與' : ''),
-        onclick: openOcc }, info.name),
+        title: info.name + (count ? '\n點一下逐場看 / 改金額' : ''), onclick: openOcc }, info.name),
       input,
       el('span', { class: 'meeting-count' + (count ? ' clickable' : ''), onclick: openOcc,
-        title: (odd.length ? '角色與目錄不同的場次:' + odd.join('、') + '\n' : '') + (count ? '點一下逐場改主講 / 參與' : '') },
-        count ? `×${count}` : '',
-        odd.length ? el('span', { class: 'mtg-odd' }, ` ${odd.map(s => s.split(' ')[1]).filter((v, k, a) => a.indexOf(v) === k).join('/')}${odd.length}`) : null),
-      el('span', { class: 'meeting-amount' }, total ? fmtMoney(total) : '')
+        title: count ? '點一下逐場看 / 改金額' : '' }, count ? `×${count}` : ''),
+      el('span', { class: 'meeting-amount' }, r.total ? fmtMoney(r.total) : '')
     );
   }
-
-  const speakerRows = MAIN_PRESET_MEETINGS.speaker.map(makeRow).filter(Boolean);
-  if (speakerRows.length) {
-    container.appendChild(el('div', { class: 'meeting-role-head' }, '主講'));
-    speakerRows.forEach(r => container.appendChild(r));
-  }
-
-  // 參與:照當月最早日期排序,空日期墊底
-  const firstDateOf = (catalogId) => {
-    const s = getMeetingDatesStr(month, catalogId).trim();
-    if (!s) return Infinity;
-    const tokens = s.split(/\s+/).map(Number).filter(n => n >= 1);
-    return tokens.length ? Math.min(...tokens) : Infinity;
-  };
-  const participantSorted = [...MAIN_PRESET_MEETINGS.participant]
-    .sort((a, b) => firstDateOf(a) - firstDateOf(b));
-  const participantRows = participantSorted.map(makeRow).filter(Boolean);
-  if (participantRows.length) {
-    container.appendChild(el('div', { class: 'meeting-role-head' }, '參與'));
-    participantRows.forEach(r => container.appendChild(r));
-  }
-
-  // 其他 + 新增的(強制顯示空 row 可填日期)
-  const extraRows = [...activeExtraIds].map(id => makeRow(id, true)).filter(Boolean);
-  if (extraRows.length) {
-    container.appendChild(el('div', { class: 'meeting-role-head' }, '其他'));
-    extraRows.forEach(r => container.appendChild(r));
+  const firstDay = (r) => r.days.length ? Math.min(...r.days) : Infinity;
+  for (const role of ['主講', '參與']) {
+    const sec = rows.filter(r => r.role === role)
+      .sort((a, b) => (firstDay(a) - firstDay(b)) || (rank(a) - rank(b)));
+    container.appendChild(el('div', { class: 'meeting-role-head' }, role));
+    sec.map(makeRow).filter(Boolean).forEach(x => container.appendChild(x));
   }
 
   const addSel = el('select', { style: 'flex:1;min-width:0;background:var(--bg-page);color:var(--ink-1);border:1px solid var(--border);border-radius:var(--r);padding:3px 6px;font-size:12px' });
   addSel.appendChild(el('option', { value: '' }, '— 新增會議 —'));
   for (const cat of catalog) {
-    if (activeExtraIds.has(cat.id)) continue;
-    // 當月已有日期的(已顯示在主講/參與)不重複列入
-    if (getMeetingDatesStr(month, cat.id).trim()) continue;
+    if (has.has(cat.id)) continue;               // 已經有列(有場次或空列)的不重複列入
     addSel.appendChild(el('option', { value: cat.id }, `[${cat.role}] ${cat.name} (${fmtMoney(cat.amount)})`));
   }
   container.appendChild(el('div', { style: 'display:flex;gap:6px;margin-top:6px;align-items:center' },
     addSel,
     el('button', { class: 'btn-secondary', style: 'padding:3px 10px;font-size:12px',
-      onclick: () => { const id = addSel.value; if (!id) return; activeExtraIds.add(id); renderMeetingPanel(); }
+      onclick: () => {
+        const id = addSel.value; if (!id) return;
+        if (!state.mtgAddIds[month]) state.mtgAddIds[month] = [];
+        if (!state.mtgAddIds[month].includes(id)) state.mtgAddIds[month].push(id);
+        renderMeetingPanel();
+      }
     }, '＋')
   ));
 
