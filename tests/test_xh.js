@@ -28,6 +28,9 @@ function grabConstBlock(name) {
 const PRICES = { bmd:120, consult:200, ct:{er_adm_self:420, ldct_health:554, opd:350, ph:350},
   mr:{er_adm_health:840, opd:700, ph:700}, opd:500, sono:150,
   special:{swal:231, hsg:210}, xray:{er:33, opd:25, portable:25, ph:25} };
+// 彙總列必填欄數(全身 MRI 是選配尾欄,不算在內)—— parseXhRow 用到,抽不到會 ReferenceError
+const XH_ROW_REQ_LINE = src.split(/\r?\n/).find(l => l.startsWith('const XH_ROW_REQ'));
+if (!XH_ROW_REQ_LINE) throw new Error('抽不到 XH_ROW_REQ');
 const api = new Function('PRICES', `
   const DAYS = {};
   let saved = 0, touched = [];
@@ -37,6 +40,7 @@ const api = new Function('PRICES', `
   function peekDay(d) { return DAYS[d] || { counts: {} }; }
   function touchDay(d) { touched.push(d); }
   ${grabConstBlock('XH_SCHEMA')}
+  ${XH_ROW_REQ_LINE}
   ${grabConstBlock('XH_PRICE_DEFAULT')}
   ${grabFn('normalizeTime')} ${grabFn('spanMinutes')}
   ${grabFn('xhPrices')} ${grabFn('xhCount')} ${grabFn('xhTotalCount')} ${grabFn('calcXhRevenue')}
@@ -103,7 +107,7 @@ console.log('[5] parseXhRow —— 一列 TSV「日期 ⇥ 起 ⇥ 訖 ⇥ 6 個
   check('日期解析', full.date === '2026-08-07', String(full.date));
   check('起訖解析', full.start === '09:30' && full.end === '17:30', `${full.start}/${full.end}`);
   check('六個件數對位', JSON.stringify(full.counts) ===
-        JSON.stringify({ mriBase: 10, mriC: 0, mriNc: 5, ca: 5, ctC: 0, ctNc: 4 }), JSON.stringify(full.counts));
+        JSON.stringify({ mriBase: 10, mriC: 0, mriNc: 5, ca: 5, ctC: 0, ctNc: 4, mriWb: 0 }), JSON.stringify(full.counts));
   check('沒有警告', full.warnings.length === 0, JSON.stringify(full.warnings));
 
   // 省略日期:8 格 = 起訖 + 6 件數
@@ -316,6 +320,42 @@ console.log('[12] applyXhRow:人填的在院時段不可以被匯入洗掉');
   check('⭐ 彙總列的起訖 → 在院時段(不是判讀)',
         d2.xhArrive === '12:40' && d2.xhLeave === '16:30', JSON.stringify(d2));
   check('彙總列沒有逐筆 → 不該有判讀時段', !('xhStart' in d2) && !('xhEnd' in d2), JSON.stringify(Object.keys(d2)));
+}
+
+console.log('');
+console.log('[13] 全身 MRI(mriWb,2026-11-06 VoiceReport 新增)—— 使用者回報「有一筆分析不出來」');
+{
+  // 使用者當天貼上的逐筆格式(只有時間/項目/數量,沒有任何病人資訊)
+  const EV = ['09:00\tarrive', '09:25\tmriBase\t2', '09:37\tctNc\t1', '10:00\tmriBase\t8', '10:08\tca\t4',
+              '12:16\tctNc\t15', '12:40\tmriWb\t1', '12:45\tleave'].map(l => '2026-11-06\t' + l).join('\n');
+  const p = api.parseXhPaste(EV);
+  check('⭐ 認得 mriWb,沒有「不是中興項目」警告', p.warnings.length === 0, JSON.stringify(p.warnings));
+  check('⭐ 全身 MRI 1 份', p.counts.mriWb === 1, JSON.stringify(p.counts));
+  check('判讀時段結束 = 12:40(那筆不再被跳過)', p.end === '12:40', p.end);
+  check('⭐ 收入 10×1000 + 4×200 + 16×450 + 1×5000 = $23,000', R(p.counts) === 23000, String(R(p.counts)));
+  check('中文 label「全身 MRI」也認', api.xhResolveKey('全身 MRI') === 'mriWb' && api.xhResolveKey('全身MRI') === 'mriWb');
+
+  const P = api.parseXhRow;
+  const r10 = P('2026-11-06\t09:00\t12:45\t10\t0\t0\t4\t0\t16\t1');
+  check('⭐ 彙總列第 10 欄 = 全身 MRI', r10.counts.mriWb === 1 && r10.counts.ctNc === 16 && r10.warnings.length === 0,
+        JSON.stringify(r10));
+  check('彙總列第 10 欄時段照常', r10.start === '09:00' && r10.end === '12:45', `${r10.start}/${r10.end}`);
+  const r9 = P('2026-08-07\t09:30\t17:30\t10\t0\t5\t5\t0\t4');
+  check('⭐ 舊格式 9 欄(沒有全身 MRI)不受影響、沒有警告', r9.start === '09:30' && r9.counts.ctNc === 4 &&
+        r9.counts.mriWb === 0 && r9.warnings.length === 0, JSON.stringify(r9));
+  const r7 = P('10\t0\t0\t4\t0\t16\t1');
+  check('只貼 7 個件數(含全身 MRI)→ 不誤判成起訖', r7.start === '' && r7.counts.mriBase === 10 && r7.counts.mriWb === 1,
+        JSON.stringify(r7));
+  const rd7 = P('2026-11-06\t10\t0\t0\t4\t0\t16\t1');
+  check('日期 + 7 個件數 → 不誤判成起訖', rd7.start === '' && rd7.counts.mriWb === 1, JSON.stringify(rd7));
+  const r11 = P('2026-11-06\t\t\t10\t0\t0\t4\t0\t16\t1\t9');
+  check('超過 10 欄 → 忽略 + 警告', r11.counts.mriWb === 1 && r11.warnings.some(w => /多出 1/.test(w)), JSON.stringify(r11.warnings));
+  const r5 = P('2026-11-06\t\t\t10\t0\t0\t4\t0');
+  check('少於 6 個件數仍警告(全身 MRI 是選配,不算在必填)', r5.warnings.some(w => /需要 6/.test(w)), JSON.stringify(r5.warnings));
+
+  const base = { counts: { ct: { opd: 3 } } };
+  check('⭐ 主帳隔離:加了全身 MRI,calcBaseRevenue 不動',
+        api.calcBaseRevenue(base, S) === api.calcBaseRevenue({ ...base, xh: { mriWb: 3 } }, S));
 }
 
 console.log(`===== ${pass} passed, ${fail} failed =====`);

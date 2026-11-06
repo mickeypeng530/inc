@@ -2233,7 +2233,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.10.29c';
+const APP_VERSION = '2026.11.06';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -3440,10 +3440,14 @@ const XH_SCHEMA = [
   { key: 'ca',      label: 'Ca',             priceKey: 'ca'    },
   { key: 'ctC',     label: 'CT 打藥',         priceKey: 'ctC'   },
   { key: 'ctNc',    label: 'CT 不打藥',       priceKey: 'ctNc'  },
+  // 2026-11-06 VoiceReport 新增(少做)。彙總列是**選配尾欄**:為 0 時產出端不送第 10 欄
+  // → parseXhRow 的「幾格算有起訖」只能數必填的 6 項(XH_ROW_REQ),不可用 XH_SCHEMA.length
+  { key: 'mriWb',   label: '全身 MRI',        priceKey: 'mriWb', optional: true },
 ];
+const XH_ROW_REQ = XH_SCHEMA.filter(it => !it.optional).length;   // 彙總列必填的件數欄數(6)
 // 每次去中興固定會有的基本份數(按「中興日」鈕一鍵填入)
 const XH_BASE_N = 10;
-const XH_PRICE_DEFAULT = { mriBase: 1000, mriC: 1000, mriNc: 800, ca: 200, ctC: 700, ctNc: 450 };
+const XH_PRICE_DEFAULT = { mriBase: 1000, mriC: 1000, mriNc: 800, ca: 200, ctC: 700, ctNc: 450, mriWb: 5000 };
 function xhPrices(settings) { return { ...XH_PRICE_DEFAULT, ...((settings && settings.xhPrices) || {}) }; }
 function xhCount(day, key) { return Number(day && day.xh && day.xh[key]) || 0; }
 function xhTotalCount(day) { return XH_SCHEMA.reduce((s, it) => s + xhCount(day, it.key), 0); }
@@ -3750,7 +3754,7 @@ function refreshXhTotal() {
 // 另一個專案若在現場即時按計數,就會送逐筆時間 —— 那是真的工作時刻,值得進 activity log
 // (事後補登的則不要送,那些時間戳是補登時刻,會把假設偽裝成量測)。
 // 一列一筆:`[日期] ⇥ 時間 ⇥ 項目 ⇥ 數量`。時間吃 HH:MM / HH:MM:SS / 完整 ISO;數量省略當 1,可負(按錯改回來)。
-// 刻意不建快取表 —— 只有 6 項,而且純函式才抽得進測試 harness
+// 刻意不建快取表 —— 只有 7 項,而且純函式才抽得進測試 harness
 // (harness 用大括號配對抽函式,IIFE const 接不了;為了測試去重寫一份對照表 = 假綠燈)。
 function xhResolveKey(raw) {
   const k = String(raw == null ? '' : raw).trim();
@@ -3847,9 +3851,9 @@ function writeXhActivity(date, events) {
     .then(snap => update(dayRef, build(snap.val())))
     .catch(() => { try { update(dayRef, build(null)).catch(() => {}); } catch (e) {} });
 }
-// 中興單日匯入:一列 TSV「日期 ⇥ 起 ⇥ 訖 ⇥ 6 個件數」。
+// 中興單日匯入:一列 TSV「日期 ⇥ 起 ⇥ 訖 ⇥ 6 個件數 [⇥ 全身 MRI]」。
 // 日期與起訖都可省略 —— 只貼 6 個數字也認。判別靠「扣掉日期後還剩幾格」:
-// 剩 8 格 = 有起訖(可能是空字串),剩 6 格 = 只有件數。
+// 剩 ≥8 格 = 有起訖(可能是空字串),剩 6~7 格 = 只有件數。第 7 個件數(全身 MRI)選配。
 function parseXhRow(text) {
   const lines = String(text || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
   const line = lines.find(l => /\d/.test(l) && !/^日期/.test(l) && !/^date/i.test(l));
@@ -3858,14 +3862,16 @@ function parseXhRow(text) {
   const out = { date: null, start: '', end: '', counts: {}, warnings: [] };
   let i = 0;
   if (/^\d{4}-\d{2}-\d{2}$/.test(f[0] || '')) { out.date = f[0]; i = 1; }
-  if ((f.length - i) >= XH_SCHEMA.length + 2 || String(f[i] || '').includes(':')) {
+  // 空字串一定是留空的起訖 —— 規格規定件數 0 要寫 0,不會留空。少了這條,
+  // 「日期 ⇥ 空 ⇥ 空 ⇥ 只有 5 個件數」會把兩格空白當件數、整排錯位且沒有警告
+  if ((f.length - i) >= XH_ROW_REQ + 2 || String(f[i] || '').includes(':') || (f.length > i && f[i] === '')) {
     out.start = normalizeTime(f[i] || '') || '';
     out.end = normalizeTime(f[i + 1] || '') || '';
     i += 2;
   }
   const nums = f.slice(i);
-  if (nums.length < XH_SCHEMA.length)
-    out.warnings.push(`只有 ${nums.length} 個件數欄位(需要 ${XH_SCHEMA.length}),缺的當 0`);
+  if (nums.length < XH_ROW_REQ)
+    out.warnings.push(`只有 ${nums.length} 個件數欄位(需要 ${XH_ROW_REQ}),缺的當 0`);
   if (nums.length > XH_SCHEMA.length)
     out.warnings.push(`多出 ${nums.length - XH_SCHEMA.length} 個欄位,已忽略`);
   XH_SCHEMA.forEach((it, k) => {
@@ -3962,7 +3968,7 @@ function showXhImportModal() {
   const modal = el('div', { class: 'modal paste-modal' },
     el('h3', null, '📥 匯入中興(單日)'),
     el('p', { class: 'settings-hint', style: 'margin:4px 0 10px' },
-      '兩種都吃:①彙總一列「日期 ⇥ 起 ⇥ 訖 ⇥ 6 個件數」 ②逐筆「[日期] ⇥ 時間 ⇥ 項目 ⇥ 數量」(件數自動加總、時段取首末筆)。套用 = 取代當天的中興資料,不動主帳。'),
+      '兩種都吃:①彙總一列「日期 ⇥ 起 ⇥ 訖 ⇥ 6 個件數 [⇥ 全身 MRI]」 ②逐筆「[日期] ⇥ 時間 ⇥ 項目 ⇥ 數量」(件數自動加總、時段取首末筆)。套用 = 取代當天的中興資料,不動主帳。'),
     el('div', { class: 'paste-body' }, ta, preview),
     el('div', { class: 'modal-actions' },
       el('button', { class: 'btn-secondary', onclick: close }, '取消'),
