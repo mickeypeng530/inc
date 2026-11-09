@@ -1432,7 +1432,19 @@ select.btn-secondary option {
 /* TAME 表:自動帶入的列 */
 .pain-ro { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 .pain-auto-badge { font-size: 9px; margin-left: 4px; padding: 0 4px; border-radius: 6px; border: 1px solid var(--accent); color: var(--accent); }
-.pain-auto-row td { background: rgba(233,162,59,.04); }
+/* 三位醫師不同底色(與月曆標籤同色系);第一格加色條,沒寫醫師的列不上色 */
+.pain-tame tr.pt-doc-Peng td { background: rgba(233,162,59,.10); }
+.pain-tame tr.pt-doc-Yen td  { background: rgba(63,185,80,.10); }
+.pain-tame tr.pt-doc-Wu td   { background: rgba(88,166,255,.10); }
+.pain-tame tr.pt-doc-Peng td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.pain-tame tr.pt-doc-Yen td:first-child  { box-shadow: inset 3px 0 0 #3fb950; }
+.pain-tame tr.pt-doc-Wu td:first-child   { box-shadow: inset 3px 0 0 #58a6ff; }
+.pain-tame tr[class*="pt-doc-"] input[type="text"] { background: transparent; }
+.pain-scope { display: inline-flex; gap: 0; }
+.pain-scope button { border-radius: 0; margin: 0; }
+.pain-scope button:first-child { border-radius: var(--r) 0 0 var(--r); }
+.pain-scope button:last-child { border-radius: 0 var(--r) var(--r) 0; }
+.pain-scope button.on { background: var(--accent); color: var(--bg-panel); border-color: var(--accent); }
 .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 @media (max-width: 700px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
 .kpi-card { position: relative; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px 10px; overflow: hidden; }
@@ -2301,7 +2313,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.10c';
+const APP_VERSION = '2026.11.10d';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -10013,7 +10025,11 @@ function renderPainInner() {
     el('div', { class: 'pain-doc-sum', id: 'pain-cal-sum', style: 'margin-top:8px' }, '')));
 
   // ---- TAME 個案表 ----
-  const scope = state.painTameAll ? '' : month;
+  const prevMonth = (() => { const [y, m] = month.split('-').map(Number); const d = new Date(y, m - 2, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
+  const tScope = state.painTameScope || 'cur';
+  const scope = tScope === 'all' ? '' : tScope === 'prev' ? prevMonth : month;
+  const sNum = scope ? Number(scope.slice(5, 7)) : 0;
   const rows = painAllTameRows(scope);
   const byDoc = {};
   for (const r of rows) byDoc[r.doctor || '?'] = (byDoc[r.doctor || '?'] || 0) + 1;
@@ -10050,16 +10066,16 @@ function renderPainInner() {
         storage.save(state.data); renderPain();
       } }, '×');
     }
-    tt.appendChild(el('tr', { class: r.auto ? 'pain-auto-row' : '' },
+    tt.appendChild(el('tr', { class: (r.auto ? 'pain-auto-row ' : '') + (PAIN_DOCTORS.includes(r.doctor) ? 'pt-doc-' + r.doctor : '') },
       el('td', null, dateCell), el('td', null, mrnCell), el('td', null, txt('dx', 'pt-dx')), el('td', null, txt('site')),
       el('td', null, txt('proc', '', 'TAME')), el('td', null, txt('ageSex')),
       el('td', null, txt('note')), el('td', null, docCell), el('td', null, delCell)));
   }
   if (!rows.length) tt.appendChild(el('tr', null, el('td', { colspan: '9', style: 'text-align:center;color:var(--ink-muted);padding:14px' },
-    scope ? `${mNum} 月還沒有 TAME 個案` : '還沒有 TAME 個案')));
+    scope ? `${sNum} 月還沒有 TAME 個案` : '還沒有 TAME 個案')));
   const docOrder = PAIN_DOCTORS.concat(Object.keys(byDoc).filter(d => !PAIN_DOCTORS.includes(d)));
   root.appendChild(el('div', { class: 'panel' },
-    el('div', { class: 'pain-head' }, el('h2', null, scope ? `${mNum} 月 · TAME 個案` : 'TAME 個案(全部)'),
+    el('div', { class: 'pain-head' }, el('h2', null, scope ? `${sNum} 月 · TAME 個案` : 'TAME 個案(全部)'),
       el('span', { class: 'pain-doc-sum' }, rows.length ? `${rows.length} 筆 · ` + docOrder.filter(d => byDoc[d]).map(d => `${d} ${byDoc[d]}`).join(' · ') : '')),
     el('div', { class: 'pain-head' },
       btn('＋ 新增', '新增一列(其他醫師的 TAME;你的會自動出現)', () => {
@@ -10068,7 +10084,9 @@ function renderPainInner() {
         storage.save(state.data); renderPain();
       }),
       btn('📥 貼上', '從原 Excel「Other doctor」頁複製資料列貼上(Peng 的列會補進對應的自動列)', showPainTamePasteModal),
-      btn(state.painTameAll ? '只看本月' : '看全部', '切換:本月 / 全部月份', () => { state.painTameAll = !state.painTameAll; renderPain(); }),
+      el('span', { class: 'pain-scope' }, ...[['cur', `本月 ${mNum}月`], ['prev', `上月 ${Number(prevMonth.slice(5, 7))}月`], ['all', '全部']].map(([k, lab]) =>
+        el('button', { class: 'btn-secondary' + (tScope === k ? ' on' : ''), style: 'padding:3px 10px;font-size:12px', title: '只看:' + lab,
+          onclick: () => { state.painTameScope = k; renderPain(); } }, lab))),
       el('span', { style: 'flex:1' }),
       btn('⬇ 下載 Excel', '下載目前顯示的這些列(2025 起,.xlsx,不含 Doctor 欄)', () => exportPainTameXlsx(rows, scope))),
     el('div', { class: 'pain-hint' }, `${PAIN_ME} 的 TAME 由 procedure 自動帶入(日期/病歷號不能改);Dx、Site、Age/Sex、備註補填即可。`),
