@@ -199,7 +199,7 @@ console.log('\n[8] 輸出版面:照原 Excel,而且不含 Doctor 欄');
   check('⭐ 沒有醫師名', !aoa.flat().includes('Yen'));
 }
 
-console.log('\n[9] ⭐ 名單新的在上;Excel 從 2025 起、舊的在上');
+console.log('\n[9] ⭐ 名單新的在上;Excel 從 2025 起、也是新的在上');
 {
   const a = build({
     '2024-12-20': { procedures: [P('stame', 'sTAME', '600031')] },
@@ -210,7 +210,7 @@ console.log('\n[9] ⭐ 名單新的在上;Excel 從 2025 起、舊的在上');
   check('畫面:日期由新到舊', all.map(r => r.date).join() === '2026-10-27,2025-06-01,2025-03-05,2024-12-20', all.map(r => r.date));
   const ex = a.painTameExportRows(all);
   check('Excel:2024 的不輸出', !ex.some(r => r.date < '2025-01-01'), ex.map(r => r.date));
-  check('Excel:舊的在上', ex.map(r => r.date).join() === '2025-03-05,2025-06-01,2026-10-27', ex.map(r => r.date));
+  check('Excel:新的在上、舊的在下(同原檔)', ex.map(r => r.date).join() === '2026-10-27,2025-06-01,2025-03-05', ex.map(r => r.date));
   check('2025-01-01 當天算進去', a.painTameExportRows([{ date: '2025-01-01' }, { date: '2024-12-31' }]).length === 1);
 }
 

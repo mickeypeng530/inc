@@ -2314,7 +2314,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.10g';
+const APP_VERSION = '2026.11.10h';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -9581,8 +9581,9 @@ const PAIN_OPD_RULES = [
   { doc: 'Wu',   dow: 3, nth: [1, 3, 5] },     // 單週三
   { doc: 'Yen',  dow: 5, nth: null },          // 每個星期五
 ];
-const XLSX_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-const XLSX_SRI = 'sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw';
+// xlsx-js-style = SheetJS 的分支,API 相同但能寫字型(原檔是 Arial 10;SheetJS 免費版只能輸出 Calibri 11)
+const XLSX_SRC = 'https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js';
+const XLSX_SRI = 'sha384-OUW9euuUyxyHcAhTqbhI+Iyb8LMssXt/cpz0yXhs9UWG2/R/uaWdakx/4cfww7Vb';
 
 function painMonthDates(month) {
   const [y, m] = month.split('-').map(Number);
@@ -9878,22 +9879,20 @@ function loadXLSX() {
   return _xlsxLoading;
 }
 // 版面照原 Excel「Other doctor」頁:第 1 列只有 Date / Site 標題、第 2 列空白、第 3 列起資料;
-// 日期是真的日期格(格式 yy-m-d);**不輸出醫師欄**(H 欄)。
+// 日期是真的日期格(格式 yy-mm-dd,同原檔);**不輸出醫師欄**(H 欄)。
 function painTameAoa(rows) {
   return [['Date', '', '', 'Site', '', '', ''], []].concat(rows.map(r =>
     [r.date || '', r.mrn || '', r.dx || '', r.site || '', r.proc || 'TAME', r.ageSex || '', r.note || '']));
 }
 const PAIN_XLSX_FROM = '2025-01-01';   // Excel 只輸出這天以後(使用者要求從 2025 開始)
-// Excel 照原檔:舊的在上、依日期往下(畫面是新的在上,這裡反過來)
+// Excel 照原檔:新的在上、舊的在下(同畫面)
 function painTameExportRows(rows) {
   return rows.filter(r => (r.date || '') >= PAIN_XLSX_FROM)
-    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.auto === b.auto ? 0 : a.auto ? -1 : 1));
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (a.auto === b.auto ? 0 : a.auto ? -1 : 1));
 }
-async function exportPainTameXlsx(rows, scope) {
-  rows = painTameExportRows(rows);
-  if (!rows.length) { toast('沒有可輸出的資料', ''); return; }
-  let X;
-  try { X = await loadXLSX(); } catch (e) { toast('⚠️ ' + e.message, 'error'); return; }
+// 照原檔外觀:全部 Arial 10、日期 yy-mm-dd、A 欄寬 11、其他 12.63(原檔預設欄寬)、分頁名 Other doctor
+const PAIN_XLSX_FONT = { name: 'Arial', sz: 10 };
+function painTameSheet(X, rows) {
   const aoa = painTameAoa(rows);
   const ws = X.utils.aoa_to_sheet(aoa);
   // 日期改成 Excel 序號(自己算,不經 JS Date → 不會被時區推前一天)
@@ -9901,11 +9900,20 @@ async function exportPainTameXlsx(rows, scope) {
     const m = String(aoa[i][0]).match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!m) continue;
     const serial = (Date.UTC(+m[1], +m[2] - 1, +m[3]) - Date.UTC(1899, 11, 30)) / 86400000;
-    ws[X.utils.encode_cell({ r: i, c: 0 })] = { t: 'n', v: serial, z: 'yy-m-d' };
+    ws[X.utils.encode_cell({ r: i, c: 0 })] = { t: 'n', v: serial, z: 'yy-mm-dd' };
   }
-  ws['!cols'] = [{ wch: 11 }, { wch: 13 }, { wch: 13 }, { wch: 13 }, { wch: 13 }, { wch: 13 }, { wch: 13 }];
+  for (const a of Object.keys(ws)) if (a[0] !== '!') ws[a].s = { font: { ...PAIN_XLSX_FONT } };
+  ws['!cols'] = [{ width: 11 }].concat(Array(6).fill(0).map(() => ({ width: 12.63 })));   // width = Excel 原始欄寬(wch 會被換算成 11.83)
+  return ws;
+}
+async function exportPainTameXlsx(rows, scope) {
+  rows = painTameExportRows(rows);
+  if (!rows.length) { toast('沒有可輸出的資料', ''); return; }
+  let X;
+  try { X = await loadXLSX(); } catch (e) { toast('⚠️ ' + e.message, 'error'); return; }
+  const ws = painTameSheet(X, rows);
   const wb = X.utils.book_new();
-  X.utils.book_append_sheet(wb, ws, 'TAME');
+  X.utils.book_append_sheet(wb, ws, 'Other doctor');
   X.writeFile(wb, `TAME_${scope || 'all'}.xlsx`);
 }
 
