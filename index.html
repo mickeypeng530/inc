@@ -1397,8 +1397,11 @@ select.btn-secondary option {
 /* 門診月曆 */
 .pain-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .pain-cal-wd { font-family: var(--font-mono); font-size: 10px; color: var(--ink-muted); text-align: center; }
-.pain-cal-day { border: 1px solid var(--border); border-radius: 4px; min-height: 60px; padding: 3px 4px;
+.pain-cal-day { border: 1px solid var(--border); border-radius: 4px; min-height: 44px; padding: 3px 4px;
   display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+/* 名字 + 人數同一行;放不下(手機)才換行 */
+.pain-cal-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
+.pain-cal-row .pain-cal-n { flex: 1 1 34px; min-width: 0; width: auto; }
 .pain-cal-day.we .pain-cal-dn { color: var(--ink-muted); }
 .pain-cal-day.today { border-color: var(--accent); }
 .pain-cal-dn { font-family: var(--font-mono); font-size: 10px; color: var(--ink-2); }
@@ -1411,18 +1414,21 @@ select.btn-secondary option {
 .pain-cal-tag.empty { color: var(--ink-muted); opacity: .3; border-style: dashed; }
 .pain-cal-tag.empty:hover { opacity: 1; }
 .pain-cal-tag.off { color: var(--ink-muted); text-decoration: line-through; }
-/* 手機:一格只剩 ~34px → 標籤縮字、收邊距,「Peng」才放得下 */
+.pain-cal-n { width: 100%; box-sizing: border-box; text-align: center; font-size: 12px; padding: 1px 2px;
+  background: var(--bg-page); color: var(--ink-1); border: 1px solid var(--border); border-radius: var(--r); }
+.pain-cal-auto { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--ink-1); }
+.pain-cal-hint { font-size: 10px; color: var(--danger); }
+/* 手機:一格只剩 ~34px → 標籤縮字、收邊距,「Peng」才放得下;名字與人數會換成兩行
+   ⚠ 這段要放在上面一般規則**之後** —— 同權重時後寫的贏,放前面會被一般規則蓋掉 */
 @media (max-width: 560px) {
   .pain-cal { gap: 2px; }
   .pain-cal-day { padding: 2px; min-height: 52px; gap: 2px; }
+  .pain-cal-row { gap: 2px; }
   .pain-cal-tag { font-size: 9px; padding: 0 2px; line-height: 14px; letter-spacing: -0.02em; }
   .pain-cal-n { font-size: 11px; padding: 0; }
+  .pain-cal-auto { font-size: 12px; }
   .pain-cal-hint { font-size: 9px; }
 }
-.pain-cal-n { width: 100%; box-sizing: border-box; text-align: center; font-size: 12px; padding: 1px 2px;
-  background: var(--bg-page); color: var(--ink-1); border: 1px solid var(--border); border-radius: var(--r); }
-.pain-cal-auto { font-size: 13px; font-variant-numeric: tabular-nums; text-align: center; color: var(--ink-1); }
-.pain-cal-hint { font-size: 10px; color: var(--danger); }
 /* TAME 表:自動帶入的列 */
 .pain-ro { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 .pain-auto-badge { font-size: 9px; margin-left: 4px; padding: 0 4px; border-radius: 6px; border: 1px solid var(--accent); color: var(--accent); }
@@ -2295,7 +2301,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.09b';
+const APP_VERSION = '2026.11.10';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -9948,19 +9954,21 @@ function renderPainInner() {
     const cancelled = !doc && !isDef && !!painDefaultOpdDoc(date);
     const cell = el('div', { class: 'pain-cal-day' + (dow === 0 || dow === 6 ? ' we' : '') + (date === today ? ' today' : '') },
       el('div', { class: 'pain-cal-dn' }, String(Number(date.slice(8)))));
-    cell.appendChild(el('button', {
+    // 名字 + 人數放同一行(使用者要求);一格太窄(手機)時 flex-wrap 自動換行
+    const row = el('div', { class: 'pain-cal-row' }, el('button', {
       class: 'pain-cal-tag ' + (doc ? 'doc-' + doc : cancelled ? 'off' : 'empty') + (isDef ? '' : ' moved'),
       title: (doc ? `${doc} 門診` : cancelled ? `取消(原本是 ${painDefaultOpdDoc(date)})` : '沒有門診') + (isDef ? '(預設)' : '(手動改過)') +
         '\n點一下切換:Peng → Yen → Wu → 取消',
       onclick: () => { cyclePainOpdDoc(date); storage.save(state.data); renderPain(); } }, doc || (cancelled ? '休' : '＋')));
     if (doc === PAIN_ME) {
-      cell.appendChild(el('div', { class: 'pain-cal-auto', title: '自動:今日 tab 當天的 OPD 看診數' }, myN ? String(myN) : '—'));
+      row.appendChild(el('span', { class: 'pain-cal-auto', title: '自動:今日 tab 當天的 OPD 看診數' }, myN ? String(myN) : '—'));
     } else if (doc) {
       const n = painOpdEntry(date).n;
-      cell.appendChild(el('input', { class: 'pain-cal-n', type: 'number', min: '0', inputmode: 'numeric', placeholder: '人數',
+      row.appendChild(el('input', { class: 'pain-cal-n', type: 'number', min: '0', inputmode: 'numeric', placeholder: '人數',
         value: typeof n === 'number' ? String(n) : '', 'data-focus-key': `pc|${date}`, onfocus: countSelectFocus,
         oninput: (e) => { setPainOpdN(date, e.target.value); refreshPainTotals(); } }));
     }
+    cell.appendChild(row);
     // 不是我的門診格,但今日 tab 記了 ≥4 人 → 很可能是換診,提醒切過來(零星約診 1~2 人不提醒)
     if (doc !== PAIN_ME && myN >= 4)
       cell.appendChild(el('div', { class: 'pain-cal-hint', title: `今日 tab 記了 ${myN} 人,但這格不是你的門診 —— 換診的話點名字切成 ${PAIN_ME}` }, `我 ${myN}?`));
