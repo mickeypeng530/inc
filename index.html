@@ -1382,6 +1382,7 @@ select.btn-secondary option {
 .pain-table .tot { font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
 .pain-table input.pain-num { width: 42px; text-align: center; padding: 2px; }
 .pain-tame td { padding: 3px 4px; }
+.pain-metric-note { display: block; font-size: 9px; line-height: 1.1; color: var(--ink-muted); white-space: nowrap; }
 .pain-tame input, .pain-tame select { width: 100%; min-width: 56px; box-sizing: border-box; }
 .pain-tame input.pt-date { min-width: 128px; }
 .pain-tame input.pt-dx { min-width: 150px; }
@@ -2313,7 +2314,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.10d';
+const APP_VERSION = '2026.11.10e';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -9947,7 +9948,9 @@ function showPainTamePasteModal() {
 // 本月三位醫師的門診/打針/TAME → 純文字(Tab 分隔),貼 LINE 或 Excel 都對得齊
 const PAIN_DOC_ZH = { Peng: '彭', Yen: '嚴', Wu: '吳' };
 function painMonthCopyText(month) {
-  const lines = [`${Number(month.slice(5, 7))}月`, ['', ...PAIN_METRICS.map(([, lab]) => lab)].join('\t')];
+  const lines = [`${Number(month.slice(5, 7))}月`,
+    ['', ...PAIN_METRICS.map(([k]) => k === 'opd' ? '(固定門診日)' : '')].join('\t'),
+    ['', ...PAIN_METRICS.map(([, lab]) => lab)].join('\t')];
   for (const doc of PAIN_DOCTORS)
     lines.push([PAIN_DOC_ZH[doc] || doc, ...PAIN_METRICS.map(([k]) => { const v = painCell(month, doc, k); return v == null ? '' : String(v); })].join('\t'));
   return lines.join('\n');
@@ -10104,7 +10107,7 @@ function renderPainInner() {
       const tr = el('tr', { class: j === 0 ? 'pain-grp-start' : '' });
       if (j === 0) tr.appendChild(el('td', { rowspan: String(PAIN_METRICS.length), class: 'pain-doc' },
         doc === PAIN_ME ? `${doc}(我)` : doc));
-      tr.appendChild(el('td', { class: 'pain-metric' }, lab));
+      tr.appendChild(el('td', { class: 'pain-metric' }, k === 'opd' ? el('span', { class: 'pain-metric-note' }, '(固定門診日)') : null, lab));
       for (const m of months) {
         const cls = (m === month ? 'pain-cur ' : '') + (m > nowMonth ? 'pain-future' : '');
         // 門診(三人都看月曆)與 Peng 的打針/TAME = 自動;其他醫師的打針/TAME = 手填
