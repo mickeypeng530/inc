@@ -21,7 +21,7 @@ let pass = 0, fail = 0;
 const check = (n, c, x) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (x !== undefined ? '  → ' + JSON.stringify(x) : '')); } };
 
 const FNS = ['getCount', 'procRankName', 'painMonthDates', 'painDefaultOpdDoc', 'painOpdEntry', 'painOpdDoc', 'painOpdCount',
-  'painOpdWrite', 'cyclePainOpdDoc', 'setPainOpdN', 'painOpdMonth', 'painInjKind', 'painMyMonth', 'painManual', 'painCell',
+  'painOpdWrite', 'cyclePainOpdDoc', 'setPainOpdN', 'painOpdMonth', 'painInjKind', 'painMyMonth', 'painManual', 'painTameCount', 'painCell',
   'setPainManual', 'painTameRows', 'ensurePainTame', 'painTameUpdate', 'painCleanMrn', 'painMineKey', 'painMine', 'painMineUpdate',
   'painMyTameRows', 'painAllTameRows', 'painParseDate', 'painDocName', 'parsePainTamePaste', 'painTameKey', 'painClassifyRows',
   'addPainTameRows', 'painTameAoa'];
@@ -102,15 +102,22 @@ console.log('\n[4] ⭐ 打針 = CT NB + NB arthro + RF/pRF,單純 Arthro 不算'
   check('Peng 10 月:打針 2、TAME 1(TAE 不算)', m.inj === 2 && m.tame === 1, m);
 }
 
-console.log('\n[5] 其他醫師的打針 / TAME 手填');
+console.log('\n[5] 其他醫師的打針手填;TAME = TAME 表的列數(2026-11-10 改)');
 {
-  const a = build({});
+  const a = build({}, { tame: [
+    { id: 'a', date: '2026-10-03', doctor: 'Yen' }, { id: 'b', date: '2026-10-20', doctor: 'Yen' },
+    { id: 'c', date: '2026-11-02', doctor: 'Yen' }, { id: 'd', date: '2026-10-08', doctor: 'Wu' },
+    { id: 'e', date: '2026-10-09', doctor: '' } ] });
   a.setPainManual('2026-10', 'Yen', 'inj', '22');
-  a.setPainManual('2026-10', 'Yen', 'tame', '3');
-  check('存進 pain.monthly', a.painCell('2026-10', 'Yen', 'inj') === 22 && a.painCell('2026-10', 'Yen', 'tame') === 3);
+  check('打針手填存進 pain.monthly', a.painCell('2026-10', 'Yen', 'inj') === 22);
   check('沒填 → null', a.painCell('2026-10', 'Wu', 'inj') === null);
+  check('⭐ Yen 10 月 TAME = 表上 2 列(11 月那列不算)', a.painCell('2026-10', 'Yen', 'tame') === 2, a.painCell('2026-10', 'Yen', 'tame'));
+  check('Wu 10 月 TAME = 1', a.painCell('2026-10', 'Wu', 'tame') === 1);
+  check('沒寫醫師的列不算進任何人', a.painCell('2026-10', 'Yen', 'tame') + a.painCell('2026-10', 'Wu', 'tame') === 3);
+  a.setPainManual('2026-10', 'Yen', 'tame', '9');
+  check('⭐ 舊的手填 TAME 不再有作用(單一來源 = 表)', a.painCell('2026-10', 'Yen', 'tame') === 2);
   a.setPainManual('2026-10', 'Yen', 'inj', ''); a.setPainManual('2026-10', 'Yen', 'tame', '');
-  check('⭐ 清空 → monthly 整個 delete', !('monthly' in a.state.data.pain), a.state.data.pain);
+  check('清空 → monthly 整個 delete', !('monthly' in a.state.data.pain), a.state.data.pain);
 }
 
 console.log('\n[6] ⭐ 我的 TAME 自動帶入當月名單');

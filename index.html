@@ -2301,7 +2301,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.10';
+const APP_VERSION = '2026.11.10b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -9658,9 +9658,17 @@ function painManual(month, doc) {
   return ((state.data.pain && state.data.pain.monthly && state.data.pain.monthly[month]) || {})[doc] || {};
 }
 // 門診一律看月曆;打針 / TAME:Peng 自動,其他醫師手填(沒填 → null)
+// 其他醫師的 TAME 數 = TAME 表裡該醫師該月的列數(2026-11-10 使用者:之後他們的 TAME 直接貼進表)。
+// 單一來源 —— 不再另外手填,兩邊不會對不起來。Peng 的 TAME 仍照 procedure(計價口徑;
+// 一天兩個部位 Excel 記 2 列、procedure 只開 1 筆,所以 Peng 的表列數可能比這個數字多)。
+function painTameCount(month, doc) {
+  return painTameRows().filter(r => r.doctor === doc && (r.date || '').startsWith(month)).length;
+}
+// 門診一律看月曆;打針 / TAME:Peng 自動;其他醫師 TAME 看 TAME 表、打針手填(沒填 → null)
 function painCell(month, doc, k) {
   if (k === 'opd') return painOpdMonth(month)[doc] ? painOpdMonth(month)[doc].n : 0;
   if (doc === PAIN_ME) return painMyMonth(month)[k];
+  if (k === 'tame') return painTameCount(month, doc);
   const v = painManual(month, doc)[k];
   return typeof v === 'number' ? v : null;
 }
@@ -9689,7 +9697,8 @@ function refreshPainTotals() {
     for (const [k] of PAIN_METRICS) {
       let tot = 0;
       for (const doc of PAIN_DOCTORS) {
-        const v = k === 'opd' ? opd[doc].n : (doc === PAIN_ME ? mine[k] : (painManual(month, doc)[k] || 0));
+        const v = k === 'opd' ? opd[doc].n : doc === PAIN_ME ? mine[k]
+          : k === 'tame' ? painTameCount(month, doc) : (painManual(month, doc)[k] || 0);
         tot += v; yt[doc + '|' + k] = (yt[doc + '|' + k] || 0) + v;
         const cell = document.querySelector(`[data-pain-auto="${month}|${doc}|${k}"]`);
         if (cell) cell.textContent = v ? String(v) : '';
@@ -10056,7 +10065,8 @@ function renderPainInner() {
         const cls = (m === month ? 'pain-cur ' : '') + (m > nowMonth ? 'pain-future' : '');
         if (doc === 'ALL') { tr.appendChild(el('td', { class: cls + ' tot', 'data-pain-tot': `${m}|${k}` }, '')); continue; }
         // 門診(三人都看月曆)與 Peng 的打針/TAME = 自動;其他醫師的打針/TAME = 手填
-        if (k === 'opd' || doc === PAIN_ME) { tr.appendChild(el('td', { class: cls + ' auto', 'data-pain-auto': `${m}|${doc}|${k}` }, '')); continue; }
+        // 自動格:門診(月曆)、Peng 全部、其他醫師的 TAME(TAME 表);只剩其他醫師的打針手填
+        if (k === 'opd' || k === 'tame' || doc === PAIN_ME) { tr.appendChild(el('td', { class: cls + ' auto', 'data-pain-auto': `${m}|${doc}|${k}` }, '')); continue; }
         const v = painManual(m, doc)[k];
         tr.appendChild(el('td', { class: cls }, el('input', { class: 'pain-num', type: 'number', min: '0', inputmode: 'numeric',
           value: typeof v === 'number' ? String(v) : '', 'data-focus-key': `pm|${m}|${doc}|${k}`,
@@ -10069,7 +10079,7 @@ function renderPainInner() {
   root.appendChild(el('div', { class: 'panel' },
     el('div', { class: 'pain-head' }, el('h2', null, `${year} 年 · 疼痛業務統計`)),
     el('div', { class: 'pain-hint' },
-      `門診 = 月曆加總。${PAIN_ME} 打針 = CT NB + NB arthro + RF/pRF(單純 Arthro 不算)、TAME = sTAME/cTAME,都自動;其他醫師的打針 / TAME 手填。`),
+      `門診 = 月曆加總。TAME:${PAIN_ME} 照 procedure,其他醫師 = TAME 個案表的列數。${PAIN_ME} 打針 = CT NB + NB arthro + RF/pRF(單純 Arthro 不算)自動;只有其他醫師的打針要手填。`),
     el('div', { style: 'overflow-x:auto' }, tbl)));
   refreshPainTotals();
 }
