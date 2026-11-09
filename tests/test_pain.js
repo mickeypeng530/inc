@@ -17,6 +17,8 @@ function grabConst(name) {
 // const PAIN_ME = 'Peng' 沒有括號 → grabConst 會一路抓到下一個常數;改抽整行
 const ME_LINE = src.split(/\r?\n/).find(l => l.startsWith('const PAIN_ME ='));
 if (!ME_LINE) throw new Error('抽不到 PAIN_ME');
+const XLSX_FROM_LINE = src.split(/\r?\n/).find(l => l.startsWith('const PAIN_XLSX_FROM ='));
+if (!XLSX_FROM_LINE) throw new Error('抽不到 PAIN_XLSX_FROM');
 let pass = 0, fail = 0;
 const check = (n, c, x) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (x !== undefined ? '  → ' + JSON.stringify(x) : '')); } };
 
@@ -24,7 +26,7 @@ const FNS = ['getCount', 'procRankName', 'painMonthDates', 'painDefaultOpdDoc', 
   'painOpdWrite', 'cyclePainOpdDoc', 'setPainOpdN', 'painOpdMonth', 'painInjKind', 'painMyMonth', 'painManual', 'painTameCount', 'painCell',
   'setPainManual', 'painTameRows', 'ensurePainTame', 'painTameUpdate', 'painCleanMrn', 'painMineKey', 'painMine', 'painMineUpdate',
   'painMyTameRows', 'painAllTameRows', 'painParseDate', 'painDocName', 'parsePainTamePaste', 'painTameKey', 'painClassifyRows',
-  'addPainTameRows', 'painTameAoa'];
+  'addPainTameRows', 'painTameAoa', 'painTameExportRows', 'painMonthCopyText'];
 function build(days, pain) {
   return new Function('DAYS', 'PAIN', `
     const state = { data: { days: DAYS, pain: PAIN } };
@@ -32,7 +34,8 @@ function build(days, pain) {
     const scheduleSave = () => { saves++; };
     const storage = { save() { saves++; } };
     const refreshPainTotals = () => {};
-    ${grabConst('PAIN_DOCTORS')} ${ME_LINE} ${grabConst('PAIN_METRICS')} ${grabConst('PAIN_OPD_RULES')}
+    ${grabConst('PAIN_DOCTORS')} ${ME_LINE} ${grabConst('PAIN_METRICS')} ${grabConst('PAIN_OPD_RULES')} ${grabConst('PAIN_DOC_ZH')}
+    ${XLSX_FROM_LINE}
     ${FNS.map(grabFn).join('\n')}
     return { state, ${FNS.join(', ')}, saves: () => saves };
   `)(days, pain);
@@ -194,6 +197,54 @@ console.log('\n[8] 輸出版面:照原 Excel,而且不含 Doctor 欄');
   check('第 1 列只有 Date / Site', JSON.stringify(aoa[0]) === JSON.stringify(['Date', '', '', 'Site', '', '', '']));
   check('第 2 列空白、第 3 列起 7 欄', aoa[1].length === 0 && aoa[2].length === 7);
   check('⭐ 沒有醫師名', !aoa.flat().includes('Yen'));
+}
+
+console.log('\n[9] ⭐ 名單新的在上;Excel 從 2025 起、舊的在上');
+{
+  const a = build({
+    '2024-12-20': { procedures: [P('stame', 'sTAME', '600031')] },
+    '2025-03-05': { procedures: [P('stame', 'sTAME', '600032')] },
+    '2026-10-27': { procedures: [P('stame', 'sTAME', '600033')] },
+  }, { tame: [{ id: 't1', date: '2025-06-01', mrn: '600034', doctor: 'Yen' }] });
+  const all = a.painAllTameRows('');
+  check('畫面:日期由新到舊', all.map(r => r.date).join() === '2026-10-27,2025-06-01,2025-03-05,2024-12-20', all.map(r => r.date));
+  const ex = a.painTameExportRows(all);
+  check('Excel:2024 的不輸出', !ex.some(r => r.date < '2025-01-01'), ex.map(r => r.date));
+  check('Excel:舊的在上', ex.map(r => r.date).join() === '2025-03-05,2025-06-01,2026-10-27', ex.map(r => r.date));
+  check('2025-01-01 當天算進去', a.painTameExportRows([{ date: '2025-01-01' }, { date: '2024-12-31' }]).length === 1);
+}
+
+console.log('\n[10] ⭐ procedure 沒填病歷號:可補填,貼上配對也會補');
+{
+  const a = build({ '2026-10-27': { procedures: [P('ctame', 'cTAME & 1500 SONO', '')] } }, {});
+  let r = a.painMyTameRows('')[0];
+  check('沒填 → mrn 空、標記不是來自 procedure', r.mrn === '' && r.mrnFromProc === false, r);
+  const line = '26-10-27\t600041\tKnee OA\tL knee\tTAME\t60/F\t一日住院\tPeng';
+  const res = a.addPainTameRows(a.parsePainTamePaste(line).rows);
+  r = a.painMyTameRows('')[0];
+  check('只靠日期配上 → 補上 Excel 的病歷號', res.byDate === 1 && r.mrn === '600041', [res, r.mrn]);
+  check('補填不改 procedure 本身', a.state.data.days['2026-10-27'].procedures[0].medRecord === '');
+  check('key 不變(補填後列不會變孤兒)', r.key === a.painMineKey('2026-10-27', '', 1) && r.dx === 'Knee OA', r);
+  const again = a.addPainTameRows(a.parsePainTamePaste(line).rows);
+  check('重貼 → 精確配對,不會多出一列', again.added === 0 && again.byDate === 0 && a.painAllTameRows('').length === 1, again);
+  const b = build({ '2026-10-28': { procedures: [P('stame', 'sTAME', '600042')] } }, {});
+  b.addPainTameRows(b.parsePainTamePaste('26-10-28\t600099\tHip\tR hip\tTAME\t55/M\t\tPeng').rows);
+  const rb = b.painMyTameRows('')[0];
+  check('procedure 有病歷號 → 不被 Excel 的蓋掉', rb.mrn === '600042' && rb.mrnFromProc, rb);
+}
+
+console.log('\n[11] ⭐ 複製本月:幾月 / 門診 打針 TAME / 彭 嚴 吳');
+{
+  const a = build({ '2026-11-11': { counts: { opd: 12 }, procedures: [P('ct_nb', 'CT NB', '600051'), P('stame', 'sTAME', '600052')] } },
+    { monthly: { '2026-11': { Yen: { inj: 5 } } }, opd: { '2026-11-06': { n: 9 } },
+      tame: [{ id: 't1', date: '2026-11-03', mrn: '600053', doctor: 'Yen' }] });
+  const t = a.painMonthCopyText('2026-11').split('\n').map(l => l.split('\t'));
+  check('第 1 列 = 11月', t[0].join() === '11月', t[0]);
+  check('第 2 列 = 空 / 門診 / 打針 / TAME', t[1].join('|') === '|門診|打針|TAME', t[1]);
+  check('彭:門診 12、打針 1、TAME 1', t[2].join('|') === '彭|12|1|1', t[2]);
+  check('嚴:門診 9(月曆)、打針 5(手填)、TAME 1(個案表)', t[3].join('|') === '嚴|9|5|1', t[3]);
+  check('吳:打針沒填 → 空白(不是 0)', t[4][0] === '吳' && t[4][2] === '', t[4]);
+  check('沒有合計列', t.length === 5);
 }
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);

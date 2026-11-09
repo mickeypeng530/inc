@@ -2301,7 +2301,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.10b';
+const APP_VERSION = '2026.11.10c';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -9695,17 +9695,13 @@ function refreshPainTotals() {
     const month = `${year}-${String(mi).padStart(2, '0')}`;
     const opd = painOpdMonth(month), mine = painMyMonth(month);
     for (const [k] of PAIN_METRICS) {
-      let tot = 0;
       for (const doc of PAIN_DOCTORS) {
         const v = k === 'opd' ? opd[doc].n : doc === PAIN_ME ? mine[k]
           : k === 'tame' ? painTameCount(month, doc) : (painManual(month, doc)[k] || 0);
-        tot += v; yt[doc + '|' + k] = (yt[doc + '|' + k] || 0) + v;
+        yt[doc + '|' + k] = (yt[doc + '|' + k] || 0) + v;
         const cell = document.querySelector(`[data-pain-auto="${month}|${doc}|${k}"]`);
         if (cell) cell.textContent = v ? String(v) : '';
       }
-      yt['ALL|' + k] = (yt['ALL|' + k] || 0) + tot;
-      const elm = document.querySelector(`[data-pain-tot="${month}|${k}"]`);
-      if (elm) elm.textContent = tot ? String(tot) : '';
     }
   }
   document.querySelectorAll('[data-pain-yt]').forEach(elm => {
@@ -9766,7 +9762,8 @@ function painMyTameRows(scope) {
       const k = seen[mrn] = (seen[mrn] || 0) + 1;
       const key = painMineKey(date, mrn, k);
       const o = painMine(key);
-      out.push({ auto: true, key, id: 'auto_' + key, date, mrn, proc: o.proc || 'TAME',
+      // procedure 沒填病歷號 → 用補填的 o.mrn(key 仍以 procedure 為準,補填不會讓列變孤兒)
+      out.push({ auto: true, key, id: 'auto_' + key, date, mrn: mrn || o.mrn || '', mrnFromProc: !!mrn, proc: o.proc || 'TAME',
                  dx: o.dx || '', site: o.site || '', ageSex: o.ageSex || '', note: o.note || '', doctor: PAIN_ME });
     }
   }
@@ -9775,7 +9772,8 @@ function painMyTameRows(scope) {
 function painAllTameRows(scope) {
   const manual = painTameRows().filter(r => !scope || (r.date || '').startsWith(scope));
   return painMyTameRows(scope).concat(manual)
-    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.auto === b.auto ? 0 : a.auto ? -1 : 1));
+    // 新的在上、舊的在下(使用者要求);同一天自動列在前
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (a.auto === b.auto ? 0 : a.auto ? -1 : 1));
 }
 // 原 Excel 的日期格式是 yy-m-d(26-10-27);從 Excel 複製出來就是那串字
 function painParseDate(s) {
@@ -9836,9 +9834,12 @@ function painClassifyRows(list) {
 }
 function addPainTameRows(list) {
   const c = painClassifyRows(list);
-  for (const { key, r } of c.toMine)
+  const noMrn = new Set(painMyTameRows('').filter(x => !x.mrnFromProc && !x.mrn).map(x => x.key));
+  for (const { key, r } of c.toMine) {
     for (const f of ['dx', 'site', 'ageSex', 'note', 'proc'])
       if (r[f] && !(f === 'proc' && r[f] === 'TAME')) painMineUpdate(key, f, r[f]);
+    if (r.mrn && noMrn.has(key)) painMineUpdate(key, 'mrn', String(r.mrn).trim());   // procedure 沒病歷號才補
+  }
   if (c.toAdd.length) {
     const arr = ensurePainTame();
     c.toAdd.forEach((r, i) => {
@@ -9869,7 +9870,14 @@ function painTameAoa(rows) {
   return [['Date', '', '', 'Site', '', '', ''], []].concat(rows.map(r =>
     [r.date || '', r.mrn || '', r.dx || '', r.site || '', r.proc || 'TAME', r.ageSex || '', r.note || '']));
 }
+const PAIN_XLSX_FROM = '2025-01-01';   // Excel 只輸出這天以後(使用者要求從 2025 開始)
+// Excel 照原檔:舊的在上、依日期往下(畫面是新的在上,這裡反過來)
+function painTameExportRows(rows) {
+  return rows.filter(r => (r.date || '') >= PAIN_XLSX_FROM)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.auto === b.auto ? 0 : a.auto ? -1 : 1));
+}
 async function exportPainTameXlsx(rows, scope) {
+  rows = painTameExportRows(rows);
   if (!rows.length) { toast('沒有可輸出的資料', ''); return; }
   let X;
   try { X = await loadXLSX(); } catch (e) { toast('⚠️ ' + e.message, 'error'); return; }
@@ -9924,6 +9932,19 @@ function showPainTamePasteModal() {
   ta.focus();
 }
 
+// 本月三位醫師的門診/打針/TAME → 純文字(Tab 分隔),貼 LINE 或 Excel 都對得齊
+const PAIN_DOC_ZH = { Peng: '彭', Yen: '嚴', Wu: '吳' };
+function painMonthCopyText(month) {
+  const lines = [`${Number(month.slice(5, 7))}月`, ['', ...PAIN_METRICS.map(([, lab]) => lab)].join('\t')];
+  for (const doc of PAIN_DOCTORS)
+    lines.push([PAIN_DOC_ZH[doc] || doc, ...PAIN_METRICS.map(([k]) => { const v = painCell(month, doc, k); return v == null ? '' : String(v); })].join('\t'));
+  return lines.join('\n');
+}
+function copyPainMonth(month) {
+  const t = painMonthCopyText(month);
+  navigator.clipboard.writeText(t).then(() => toast(`✓ 已複製 ${Number(month.slice(5, 7))} 月統計`, 'success'))
+    .catch(() => prompt('複製失敗,請手動複製:', t));
+}
 function shiftPainMonth(delta) {
   const [y, m] = state.painMonth.split('-').map(Number);
   const d = new Date(y, m - 1 + delta, 1);
@@ -9946,7 +9967,9 @@ function renderPainInner() {
     el('input', { type: 'month', class: 'btn-secondary', value: month, style: 'padding:2px 6px',
       onchange: (e) => { if (e.target.value) { state.painMonth = e.target.value; renderPain(); } } }),
     btn('→', '下個月', () => shiftPainMonth(1), 'padding:3px 12px'),
-    month !== nowMonth ? btn('本月', '回到這個月', () => { state.painMonth = nowMonth; renderPain(); }) : null));
+    month !== nowMonth ? btn('本月', '回到這個月', () => { state.painMonth = nowMonth; renderPain(); }) : null,
+    el('span', { style: 'flex:1' }),
+    btn(`📋 複製 ${mNum} 月`, '複製這個月三位醫師的門診 / 打針 / TAME(可直接貼 LINE / Excel)', () => copyPainMonth(month))));
 
   // ---- 門診月曆 ----
   const today = todayISO();
@@ -10004,7 +10027,10 @@ function renderPainInner() {
     if (r.auto) {
       // 衍生列:日期/病歷號/醫師來自 procedure,不能改也不能刪(要移除 → 刪那筆 procedure)
       dateCell = el('span', { class: 'pain-ro', title: '自動:你的 TAME procedure' }, r.date, el('span', { class: 'pain-auto-badge' }, '自動'));
-      mrnCell = el('span', { class: 'pain-ro' }, r.mrn || '—');
+      // procedure 有病歷號 → 唯讀;procedure 沒填 → 這裡可以補(存在 tameMine,不動 procedure)
+      mrnCell = r.mrnFromProc ? el('span', { class: 'pain-ro' }, r.mrn)
+        : el('input', { type: 'text', value: r.mrn || '', placeholder: '未填', title: '這筆 procedure 沒填病歷號,可在這裡補', 'data-focus-key': `pt|${r.id}|mrn`,
+            autocomplete: 'off', oninput: (e) => painMineUpdate(r.key, 'mrn', e.target.value.trim()) });
       docCell = el('span', { class: 'pain-ro' }, PAIN_ME);
       delCell = el('span', { class: 'pain-ro', title: '自動帶入的列:要移除請刪除那筆 procedure' }, '');
     } else {
@@ -10026,8 +10052,8 @@ function renderPainInner() {
     }
     tt.appendChild(el('tr', { class: r.auto ? 'pain-auto-row' : '' },
       el('td', null, dateCell), el('td', null, mrnCell), el('td', null, txt('dx', 'pt-dx')), el('td', null, txt('site')),
-      el('td', null, txt('proc', '', 'TAME')), el('td', null, txt('ageSex', '', '45/M')),
-      el('td', null, txt('note', '', '一日住院')), el('td', null, docCell), el('td', null, delCell)));
+      el('td', null, txt('proc', '', 'TAME')), el('td', null, txt('ageSex')),
+      el('td', null, txt('note')), el('td', null, docCell), el('td', null, delCell)));
   }
   if (!rows.length) tt.appendChild(el('tr', null, el('td', { colspan: '9', style: 'text-align:center;color:var(--ink-muted);padding:14px' },
     scope ? `${mNum} 月還沒有 TAME 個案` : '還沒有 TAME 個案')));
@@ -10044,7 +10070,7 @@ function renderPainInner() {
       btn('📥 貼上', '從原 Excel「Other doctor」頁複製資料列貼上(Peng 的列會補進對應的自動列)', showPainTamePasteModal),
       btn(state.painTameAll ? '只看本月' : '看全部', '切換:本月 / 全部月份', () => { state.painTameAll = !state.painTameAll; renderPain(); }),
       el('span', { style: 'flex:1' }),
-      btn('⬇ 下載 Excel', '下載目前顯示的這些列(.xlsx,不含 Doctor 欄)', () => exportPainTameXlsx(rows, scope))),
+      btn('⬇ 下載 Excel', '下載目前顯示的這些列(2025 起,.xlsx,不含 Doctor 欄)', () => exportPainTameXlsx(rows, scope))),
     el('div', { class: 'pain-hint' }, `${PAIN_ME} 的 TAME 由 procedure 自動帶入(日期/病歷號不能改);Dx、Site、Age/Sex、備註補填即可。`),
     el('div', { style: 'overflow-x:auto' }, tt)));
 
@@ -10055,15 +10081,14 @@ function renderPainInner() {
   head.appendChild(el('th', { class: 'grp' }, '全年'));
   tbl.appendChild(head);
   const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
-  for (const doc of PAIN_DOCTORS.concat(['ALL'])) {
+  for (const doc of PAIN_DOCTORS) {
     PAIN_METRICS.forEach(([k, lab], j) => {
       const tr = el('tr', { class: j === 0 ? 'pain-grp-start' : '' });
       if (j === 0) tr.appendChild(el('td', { rowspan: String(PAIN_METRICS.length), class: 'pain-doc' },
-        doc === 'ALL' ? '合計' : doc === PAIN_ME ? `${doc}(我)` : doc));
+        doc === PAIN_ME ? `${doc}(我)` : doc));
       tr.appendChild(el('td', { class: 'pain-metric' }, lab));
       for (const m of months) {
         const cls = (m === month ? 'pain-cur ' : '') + (m > nowMonth ? 'pain-future' : '');
-        if (doc === 'ALL') { tr.appendChild(el('td', { class: cls + ' tot', 'data-pain-tot': `${m}|${k}` }, '')); continue; }
         // 門診(三人都看月曆)與 Peng 的打針/TAME = 自動;其他醫師的打針/TAME = 手填
         // 自動格:門診(月曆)、Peng 全部、其他醫師的 TAME(TAME 表);只剩其他醫師的打針手填
         if (k === 'opd' || k === 'tame' || doc === PAIN_ME) { tr.appendChild(el('td', { class: cls + ' auto', 'data-pain-auto': `${m}|${doc}|${k}` }, '')); continue; }
@@ -10072,7 +10097,7 @@ function renderPainInner() {
           value: typeof v === 'number' ? String(v) : '', 'data-focus-key': `pm|${m}|${doc}|${k}`,
           onfocus: countSelectFocus, oninput: (e) => setPainManual(m, doc, k, e.target.value) })));
       }
-      tr.appendChild(el('td', { class: 'grp' + (doc === 'ALL' ? ' tot' : ' auto'), 'data-pain-yt': `${doc}|${k}` }, ''));
+      tr.appendChild(el('td', { class: 'grp auto', 'data-pain-yt': `${doc}|${k}` }, ''));
       tbl.appendChild(tr);
     });
   }
