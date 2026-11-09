@@ -1376,19 +1376,57 @@ select.btn-secondary option {
 .pain-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
 .pain-head h2 { margin: 0; flex: 1 1 auto; }
 .pain-hint { font-size: 11px; color: var(--ink-muted); margin-bottom: 8px; line-height: 1.6; }
-.pain-table th, .pain-table td { text-align: center; padding: 4px 6px; white-space: nowrap; }
+.pain-table th, .pain-table td { text-align: center; padding: 3px 3px; white-space: nowrap; }
 .pain-table th.grp, .pain-table td.grp { border-left: 1px solid var(--border); }
 .pain-table .auto { color: var(--ink-1); font-variant-numeric: tabular-nums; }
 .pain-table .tot { font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
-.pain-table input.pain-num { width: 52px; text-align: center; }
-.pain-table tr.pain-ytotal td { border-top: 2px solid var(--border); font-weight: 600; }
-.pain-table tr.pain-future td { opacity: .45; }
+.pain-table input.pain-num { width: 42px; text-align: center; padding: 2px; }
 .pain-tame td { padding: 3px 4px; }
 .pain-tame input, .pain-tame select { width: 100%; min-width: 56px; box-sizing: border-box; }
 .pain-tame input.pt-date { min-width: 128px; }
 .pain-tame input.pt-dx { min-width: 150px; }
 .pain-tame select { min-width: 68px; }
 .pain-doc-sum { font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted); }
+.pain-nav { position: sticky; top: 0; z-index: 2; background: var(--bg-page); padding: 4px 0; }
+/* 年度表:月份橫軸 */
+.pain-table td.pain-doc { font-weight: 600; text-align: left; vertical-align: top; }
+.pain-table td.pain-metric { color: var(--ink-muted); font-size: 11px; text-align: left; }
+.pain-table tr.pain-grp-start td { border-top: 2px solid var(--border); }
+.pain-table .pain-cur { background: rgba(233,162,59,.10); }
+.pain-table td.pain-future { opacity: .4; }
+/* 門診月曆 */
+.pain-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.pain-cal-wd { font-family: var(--font-mono); font-size: 10px; color: var(--ink-muted); text-align: center; }
+.pain-cal-day { border: 1px solid var(--border); border-radius: 4px; min-height: 60px; padding: 3px 4px;
+  display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pain-cal-day.we .pain-cal-dn { color: var(--ink-muted); }
+.pain-cal-day.today { border-color: var(--accent); }
+.pain-cal-dn { font-family: var(--font-mono); font-size: 10px; color: var(--ink-2); }
+.pain-cal-tag { font-size: 11px; border-radius: 8px; border: 1px solid currentColor; background: transparent;
+  cursor: pointer; padding: 0 6px; line-height: 16px; align-self: flex-start; max-width: 100%; }
+.pain-cal-tag.doc-Peng { color: var(--accent); }
+.pain-cal-tag.doc-Wu { color: #58a6ff; }
+.pain-cal-tag.doc-Yen { color: #3fb950; }
+.pain-cal-tag.moved { border-style: dashed; }
+.pain-cal-tag.empty { color: var(--ink-muted); opacity: .3; border-style: dashed; }
+.pain-cal-tag.empty:hover { opacity: 1; }
+.pain-cal-tag.off { color: var(--ink-muted); text-decoration: line-through; }
+/* 手機:一格只剩 ~34px → 標籤縮字、收邊距,「Peng」才放得下 */
+@media (max-width: 560px) {
+  .pain-cal { gap: 2px; }
+  .pain-cal-day { padding: 2px; min-height: 52px; gap: 2px; }
+  .pain-cal-tag { font-size: 9px; padding: 0 2px; line-height: 14px; letter-spacing: -0.02em; }
+  .pain-cal-n { font-size: 11px; padding: 0; }
+  .pain-cal-hint { font-size: 9px; }
+}
+.pain-cal-n { width: 100%; box-sizing: border-box; text-align: center; font-size: 12px; padding: 1px 2px;
+  background: var(--bg-page); color: var(--ink-1); border: 1px solid var(--border); border-radius: var(--r); }
+.pain-cal-auto { font-size: 13px; font-variant-numeric: tabular-nums; text-align: center; color: var(--ink-1); }
+.pain-cal-hint { font-size: 10px; color: var(--danger); }
+/* TAME 表:自動帶入的列 */
+.pain-ro { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.pain-auto-badge { font-size: 9px; margin-left: 4px; padding: 0 4px; border-radius: 6px; border: 1px solid var(--accent); color: var(--accent); }
+.pain-auto-row td { background: rgba(233,162,59,.04); }
 .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 @media (max-width: 700px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
 .kpi-card { position: relative; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px 10px; overflow: hidden; }
@@ -2257,7 +2295,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.09';
+const APP_VERSION = '2026.11.09b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -9505,22 +9543,90 @@ function checkDateRollover() {
 
 // ===== 疼痛業務統計(2026-11-09)=====
 // 三位醫師(Peng = 使用者本人)每月:門診人數 / 打針數 / TAME 數。
-//   Peng 自動算(使用者定義):
-//     門診 = **星期三而且當天看診 ≥4 人**(零星約診 1~2 人、或別天的約診不算)
-//     打針 = CT NB 系列 + NB arthro 系列 + RF/pRF。**單純 Arthro(presetId 'arthro')= 診斷性關節攝影,不算**
-//     TAME = procRankName === 'TAME'(sTAME / cTAME / c(s)TAME / cTAME & SONO;TAE 不是 TAME)
-//   Yen / Wu:手動輸入,存 state.data.pain.monthly[YYYY-MM][醫師] = { opd, inj, tame }
-// TAME 個案表 state.data.pain.tame[] = 原 Excel「Other doctor」頁的格式(三位醫師的都記)。
-//   ⚠ 含病歷號 → 只存在私有 RTDB,**不可**寫進 repo / 測試資料。輸出 .xlsx 時**不含醫師欄**(使用者要求)。
+//   門診:**由門診月曆決定**(pain.opd)。預設排班(使用者定):Peng = 當月第 2、4 個星期三(雙週三)、
+//         Wu = 第 1、3、5 個星期三(單週三)、Yen = 每個星期五。每格的醫師可點名字輪流切換(含「取消」)。
+//         Peng 那幾診的人數**直接讀當天今日 tab 的 OPD 看診數**;Yen / Wu 在月曆格手填。
+//   打針:Peng 自動 = CT NB 系列 + NB arthro 系列 + RF/pRF。**單純 Arthro(presetId 'arthro')= 診斷性,不算**。
+//         Yen / Wu 手填(pain.monthly[月][醫師].inj)。
+//   TAME:Peng 自動 = procRankName === 'TAME'(TAE 不是)。Yen / Wu 手填(pain.monthly[月][醫師].tame)。
+// TAME 個案表 = 原 Excel「Other doctor」頁的格式:
+//   **Peng 的列是衍生的**(由當月 TAME procedure 自動產生,日期/病歷號唯讀),補填欄位存 pain.tameMine[key];
+//   其他醫師(或對不上 procedure 的)存 pain.tame[]。輸出 .xlsx **不含醫師欄**(使用者要求)。
+//   ⚠ 含病歷號 → 只存私有 RTDB,**不可**寫進 repo / 測試資料(repo 是 PUBLIC)。
 // top-level `pain` 只有 web 會寫 → 不需要守門(同 settings / monthlyMeta)。
 const PAIN_DOCTORS = ['Peng', 'Yen', 'Wu'];
 const PAIN_ME = 'Peng';
 const PAIN_METRICS = [['opd', '門診'], ['inj', '打針'], ['tame', 'TAME']];
+const PAIN_OPD_RULES = [
+  { doc: 'Peng', dow: 3, nth: [2, 4] },        // 雙週三(當月第 2、4 個星期三)
+  { doc: 'Wu',   dow: 3, nth: [1, 3, 5] },     // 單週三
+  { doc: 'Yen',  dow: 5, nth: null },          // 每個星期五
+];
 const XLSX_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 const XLSX_SRI = 'sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw';
 
-function painIsClinicDay(date, day) {
-  return new Date(date + 'T00:00:00').getDay() === 3 && getCount(day, 'opd') >= 4;
+function painMonthDates(month) {
+  const [y, m] = month.split('-').map(Number);
+  const dim = new Date(y, m, 0).getDate();
+  const out = [];
+  for (let d = 1; d <= dim; d++) out.push(`${month}-${String(d).padStart(2, '0')}`);
+  return out;
+}
+// 當月第幾個星期 X = ceil(日 / 7)(第 1~7 日是第 1 個,不管月初是星期幾)
+function painDefaultOpdDoc(date) {
+  const dt = new Date(date + 'T00:00:00'), dow = dt.getDay(), nth = Math.ceil(dt.getDate() / 7);
+  const r = PAIN_OPD_RULES.find(x => x.dow === dow && (!x.nth || x.nth.includes(nth)));
+  return r ? r.doc : null;
+}
+function painOpdEntry(date) { return (state.data.pain && state.data.pain.opd && state.data.pain.opd[date]) || {}; }
+function painOpdDoc(date) {
+  const e = painOpdEntry(date);
+  if (e.doc === 'none') return null;
+  return e.doc || painDefaultOpdDoc(date);
+}
+function painOpdCount(date) {
+  const doc = painOpdDoc(date);
+  if (!doc) return 0;
+  if (doc === PAIN_ME) return getCount(state.data.days && state.data.days[date], 'opd');
+  return Number(painOpdEntry(date).n) || 0;
+}
+function painOpdWrite(date, fn) {
+  if (!state.data.pain) state.data.pain = {};
+  const P = state.data.pain;
+  if (!P.opd) P.opd = {};
+  const e = P.opd[date] || (P.opd[date] = {});
+  fn(e);
+  // 清空一律 delete(含空的節點)—— RTDB 不存空物件,留空殼會讓回音比對對不上
+  if (!Object.keys(e).length) delete P.opd[date];
+  if (!Object.keys(P.opd).length) delete P.opd;
+}
+// 名字輪流:Peng → Yen → Wu → (取消) → Peng …;跟預設一樣就不存(預設改了也跟著走)
+function cyclePainOpdDoc(date) {
+  const seq = PAIN_DOCTORS.concat([null]);
+  const cur = painOpdDoc(date);
+  const next = seq[(seq.indexOf(cur) + 1) % seq.length];
+  const def = painDefaultOpdDoc(date);
+  painOpdWrite(date, (e) => {
+    if (next === def) delete e.doc; else e.doc = next || 'none';
+  });
+  return next;
+}
+function setPainOpdN(date, raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  painOpdWrite(date, (e) => { if (s === '') delete e.n; else e.n = Math.max(0, Math.round(Number(s) || 0)); });
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
+}
+function painOpdMonth(month) {
+  const out = {};
+  for (const d of PAIN_DOCTORS) out[d] = { n: 0, days: 0 };
+  for (const date of painMonthDates(month)) {
+    const doc = painOpdDoc(date);
+    if (!doc) continue;
+    if (!out[doc]) out[doc] = { n: 0, days: 0 };
+    out[doc].days++;
+    out[doc].n += painOpdCount(date);
+  }
+  return out;
 }
 // 認 presetId 為主、名稱為輔(自訂 preset 的 id 是 preset_<時間戳>,只能靠名稱)
 function painInjKind(p) {
@@ -9532,10 +9638,9 @@ function painInjKind(p) {
   return null;
 }
 function painMyMonth(month) {
-  const out = { opd: 0, inj: 0, tame: 0 };
+  const out = { opd: painOpdMonth(month)[PAIN_ME].n, inj: 0, tame: 0 };
   for (const [date, day] of Object.entries(state.data.days || {})) {
     if (!date.startsWith(month)) continue;
-    if (painIsClinicDay(date, day)) out.opd += getCount(day, 'opd');
     for (const p of (day.procedures || [])) {
       if (painInjKind(p)) out.inj++;
       if (procRankName(p) === 'TAME') out.tame++;
@@ -9546,7 +9651,9 @@ function painMyMonth(month) {
 function painManual(month, doc) {
   return ((state.data.pain && state.data.pain.monthly && state.data.pain.monthly[month]) || {})[doc] || {};
 }
+// 門診一律看月曆;打針 / TAME:Peng 自動,其他醫師手填(沒填 → null)
 function painCell(month, doc, k) {
+  if (k === 'opd') return painOpdMonth(month)[doc] ? painOpdMonth(month)[doc].n : 0;
   if (doc === PAIN_ME) return painMyMonth(month)[k];
   const v = painManual(month, doc)[k];
   return typeof v === 'number' ? v : null;
@@ -9559,23 +9666,27 @@ function setPainManual(month, doc, k, raw) {
   const d = m[doc] || (m[doc] = {});
   const s = String(raw == null ? '' : raw).trim();
   if (s === '') delete d[k]; else d[k] = Math.max(0, Math.round(Number(s) || 0));
-  // 清空一律 delete(RTDB 不存空物件,留空殼會讓回音比對對不上)
   if (!Object.keys(d).length) delete m[doc];
   if (!Object.keys(m).length) delete P.monthly[month];
+  if (!Object.keys(P.monthly).length) delete P.monthly;
   scheduleSave('saveDebounce', () => storage.save(state.data), 400);
   refreshPainTotals();
 }
-// 只改合計數字,不重建(打字中)
+// 只改數字,不重建(打字中)—— 年度表的合計 / 全年 / 其他醫師的門診格,與月曆下方的小計
 function refreshPainTotals() {
-  const year = state.painYear;
+  const year = (state.painMonth || '').slice(0, 4);
+  if (!year) return;
   const yt = {};
   for (let mi = 1; mi <= 12; mi++) {
     const month = `${year}-${String(mi).padStart(2, '0')}`;
+    const opd = painOpdMonth(month), mine = painMyMonth(month);
     for (const [k] of PAIN_METRICS) {
       let tot = 0;
       for (const doc of PAIN_DOCTORS) {
-        const v = painCell(month, doc, k) || 0;
+        const v = k === 'opd' ? opd[doc].n : (doc === PAIN_ME ? mine[k] : (painManual(month, doc)[k] || 0));
         tot += v; yt[doc + '|' + k] = (yt[doc + '|' + k] || 0) + v;
+        const cell = document.querySelector(`[data-pain-auto="${month}|${doc}|${k}"]`);
+        if (cell) cell.textContent = v ? String(v) : '';
       }
       yt['ALL|' + k] = (yt['ALL|' + k] || 0) + tot;
       const elm = document.querySelector(`[data-pain-tot="${month}|${k}"]`);
@@ -9586,8 +9697,14 @@ function refreshPainTotals() {
     const v = yt[elm.getAttribute('data-pain-yt')] || 0;
     elm.textContent = v ? String(v) : '';
   });
+  const sum = $('pain-cal-sum');
+  if (sum && state.painMonth) {
+    const o = painOpdMonth(state.painMonth);
+    sum.textContent = PAIN_DOCTORS.map(d => `${d} ${o[d].days} 診 · ${o[d].n || '—'} 人`).join('   ｜   ');
+  }
 }
 
+// ---- TAME 個案 ----
 function painTameRows() { return (state.data.pain && Array.isArray(state.data.pain.tame)) ? state.data.pain.tame : []; }
 function ensurePainTame() {
   if (!state.data.pain) state.data.pain = {};
@@ -9605,6 +9722,45 @@ function painTameUpdate(id, field, val) {
 function painCleanMrn(s) {
   const m = String(s || '').split(/[\/\n]/)[0].match(/[A-Za-z]?\d{4,}/);
   return m ? m[0] : String(s || '').trim();
+}
+// tameMine 的 key:RTDB key 不可含 . # $ / [ ] → 病歷號只留英數
+function painMineKey(date, mrn, k) {
+  return `${date}_${String(mrn || '').replace(/[^A-Za-z0-9]/g, '') || 'x'}_${k}`;
+}
+function painMine(key) { return (state.data.pain && state.data.pain.tameMine && state.data.pain.tameMine[key]) || {}; }
+function painMineUpdate(key, field, val) {
+  if (!state.data.pain) state.data.pain = {};
+  const P = state.data.pain;
+  if (!P.tameMine) P.tameMine = {};
+  const o = P.tameMine[key] || (P.tameMine[key] = {});
+  const v = String(val == null ? '' : val);
+  if (v === '') delete o[field]; else o[field] = v;
+  if (!Object.keys(o).length) delete P.tameMine[key];
+  if (!Object.keys(P.tameMine).length) delete P.tameMine;
+  scheduleSave('saveDebounce', () => storage.save(state.data), 400);
+}
+// 我的 TAME:由 procedure 衍生(scope = 'YYYY-MM' 或 '' 全部)。同日同病歷號兩筆 → k 區分
+function painMyTameRows(scope) {
+  const out = [];
+  const dates = Object.keys(state.data.days || {}).filter(d => !scope || d.startsWith(scope)).sort();
+  for (const date of dates) {
+    const seen = {};
+    for (const p of (state.data.days[date].procedures || [])) {
+      if (procRankName(p) !== 'TAME') continue;
+      const mrn = painCleanMrn(p.medRecord);
+      const k = seen[mrn] = (seen[mrn] || 0) + 1;
+      const key = painMineKey(date, mrn, k);
+      const o = painMine(key);
+      out.push({ auto: true, key, id: 'auto_' + key, date, mrn, proc: o.proc || 'TAME',
+                 dx: o.dx || '', site: o.site || '', ageSex: o.ageSex || '', note: o.note || '', doctor: PAIN_ME });
+    }
+  }
+  return out;
+}
+function painAllTameRows(scope) {
+  const manual = painTameRows().filter(r => !scope || (r.date || '').startsWith(scope));
+  return painMyTameRows(scope).concat(manual)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.auto === b.auto ? 0 : a.auto ? -1 : 1));
 }
 // 原 Excel 的日期格式是 yy-m-d(26-10-27);從 Excel 複製出來就是那串字
 function painParseDate(s) {
@@ -9632,31 +9788,51 @@ function parsePainTamePaste(text) {
   }
   return { rows, skipped };
 }
-// 同日 + 同病歷號 + 同醫師 視為同一筆(重貼不會重複)
 function painTameKey(r) { return `${r.date}|${painCleanMrn(r.mrn)}|${r.doctor || ''}`; }
-function addPainTameRows(list) {
-  const arr = ensurePainTame();
-  const have = new Set(arr.map(painTameKey));
-  let n = 0;
-  for (const r of list) {
+// 分流:Peng 的列對得上 procedure → 補進那一列(tameMine);其餘 → 手動列(同日+病歷號+醫師 已存在就略過)
+// 對得上的判斷分兩輪(2026-11-09 用原 Excel 實測:Peng 35 筆,日期+病歷號對得上 31、只有日期對得上 4):
+//   ① 日期 + 病歷號 ② 病歷號對不上,但**那天恰好只剩一筆沒配到的我的 TAME** → 併進去並標 byDate 請使用者確認。
+//   沒有第 ② 輪的話,那 4 筆會變成跟自動列重複的手動列 → 同一台 TAME 算兩次。
+// 每一個自動列只能被認領一次(同日同人兩台 TAME 要各配各的)。
+function painClassifyRows(list) {
+  const exact = {}, byDay = {};
+  for (const r of painMyTameRows('')) {
+    (exact[`${r.date}|${painCleanMrn(r.mrn)}`] ||= []).push(r.key);
+    (byDay[r.date] ||= []).push(r.key);
+  }
+  const have = new Set(painTameRows().map(painTameKey));
+  const claimed = new Set(), toMine = [], rest = [];
+  let dup = 0;
+  for (const r of list) {                                     // ① 精確配對
+    const k = r.doctor === PAIN_ME && (exact[`${r.date}|${painCleanMrn(r.mrn)}`] || []).find(x => !claimed.has(x));
+    if (k) { claimed.add(k); toMine.push({ key: k, r, byDate: false }); } else rest.push(r);
+  }
+  const toAdd = [];
+  for (const r of rest) {                                     // ② 只剩日期
+    if (r.doctor === PAIN_ME) {
+      const left = (byDay[r.date] || []).filter(x => !claimed.has(x));
+      if (left.length === 1) { claimed.add(left[0]); toMine.push({ key: left[0], r, byDate: true }); continue; }
+    }
     const k = painTameKey(r);
-    if (have.has(k)) continue;
-    have.add(k);
-    const row = { id: 'pt_' + Date.now().toString(36) + '_' + (n++) };
-    for (const [f, v] of Object.entries(r)) if (v !== '' && v != null) row[f] = v;
-    arr.push(row);
+    if (have.has(k)) { dup++; continue; }
+    have.add(k); toAdd.push(r);
   }
-  return n;
+  return { toMine, toAdd, dup, byDate: toMine.filter(x => x.byDate).length };
 }
-// 把我(Peng)在範圍內的 TAME procedure 帶進表格(日期 + 病歷號;診斷等欄位再補)
-function painMyTameCandidates(scope) {
-  const out = [];
-  for (const [date, day] of Object.entries(state.data.days || {})) {
-    if (scope && !date.startsWith(scope)) continue;
-    for (const p of (day.procedures || []))
-      if (procRankName(p) === 'TAME') out.push({ date, mrn: painCleanMrn(p.medRecord), proc: 'TAME', doctor: PAIN_ME });
+function addPainTameRows(list) {
+  const c = painClassifyRows(list);
+  for (const { key, r } of c.toMine)
+    for (const f of ['dx', 'site', 'ageSex', 'note', 'proc'])
+      if (r[f] && !(f === 'proc' && r[f] === 'TAME')) painMineUpdate(key, f, r[f]);
+  if (c.toAdd.length) {
+    const arr = ensurePainTame();
+    c.toAdd.forEach((r, i) => {
+      const row = { id: 'pt_' + Date.now().toString(36) + '_' + i };
+      for (const [f, v] of Object.entries(r)) if (v !== '' && v != null) row[f] = v;
+      arr.push(row);
+    });
   }
-  return out.sort((a, b) => a.date.localeCompare(b.date));
+  return { added: c.toAdd.length, merged: c.toMine.length, dup: c.dup, byDate: c.byDate };
 }
 
 let _xlsxLoading = null;
@@ -9706,13 +9882,11 @@ function showPainTamePasteModal() {
   const close = () => overlay.remove();
   const preview = () => {
     const { rows, skipped } = parsePainTamePaste(ta.value);
-    const have = new Set(painTameRows().map(painTameKey));
-    const dup = rows.filter(r => have.has(painTameKey(r))).length;
-    const byDoc = {};
-    for (const r of rows) byDoc[r.doctor || '(無醫師)'] = (byDoc[r.doctor || '(無醫師)'] || 0) + 1;
-    info.textContent = rows.length
-      ? `解析到 ${rows.length} 筆(${Object.entries(byDoc).map(([d, n]) => d + ' ' + n).join('、')})· 已存在 ${dup} 筆會略過 · 跳過 ${skipped.length} 列(表頭/空白)`
-      : '還沒有可解析的資料列(第一欄要是日期)';
+    if (!rows.length) { info.textContent = '還沒有可解析的資料列(第一欄要是日期)'; return; }
+    const c = painClassifyRows(rows);
+    info.textContent = `解析到 ${rows.length} 筆:新增 ${c.toAdd.length} · 補進我的 TAME ${c.toMine.length}` +
+      (c.byDate ? `(其中 ${c.byDate} 筆病歷號跟 procedure 不同、只靠日期配對,加入後請核對)` : '') +
+      ` · 已存在略過 ${c.dup}` + (skipped.length ? ` · 跳過 ${skipped.length} 列(表頭/空白)` : '');
   };
   ta.addEventListener('input', preview);
   const modal = el('div', { class: 'modal paste-modal' },
@@ -9723,10 +9897,10 @@ function showPainTamePasteModal() {
       el('button', { class: 'btn-primary', onclick: () => {
         const { rows } = parsePainTamePaste(ta.value);
         if (!rows.length) { toast('沒有可加入的資料', ''); return; }
-        const n = addPainTameRows(rows);
+        const r = addPainTameRows(rows);
         storage.save(state.data);
         close(); renderPain();
-        toast(`✓ 加入 ${n} 筆${rows.length - n ? `(${rows.length - n} 筆已存在略過)` : ''}`, 'success');
+        toast(`✓ 新增 ${r.added} 筆 · 補進我的 TAME ${r.merged} 筆${r.byDate ? `(${r.byDate} 筆只靠日期配對,請核對)` : ''}${r.dup ? ` · ${r.dup} 筆已存在略過` : ''}`, 'success');
       } }, '加入'))
   );
   overlay.appendChild(modal);
@@ -9735,136 +9909,161 @@ function showPainTamePasteModal() {
   ta.focus();
 }
 
+function shiftPainMonth(delta) {
+  const [y, m] = state.painMonth.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  state.painMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  renderPain();
+}
 function renderPain() { withFocusPreserved(renderPainInner); }
 function renderPainInner() {
   const root = $('pain-root');
   if (!root) return;
   const nowMonth = isoToMonth(todayISO());
-  if (!state.painYear) state.painYear = nowMonth.slice(0, 4);
-  if (state.painTameMonth === undefined) state.painTameMonth = nowMonth;
+  if (!state.painMonth) state.painMonth = nowMonth;
+  const month = state.painMonth, year = month.slice(0, 4), mNum = Number(month.slice(5, 7));
   root.innerHTML = '';
+  const btn = (label, title, fn, style) => el('button', { class: 'btn-secondary', style: style || 'padding:3px 10px;font-size:12px', title, onclick: fn }, label);
 
-  // ---- 每月統計 ----
-  const years = new Set([nowMonth.slice(0, 4), state.painYear]);
-  for (const d of Object.keys(state.data.days || {})) if (d >= '2024') years.add(d.slice(0, 4));
-  const ySel = el('select', { class: 'btn-secondary', style: 'padding:3px 8px',
-    onchange: (e) => { state.painYear = e.target.value; renderPain(); } });
-  for (const y of [...years].sort().reverse()) { const o = el('option', { value: y }, y + ' 年'); if (y === state.painYear) o.selected = true; ySel.appendChild(o); }
+  // ---- 月份切換(三塊共用)----
+  root.appendChild(el('div', { class: 'pain-head pain-nav' },
+    btn('←', '上個月', () => shiftPainMonth(-1), 'padding:3px 12px'),
+    el('input', { type: 'month', class: 'btn-secondary', value: month, style: 'padding:2px 6px',
+      onchange: (e) => { if (e.target.value) { state.painMonth = e.target.value; renderPain(); } } }),
+    btn('→', '下個月', () => shiftPainMonth(1), 'padding:3px 12px'),
+    month !== nowMonth ? btn('本月', '回到這個月', () => { state.painMonth = nowMonth; renderPain(); }) : null));
 
-  const tbl = el('table', { class: 'settings-table pain-table' });
-  const h1 = el('tr', null, el('th', { rowspan: '2' }, '月份'));
-  for (const doc of PAIN_DOCTORS.concat(['合計']))
-    h1.appendChild(el('th', { colspan: String(PAIN_METRICS.length), class: 'grp' }, doc === PAIN_ME ? `${doc}(我·自動)` : doc));
-  const h2 = el('tr', null);
-  for (let g = 0; g < PAIN_DOCTORS.length + 1; g++)
-    PAIN_METRICS.forEach(([, lab], j) => h2.appendChild(el('th', { class: j === 0 ? 'grp' : '' }, lab)));
-  tbl.appendChild(h1); tbl.appendChild(h2);
-  for (let mi = 1; mi <= 12; mi++) {
-    const month = `${state.painYear}-${String(mi).padStart(2, '0')}`;
-    const future = month > nowMonth;
-    const tr = el('tr', { class: future ? 'pain-future' : '' }, el('td', null, `${mi} 月`));
-    const mine = future ? null : painMyMonth(month);
-    for (const doc of PAIN_DOCTORS) {
-      PAIN_METRICS.forEach(([k], j) => {
-        const cls = j === 0 ? 'grp' : '';
-        if (doc === PAIN_ME) { tr.appendChild(el('td', { class: cls + ' auto' }, mine && mine[k] ? String(mine[k]) : '')); return; }
-        const v = painManual(month, doc)[k];
-        tr.appendChild(el('td', { class: cls }, el('input', { class: 'pain-num', type: 'number', min: '0', inputmode: 'numeric',
-          value: typeof v === 'number' ? String(v) : '', 'data-focus-key': `pm|${month}|${doc}|${k}`,
-          onfocus: countSelectFocus, oninput: (e) => setPainManual(month, doc, k, e.target.value) })));
-      });
+  // ---- 門診月曆 ----
+  const today = todayISO();
+  const cal = el('div', { class: 'pain-cal' });
+  for (const w of ['一', '二', '三', '四', '五', '六', '日']) cal.appendChild(el('div', { class: 'pain-cal-wd' }, w));
+  const dates = painMonthDates(month);
+  const lead = (new Date(dates[0] + 'T00:00:00').getDay() + 6) % 7;      // 週一起始
+  for (let i = 0; i < lead; i++) cal.appendChild(el('div', null, ''));
+  for (const date of dates) {
+    const dow = new Date(date + 'T00:00:00').getDay();
+    const doc = painOpdDoc(date), myN = getCount(state.data.days && state.data.days[date], 'opd');
+    const isDef = !painOpdEntry(date).doc;
+    // 預設有診、被手動取消(放假)→ 顯示「休」,不然看起來跟一般空白日一樣,之後會忘記那天原本有診
+    const cancelled = !doc && !isDef && !!painDefaultOpdDoc(date);
+    const cell = el('div', { class: 'pain-cal-day' + (dow === 0 || dow === 6 ? ' we' : '') + (date === today ? ' today' : '') },
+      el('div', { class: 'pain-cal-dn' }, String(Number(date.slice(8)))));
+    cell.appendChild(el('button', {
+      class: 'pain-cal-tag ' + (doc ? 'doc-' + doc : cancelled ? 'off' : 'empty') + (isDef ? '' : ' moved'),
+      title: (doc ? `${doc} 門診` : cancelled ? `取消(原本是 ${painDefaultOpdDoc(date)})` : '沒有門診') + (isDef ? '(預設)' : '(手動改過)') +
+        '\n點一下切換:Peng → Yen → Wu → 取消',
+      onclick: () => { cyclePainOpdDoc(date); storage.save(state.data); renderPain(); } }, doc || (cancelled ? '休' : '＋')));
+    if (doc === PAIN_ME) {
+      cell.appendChild(el('div', { class: 'pain-cal-auto', title: '自動:今日 tab 當天的 OPD 看診數' }, myN ? String(myN) : '—'));
+    } else if (doc) {
+      const n = painOpdEntry(date).n;
+      cell.appendChild(el('input', { class: 'pain-cal-n', type: 'number', min: '0', inputmode: 'numeric', placeholder: '人數',
+        value: typeof n === 'number' ? String(n) : '', 'data-focus-key': `pc|${date}`, onfocus: countSelectFocus,
+        oninput: (e) => { setPainOpdN(date, e.target.value); refreshPainTotals(); } }));
     }
-    PAIN_METRICS.forEach(([k], j) => tr.appendChild(el('td', { class: (j === 0 ? 'grp ' : '') + 'tot', 'data-pain-tot': `${month}|${k}` }, '')));
-    tbl.appendChild(tr);
+    // 不是我的門診格,但今日 tab 記了 ≥4 人 → 很可能是換診,提醒切過來(零星約診 1~2 人不提醒)
+    if (doc !== PAIN_ME && myN >= 4)
+      cell.appendChild(el('div', { class: 'pain-cal-hint', title: `今日 tab 記了 ${myN} 人,但這格不是你的門診 —— 換診的話點名字切成 ${PAIN_ME}` }, `我 ${myN}?`));
+    cal.appendChild(cell);
   }
-  const yt = el('tr', { class: 'pain-ytotal' }, el('td', null, '全年'));
-  for (const doc of PAIN_DOCTORS.concat(['ALL']))
-    PAIN_METRICS.forEach(([k], j) => yt.appendChild(el('td', { class: (j === 0 ? 'grp ' : '') + (doc === 'ALL' ? 'tot' : ''), 'data-pain-yt': `${doc}|${k}` }, '')));
-  tbl.appendChild(yt);
-
   root.appendChild(el('div', { class: 'panel' },
-    el('div', { class: 'pain-head' }, el('h2', null, '疼痛業務 · 每月統計'), ySel),
-    el('div', { class: 'pain-hint' },
-      `${PAIN_ME}(我)自動帶入:門診 = 星期三且當天看診 ≥4 人;打針 = CT NB + NB arthro + RF/pRF(單純 Arthro 不算);TAME = sTAME/cTAME。其他醫師手動填。`),
-    el('div', { style: 'overflow-x:auto' }, tbl)));
-  refreshPainTotals();
+    el('div', { class: 'pain-head' }, el('h2', null, `${mNum} 月 · 門診月曆`)),
+    el('div', { class: 'pain-hint' }, `預設:${PAIN_ME} 第 2、4 個星期三 · Wu 第 1、3、5 個星期三 · Yen 每個星期五。點名字可換人或取消(放假)。${PAIN_ME} 的人數自動帶今日 tab 的 OPD 看診數。`),
+    cal,
+    el('div', { class: 'pain-doc-sum', id: 'pain-cal-sum', style: 'margin-top:8px' }, '')));
 
   // ---- TAME 個案表 ----
-  const all = painTameRows();
-  const scope = state.painTameMonth;           // '' = 全部
-  const months = new Set([nowMonth]);
-  for (const r of all) if (r.date) months.add(r.date.slice(0, 7));
-  const mSel = el('select', { class: 'btn-secondary', style: 'padding:3px 8px',
-    onchange: (e) => { state.painTameMonth = e.target.value; renderPain(); } });
-  mSel.appendChild(el('option', { value: '' }, '全部'));
-  for (const m of [...months].sort().reverse()) mSel.appendChild(el('option', { value: m }, m));
-  mSel.value = scope;
-  const rows = all.filter(r => !scope || (r.date || '').startsWith(scope))
-    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.id).localeCompare(String(b.id)));
+  const scope = state.painTameAll ? '' : month;
+  const rows = painAllTameRows(scope);
   const byDoc = {};
   for (const r of rows) byDoc[r.doctor || '?'] = (byDoc[r.doctor || '?'] || 0) + 1;
-
   const tt = el('table', { class: 'settings-table pain-tame' });
   tt.appendChild(el('tr', null, ...['Date', '病歷號', 'Dx', 'Site', '術式', 'Age/Sex', '備註', 'Doctor', ''].map(h => el('th', null, h))));
-  const txt = (r, f, cls, ph) => el('input', { type: 'text', class: cls || '', value: r[f] || '', placeholder: ph || '',
-    'data-focus-key': `pt|${r.id}|${f}`, autocomplete: 'off', oninput: (e) => painTameUpdate(r.id, f, e.target.value) });
   for (const r of rows) {
-    const docSel = el('select', { 'data-focus-key': `pt|${r.id}|doctor`,
-      onchange: (e) => { painTameUpdate(r.id, 'doctor', e.target.value); refreshPainDocSum(); } });
-    const docs = PAIN_DOCTORS.includes(r.doctor) || !r.doctor ? PAIN_DOCTORS : PAIN_DOCTORS.concat([r.doctor]);
-    for (const d of docs) { const o = el('option', { value: d }, d); if (d === (r.doctor || '')) o.selected = true; docSel.appendChild(o); }
-    if (!r.doctor) { const o = el('option', { value: '' }, '—'); o.selected = true; docSel.insertBefore(o, docSel.firstChild); }
-    tt.appendChild(el('tr', null,
-      el('td', null, el('input', { type: 'date', class: 'pt-date', value: r.date || '', 'data-focus-key': `pt|${r.id}|date`,
-        // 改日期可能換月 / 換排序 → 存完重繪(onchange,不是逐鍵)
-        onchange: (e) => { painTameUpdate(r.id, 'date', e.target.value); renderPain(); } })),
-      el('td', null, txt(r, 'mrn')), el('td', null, txt(r, 'dx', 'pt-dx')), el('td', null, txt(r, 'site')),
-      el('td', null, txt(r, 'proc', '', 'TAME')), el('td', null, txt(r, 'ageSex', '', '45/M')),
-      el('td', null, txt(r, 'note', '', '一日住院')), el('td', null, docSel),
-      el('td', null, el('button', { class: 'btn-del', title: '刪除', onclick: () => {
+    const upd = r.auto ? (f, v) => painMineUpdate(r.key, f, v) : (f, v) => painTameUpdate(r.id, f, v);
+    const txt = (f, cls, ph) => el('input', { type: 'text', class: cls || '', value: r[f] || '', placeholder: ph || '',
+      'data-focus-key': `pt|${r.id}|${f}`, autocomplete: 'off', oninput: (e) => upd(f, e.target.value) });
+    let dateCell, mrnCell, docCell, delCell;
+    if (r.auto) {
+      // 衍生列:日期/病歷號/醫師來自 procedure,不能改也不能刪(要移除 → 刪那筆 procedure)
+      dateCell = el('span', { class: 'pain-ro', title: '自動:你的 TAME procedure' }, r.date, el('span', { class: 'pain-auto-badge' }, '自動'));
+      mrnCell = el('span', { class: 'pain-ro' }, r.mrn || '—');
+      docCell = el('span', { class: 'pain-ro' }, PAIN_ME);
+      delCell = el('span', { class: 'pain-ro', title: '自動帶入的列:要移除請刪除那筆 procedure' }, '');
+    } else {
+      dateCell = el('input', { type: 'date', class: 'pt-date', value: r.date || '', 'data-focus-key': `pt|${r.id}|date`,
+        onchange: (e) => { painTameUpdate(r.id, 'date', e.target.value); renderPain(); } });
+      mrnCell = txt('mrn');
+      const docSel = el('select', { 'data-focus-key': `pt|${r.id}|doctor`,
+        onchange: (e) => { painTameUpdate(r.id, 'doctor', e.target.value); renderPain(); } });
+      const docs = PAIN_DOCTORS.includes(r.doctor) || !r.doctor ? PAIN_DOCTORS : PAIN_DOCTORS.concat([r.doctor]);
+      if (!r.doctor) docSel.appendChild(el('option', { value: '' }, '—'));
+      for (const d of docs) { const o = el('option', { value: d }, d); if (d === (r.doctor || '')) o.selected = true; docSel.appendChild(o); }
+      docCell = docSel;
+      delCell = el('button', { class: 'btn-del', title: '刪除', onclick: () => {
         if (!confirm(`刪除 ${r.date || ''} ${r.doctor || ''} 這筆?`)) return;
         const arr = ensurePainTame(), i = arr.indexOf(r);
         if (i >= 0) arr.splice(i, 1);
         storage.save(state.data); renderPain();
-      } }, '×'))));
+      } }, '×');
+    }
+    tt.appendChild(el('tr', { class: r.auto ? 'pain-auto-row' : '' },
+      el('td', null, dateCell), el('td', null, mrnCell), el('td', null, txt('dx', 'pt-dx')), el('td', null, txt('site')),
+      el('td', null, txt('proc', '', 'TAME')), el('td', null, txt('ageSex', '', '45/M')),
+      el('td', null, txt('note', '', '一日住院')), el('td', null, docCell), el('td', null, delCell)));
   }
   if (!rows.length) tt.appendChild(el('tr', null, el('td', { colspan: '9', style: 'text-align:center;color:var(--ink-muted);padding:14px' },
-    scope ? `${scope} 還沒有 TAME 個案` : '還沒有 TAME 個案')));
-
-  const sumEl = el('span', { class: 'pain-doc-sum', id: 'pain-doc-sum' },
-    rows.length ? `${rows.length} 筆 · ` + PAIN_DOCTORS.concat(Object.keys(byDoc).filter(d => !PAIN_DOCTORS.includes(d)))
-      .filter(d => byDoc[d]).map(d => `${d} ${byDoc[d]}`).join(' · ') : '');
-  const btn = (label, title, fn) => el('button', { class: 'btn-secondary', style: 'padding:3px 10px;font-size:12px', title, onclick: fn }, label);
+    scope ? `${mNum} 月還沒有 TAME 個案` : '還沒有 TAME 個案')));
+  const docOrder = PAIN_DOCTORS.concat(Object.keys(byDoc).filter(d => !PAIN_DOCTORS.includes(d)));
   root.appendChild(el('div', { class: 'panel' },
-    el('div', { class: 'pain-head' }, el('h2', null, 'TAME 個案'), mSel, sumEl),
+    el('div', { class: 'pain-head' }, el('h2', null, scope ? `${mNum} 月 · TAME 個案` : 'TAME 個案(全部)'),
+      el('span', { class: 'pain-doc-sum' }, rows.length ? `${rows.length} 筆 · ` + docOrder.filter(d => byDoc[d]).map(d => `${d} ${byDoc[d]}`).join(' · ') : '')),
     el('div', { class: 'pain-head' },
-      btn('＋ 新增', '新增一列(醫師預設 Peng)', () => {
-        const date = scope && scope !== nowMonth ? scope + '-01' : todayISO();
-        ensurePainTame().push({ id: 'pt_' + Date.now().toString(36), date, proc: 'TAME', doctor: PAIN_ME });
+      btn('＋ 新增', '新增一列(其他醫師的 TAME;你的會自動出現)', () => {
+        const date = month === nowMonth ? todayISO() : month + '-01';
+        ensurePainTame().push({ id: 'pt_' + Date.now().toString(36), date, proc: 'TAME', doctor: 'Yen' });
         storage.save(state.data); renderPain();
       }),
-      btn('帶入我的 TAME', `把${scope ? ' ' + scope + ' ' : '所有'}我做的 TAME 帶進來(日期 + 病歷號;已在表上的略過)`, () => {
-        const cand = painMyTameCandidates(scope);
-        if (!cand.length) { toast(`${scope || ''} 沒有我的 TAME 紀錄`, ''); return; }
-        const n = addPainTameRows(cand);
-        if (n) storage.save(state.data);
-        renderPain();
-        toast(n ? `✓ 帶入 ${n} 筆(診斷/部位/年齡性別請補)` : '都已經在表上了', n ? 'success' : '');
-      }),
-      btn('📥 貼上', '從原 Excel「Other doctor」頁複製資料列貼上', showPainTamePasteModal),
+      btn('📥 貼上', '從原 Excel「Other doctor」頁複製資料列貼上(Peng 的列會補進對應的自動列)', showPainTamePasteModal),
+      btn(state.painTameAll ? '只看本月' : '看全部', '切換:本月 / 全部月份', () => { state.painTameAll = !state.painTameAll; renderPain(); }),
       el('span', { style: 'flex:1' }),
       btn('⬇ 下載 Excel', '下載目前顯示的這些列(.xlsx,不含 Doctor 欄)', () => exportPainTameXlsx(rows, scope))),
+    el('div', { class: 'pain-hint' }, `${PAIN_ME} 的 TAME 由 procedure 自動帶入(日期/病歷號不能改);Dx、Site、Age/Sex、備註補填即可。`),
     el('div', { style: 'overflow-x:auto' }, tt)));
-}
-// 只改「各醫師幾筆」那行(改醫師下拉時,不重建表格)
-function refreshPainDocSum() {
-  const elm = $('pain-doc-sum');
-  if (!elm) return;
-  const scope = state.painTameMonth;
-  const rows = painTameRows().filter(r => !scope || (r.date || '').startsWith(scope));
-  const byDoc = {};
-  for (const r of rows) byDoc[r.doctor || '?'] = (byDoc[r.doctor || '?'] || 0) + 1;
-  elm.textContent = rows.length ? `${rows.length} 筆 · ` + Object.entries(byDoc).map(([d, n]) => `${d} ${n}`).join(' · ') : '';
+
+  // ---- 年度統計(月份橫軸)----
+  const tbl = el('table', { class: 'settings-table pain-table' });
+  const head = el('tr', null, el('th', null, ''), el('th', null, ''));
+  for (let mi = 1; mi <= 12; mi++) head.appendChild(el('th', { class: mi === mNum ? 'pain-cur' : '' }, `${mi}月`));
+  head.appendChild(el('th', { class: 'grp' }, '全年'));
+  tbl.appendChild(head);
+  const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+  for (const doc of PAIN_DOCTORS.concat(['ALL'])) {
+    PAIN_METRICS.forEach(([k, lab], j) => {
+      const tr = el('tr', { class: j === 0 ? 'pain-grp-start' : '' });
+      if (j === 0) tr.appendChild(el('td', { rowspan: String(PAIN_METRICS.length), class: 'pain-doc' },
+        doc === 'ALL' ? '合計' : doc === PAIN_ME ? `${doc}(我)` : doc));
+      tr.appendChild(el('td', { class: 'pain-metric' }, lab));
+      for (const m of months) {
+        const cls = (m === month ? 'pain-cur ' : '') + (m > nowMonth ? 'pain-future' : '');
+        if (doc === 'ALL') { tr.appendChild(el('td', { class: cls + ' tot', 'data-pain-tot': `${m}|${k}` }, '')); continue; }
+        // 門診(三人都看月曆)與 Peng 的打針/TAME = 自動;其他醫師的打針/TAME = 手填
+        if (k === 'opd' || doc === PAIN_ME) { tr.appendChild(el('td', { class: cls + ' auto', 'data-pain-auto': `${m}|${doc}|${k}` }, '')); continue; }
+        const v = painManual(m, doc)[k];
+        tr.appendChild(el('td', { class: cls }, el('input', { class: 'pain-num', type: 'number', min: '0', inputmode: 'numeric',
+          value: typeof v === 'number' ? String(v) : '', 'data-focus-key': `pm|${m}|${doc}|${k}`,
+          onfocus: countSelectFocus, oninput: (e) => setPainManual(m, doc, k, e.target.value) })));
+      }
+      tr.appendChild(el('td', { class: 'grp' + (doc === 'ALL' ? ' tot' : ' auto'), 'data-pain-yt': `${doc}|${k}` }, ''));
+      tbl.appendChild(tr);
+    });
+  }
+  root.appendChild(el('div', { class: 'panel' },
+    el('div', { class: 'pain-head' }, el('h2', null, `${year} 年 · 疼痛業務統計`)),
+    el('div', { class: 'pain-hint' },
+      `門診 = 月曆加總。${PAIN_ME} 打針 = CT NB + NB arthro + RF/pRF(單純 Arthro 不算)、TAME = sTAME/cTAME,都自動;其他醫師的打針 / TAME 手填。`),
+    el('div', { style: 'overflow-x:auto' }, tbl)));
+  refreshPainTotals();
 }
 
 function setView(name) {
