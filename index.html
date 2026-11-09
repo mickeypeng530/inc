@@ -2314,7 +2314,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.10f';
+const APP_VERSION = '2026.11.10g';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -9948,9 +9948,7 @@ function showPainTamePasteModal() {
 // 本月三位醫師的門診/打針/TAME → 純文字(Tab 分隔),貼 LINE 或 Excel 都對得齊
 const PAIN_DOC_ZH = { Peng: '彭', Yen: '嚴', Wu: '吳' };
 function painMonthCopyText(month) {
-  const lines = [`${Number(month.slice(5, 7))}月`,
-    ['', ...PAIN_METRICS.map(([k]) => k === 'opd' ? '(固定門診日)' : '')].join('\t'),
-    ['', ...PAIN_METRICS.map(([, lab]) => lab)].join('\t')];
+  const lines = [`${Number(month.slice(5, 7))}月`, ['', ...PAIN_METRICS.map(([, lab]) => lab)].join('\t')];
   for (const doc of PAIN_DOCTORS)
     lines.push([PAIN_DOC_ZH[doc] || doc, ...PAIN_METRICS.map(([k]) => { const v = painCell(month, doc, k); return v == null ? '' : String(v); })].join('\t'));
   return lines.join('\n');
@@ -10124,7 +10122,7 @@ function renderPainInner() {
     el('div', { class: 'pain-head' }, el('h2', null, `${year} 年 · 疼痛業務統計`), el('span', { style: 'flex:1' }),
       btn(`📋 複製 ${mNum} 月`, '複製這個月三位醫師的門診 / 打針 / TAME(可直接貼 LINE / Excel)', () => copyPainMonth(month))),
     el('div', { class: 'pain-hint' },
-      `門診 = 月曆加總。TAME:${PAIN_ME} 照 procedure,其他醫師 = TAME 個案表的列數。${PAIN_ME} 打針 = CT NB + NB arthro + RF/pRF(單純 Arthro 不算)自動;只有其他醫師的打針要手填。`),
+      `門診 = 月曆加總(只算固定門診日,不含臨時約診)。TAME:${PAIN_ME} 照 procedure,其他醫師 = TAME 個案表的列數。${PAIN_ME} 打針 = CT NB + NB arthro + RF/pRF(單純 Arthro 不算)自動;只有其他醫師的打針要手填。`),
     el('div', { style: 'overflow-x:auto' }, tbl)));
   refreshPainTotals();
 }
