@@ -1406,6 +1406,16 @@ select.btn-secondary option {
 .pain-cal-day.we .pain-cal-dn { color: var(--ink-muted); }
 .pain-cal-day.today { border-color: var(--accent); }
 .pain-cal-dn { font-family: var(--font-mono); font-size: 10px; color: var(--ink-2); }
+.pain-cal-head { display: flex; align-items: center; justify-content: space-between; gap: 2px; min-height: 12px; }
+/* 記錄狀態小圓點:按鈕本身 18px(好點),畫出來的點 9px */
+.pain-rec { position: relative; width: 18px; height: 14px; padding: 0; margin: -2px -2px 0 0; border: 0; background: transparent; cursor: pointer; flex: none; }
+.pain-rec::after { content: ''; position: absolute; left: 50%; top: 50%; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: var(--rc); }
+.pain-rec.static { display: inline-block; width: 11px; height: 11px; margin: 0 3px 0 0; cursor: default; vertical-align: -1px; }
+.pain-rec.rec-none { --rc: #f85149; }
+.pain-rec.rec-part { --rc: #e3b341; }
+.pain-rec.rec-done { --rc: #3fb950; }
+.pain-rec-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; font-size: 11px; color: var(--ink-2); }
+.pain-rec-left { color: var(--ink-muted); }
 .pain-cal-tag { font-size: 11px; border-radius: 8px; border: 1px solid currentColor; background: transparent;
   cursor: pointer; padding: 0 6px; line-height: 16px; align-self: flex-start; max-width: 100%; }
 .pain-cal-tag.doc-Peng { color: var(--accent); }
@@ -2314,7 +2324,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.10h';
+const APP_VERSION = '2026.11.13';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -9636,6 +9646,19 @@ function setPainOpdN(date, raw) {
   painOpdWrite(date, (e) => { if (s === '') delete e.n; else e.n = Math.max(0, Math.round(Number(s) || 0)); });
   scheduleSave('saveDebounce', () => storage.save(state.data), 400);
 }
+// 門診日「門診人數 + 打針數是否已記錄完畢」的小圓點:未記錄(紅,預設不存)→ 部分(黃)→ 已記錄(綠)→ 未記錄
+const PAIN_REC = [
+  { k: '',     cls: 'rec-none', label: '未記錄' },
+  { k: 'part', cls: 'rec-part', label: '部分記錄' },
+  { k: 'done', cls: 'rec-done', label: '已記錄' },
+];
+function painRecOf(date) { const r = painOpdEntry(date).rec; return PAIN_REC.find(x => x.k === r) || PAIN_REC[0]; }
+function cyclePainRec(date) {
+  const cur = painRecOf(date);
+  const next = PAIN_REC[(PAIN_REC.indexOf(cur) + 1) % PAIN_REC.length];
+  painOpdWrite(date, (e) => { if (next.k) e.rec = next.k; else delete e.rec; });
+  return next;
+}
 function painOpdMonth(month) {
   const out = {};
   for (const d of PAIN_DOCTORS) out[d] = { n: 0, days: 0 };
@@ -9966,6 +9989,23 @@ function copyPainMonth(month) {
   navigator.clipboard.writeText(t).then(() => toast(`✓ 已複製 ${Number(month.slice(5, 7))} 月統計`, 'success'))
     .catch(() => prompt('複製失敗,請手動複製:', t));
 }
+// 圖例 + 每個人本月(到今天為止)的門診日各是什麼狀態
+function refreshPainRecSum() {
+  const box = $('pain-rec-sum');
+  if (!box || !state.painMonth) return;
+  const today = todayISO(), by = {};
+  for (const date of painMonthDates(state.painMonth)) {
+    const doc = painOpdDoc(date);
+    if (!doc || date > today) continue;
+    const b = by[doc] || (by[doc] = { none: 0, part: 0, done: 0 });
+    b[painRecOf(date).k || 'none']++;
+  }
+  box.innerHTML = '';
+  for (const r of PAIN_REC) box.appendChild(el('span', { class: 'pain-rec-key' }, el('span', { class: 'pain-rec ' + r.cls + ' static' }), r.label));
+  const left = PAIN_DOCTORS.filter(d => by[d] && (by[d].none || by[d].part))
+    .map(d => `${d} 未記錄 ${by[d].none}${by[d].part ? ` · 部分 ${by[d].part}` : ''}`);
+  box.appendChild(el('span', { class: 'pain-rec-left' }, left.length ? '還沒記完:' + left.join('   ｜   ') : (Object.keys(by).length ? '✓ 本月到今天都記完了' : '')));
+}
 function shiftPainMonth(delta) {
   const [y, m] = state.painMonth.split('-').map(Number);
   const d = new Date(y, m - 1 + delta, 1);
@@ -10003,8 +10043,22 @@ function renderPainInner() {
     const isDef = !painOpdEntry(date).doc;
     // 預設有診、被手動取消(放假)→ 顯示「休」,不然看起來跟一般空白日一樣,之後會忘記那天原本有診
     const cancelled = !doc && !isDef && !!painDefaultOpdDoc(date);
-    const cell = el('div', { class: 'pain-cal-day' + (dow === 0 || dow === 6 ? ' we' : '') + (date === today ? ' today' : '') },
-      el('div', { class: 'pain-cal-dn' }, String(Number(date.slice(8)))));
+    const head = el('div', { class: 'pain-cal-head' }, el('span', { class: 'pain-cal-dn' }, String(Number(date.slice(8)))));
+    if (doc && date <= today) {
+      const rec = painRecOf(date);
+      const dot = el('button', { class: 'pain-rec ' + rec.cls, title: `${doc}:${rec.label}(門診人數 + 打針數)\n點一下切換:未記錄 → 部分記錄 → 已記錄`,
+        'aria-label': `${doc} ${rec.label}`,
+        onclick: () => {   // 只換 class,不重繪整頁;連點是中間值 → debounce 存
+          const nx = cyclePainRec(date);
+          dot.className = 'pain-rec ' + nx.cls;
+          dot.title = `${doc}:${nx.label}(門診人數 + 打針數)\n點一下切換:未記錄 → 部分記錄 → 已記錄`;
+          dot.setAttribute('aria-label', `${doc} ${nx.label}`);
+          refreshPainRecSum();
+          scheduleSave('saveDebounce', () => storage.save(state.data), 400);
+        } });
+      head.appendChild(dot);
+    }
+    const cell = el('div', { class: 'pain-cal-day' + (dow === 0 || dow === 6 ? ' we' : '') + (date === today ? ' today' : '') }, head);
     // 名字 + 人數放同一行(使用者要求);一格太窄(手機)時 flex-wrap 自動換行
     const row = el('div', { class: 'pain-cal-row' }, el('button', {
       class: 'pain-cal-tag ' + (doc ? 'doc-' + doc : cancelled ? 'off' : 'empty') + (isDef ? '' : ' moved'),
@@ -10029,7 +10083,9 @@ function renderPainInner() {
     el('div', { class: 'pain-head' }, el('h2', null, `${mNum} 月 · 門診月曆`)),
     el('div', { class: 'pain-hint' }, `預設:${PAIN_ME} 第 2、4 個星期三 · Wu 第 1、3、5 個星期三 · Yen 每個星期五。點名字可換人或取消(放假)。${PAIN_ME} 的人數自動帶今日 tab 的 OPD 看診數。`),
     cal,
-    el('div', { class: 'pain-doc-sum', id: 'pain-cal-sum', style: 'margin-top:8px' }, '')));
+    el('div', { class: 'pain-doc-sum', id: 'pain-cal-sum', style: 'margin-top:8px' }, ''),
+    el('div', { class: 'pain-rec-legend', id: 'pain-rec-sum' }, '')));
+  refreshPainRecSum();
 
   // ---- TAME 個案表 ----
   const prevMonth = (() => { const [y, m] = month.split('-').map(Number); const d = new Date(y, m - 2, 1);

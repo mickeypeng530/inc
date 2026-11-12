@@ -26,7 +26,7 @@ const FNS = ['getCount', 'procRankName', 'painMonthDates', 'painDefaultOpdDoc', 
   'painOpdWrite', 'cyclePainOpdDoc', 'setPainOpdN', 'painOpdMonth', 'painInjKind', 'painMyMonth', 'painManual', 'painTameCount', 'painCell',
   'setPainManual', 'painTameRows', 'ensurePainTame', 'painTameUpdate', 'painCleanMrn', 'painMineKey', 'painMine', 'painMineUpdate',
   'painMyTameRows', 'painAllTameRows', 'painParseDate', 'painDocName', 'parsePainTamePaste', 'painTameKey', 'painClassifyRows',
-  'addPainTameRows', 'painTameAoa', 'painTameExportRows', 'painMonthCopyText'];
+  'addPainTameRows', 'painTameAoa', 'painTameExportRows', 'painMonthCopyText', 'painRecOf', 'cyclePainRec'];
 function build(days, pain) {
   return new Function('DAYS', 'PAIN', `
     const state = { data: { days: DAYS, pain: PAIN } };
@@ -34,7 +34,7 @@ function build(days, pain) {
     const scheduleSave = () => { saves++; };
     const storage = { save() { saves++; } };
     const refreshPainTotals = () => {};
-    ${grabConst('PAIN_DOCTORS')} ${ME_LINE} ${grabConst('PAIN_METRICS')} ${grabConst('PAIN_OPD_RULES')} ${grabConst('PAIN_DOC_ZH')}
+    ${grabConst('PAIN_DOCTORS')} ${ME_LINE} ${grabConst('PAIN_METRICS')} ${grabConst('PAIN_OPD_RULES')} ${grabConst('PAIN_DOC_ZH')} ${grabConst('PAIN_REC')}
     ${XLSX_FROM_LINE}
     ${FNS.map(grabFn).join('\n')}
     return { state, ${FNS.join(', ')}, saves: () => saves };
@@ -245,6 +245,21 @@ console.log('\n[11] ⭐ 複製本月:幾月 / 門診 打針 TAME / 彭 嚴 吳')
   check('嚴:門診 9(月曆)、打針 5(手填)、TAME 1(個案表)', t[3].join('|') === '嚴|9|5|1', t[3]);
   check('吳:打針沒填 → 空白(不是 0)', t[4][0] === '吳' && t[4][2] === '', t[4]);
   check('沒有合計列', t.length === 5);
+}
+
+console.log('\n[12] ⭐ 門診日記錄狀態小圓點:未記錄 → 部分 → 已記錄 → 未記錄');
+{
+  const a = build({}, {});
+  check('預設 = 未記錄(不存)', a.painRecOf('2026-11-11').k === '' && !a.state.data.pain.opd);
+  check('點一下 → 部分記錄', a.cyclePainRec('2026-11-11').k === 'part' && a.state.data.pain.opd['2026-11-11'].rec === 'part');
+  check('再點 → 已記錄', a.cyclePainRec('2026-11-11').k === 'done' && a.painRecOf('2026-11-11').label === '已記錄');
+  check('再點 → 回到未記錄,而且節點清乾淨(RTDB 不存空物件)', a.cyclePainRec('2026-11-11').k === '' && !a.state.data.pain.opd);
+  // 跟名字切換 / 人數共存:改名字、填人數不會洗掉狀態
+  a.cyclePainRec('2026-11-06'); a.cyclePainRec('2026-11-06');
+  a.setPainOpdN('2026-11-06', '9'); a.cyclePainOpdDoc('2026-11-06');
+  const e = a.state.data.pain.opd['2026-11-06'];
+  check('換醫師、填人數後狀態還在', e.rec === 'done' && e.n === 9 && !!e.doc, e);
+  check('清掉人數不影響狀態', (a.setPainOpdN('2026-11-06', ''), a.state.data.pain.opd['2026-11-06'].rec === 'done'));
 }
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
