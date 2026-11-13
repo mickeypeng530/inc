@@ -1379,6 +1379,12 @@ select.btn-secondary option {
 .pain-table th, .pain-table td { text-align: center; padding: 3px 3px; white-space: nowrap; }
 .pain-table th.grp, .pain-table td.grp { border-left: 1px solid var(--border); }
 .pain-table .auto { color: var(--ink-1); font-variant-numeric: tabular-nums; }
+.pain-table td.pain-inj-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.pain-table td.pain-inj-link:hover { color: var(--accent); }
+.pain-table td.pain-inj-link.open { color: var(--accent); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+.pain-inj-box { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r); }
+.settings-table.pain-inj-table { width: auto; }
+.pain-inj-table td { padding: 3px 8px; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pain-table .tot { font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
 .pain-table input.pain-num { width: 42px; text-align: center; padding: 2px; }
 .pain-tame td { padding: 3px 4px; }
@@ -2324,7 +2330,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.13';
+const APP_VERSION = '2026.11.13b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -9691,6 +9697,16 @@ function painMyMonth(month) {
   }
   return out;
 }
+// 我某個月的打針名單(年度表點「打針」數字展開用);判定與 painMyMonth 同一支 painInjKind
+function painMyInjList(month) {
+  const out = [];
+  for (const date of Object.keys(state.data.days || {}).filter(d => d.startsWith(month)).sort())
+    for (const p of (state.data.days[date].procedures || [])) {
+      const kind = painInjKind(p);
+      if (kind) out.push({ date, kind, name: p.presetName || p.presetId || '', mrn: painCleanMrn(p.medRecord) });
+    }
+  return out;
+}
 function painManual(month, doc) {
   return ((state.data.pain && state.data.pain.monthly && state.data.pain.monthly[month]) || {})[doc] || {};
 }
@@ -10172,6 +10188,11 @@ function renderPainInner() {
         const cls = (m === month ? 'pain-cur ' : '') + (m > nowMonth ? 'pain-future' : '');
         // 門診(三人都看月曆)與 Peng 的打針/TAME = 自動;其他醫師的打針/TAME = 手填
         // 自動格:門診(月曆)、Peng 全部、其他醫師的 TAME(TAME 表);只剩其他醫師的打針手填
+        if (doc === PAIN_ME && k === 'inj') {   // 點數字 → 展開 / 收起這個月的打針名單
+          tr.appendChild(el('td', { class: cls + ' auto pain-inj-link' + (state.painInjOpen === m ? ' open' : ''), 'data-pain-auto': `${m}|${doc}|${k}`,
+            title: `點一下看 ${Number(m.slice(5))} 月的打針名單`, onclick: () => { state.painInjOpen = state.painInjOpen === m ? null : m; renderPain(); } }, ''));
+          continue;
+        }
         if (k === 'opd' || k === 'tame' || doc === PAIN_ME) { tr.appendChild(el('td', { class: cls + ' auto', 'data-pain-auto': `${m}|${doc}|${k}` }, '')); continue; }
         const v = painManual(m, doc)[k];
         tr.appendChild(el('td', { class: cls }, el('input', { class: 'pain-num', type: 'number', min: '0', inputmode: 'numeric',
@@ -10187,8 +10208,29 @@ function renderPainInner() {
       btn(`📋 複製 ${mNum} 月`, '複製這個月三位醫師的門診 / 打針 / TAME(可直接貼 LINE / Excel)', () => copyPainMonth(month))),
     el('div', { class: 'pain-hint' },
       `門診 = 月曆加總(只算固定門診日,不含臨時約診)。TAME:${PAIN_ME} 照 procedure,其他醫師 = TAME 個案表的列數。${PAIN_ME} 打針 = CT NB + NB arthro + RF/pRF(單純 Arthro 不算)自動;只有其他醫師的打針要手填。`),
-    el('div', { style: 'overflow-x:auto' }, tbl)));
+    el('div', { style: 'overflow-x:auto' }, tbl),
+    painInjListBox(year)));
   refreshPainTotals();
+}
+// 年度表下方:點了哪個月的「打針」就列那個月的名單(只在那年的月份才顯示)
+function painInjListBox(year) {
+  const m = state.painInjOpen;
+  if (!m || !m.startsWith(year)) return null;
+  const list = painMyInjList(m), by = {};
+  for (const x of list) by[x.kind] = (by[x.kind] || 0) + 1;
+  const box = el('div', { class: 'pain-inj-box' },
+    el('div', { class: 'pain-head' },
+      el('b', null, `${Number(m.slice(5))} 月 · ${PAIN_ME} 打針 ${list.length} 筆`),
+      el('span', { class: 'pain-doc-sum' }, Object.entries(by).map(([k, n]) => `${k} ${n}`).join(' · ')),
+      el('span', { style: 'flex:1' }),
+      el('button', { class: 'btn-secondary', style: 'padding:2px 8px;font-size:12px', title: '收起',
+        onclick: () => { state.painInjOpen = null; renderPain(); } }, '✕')));
+  if (!list.length) { box.appendChild(el('div', { class: 'pain-hint' }, '這個月沒有打針紀錄')); return box; }
+  const t = el('table', { class: 'settings-table pain-inj-table' });
+  t.appendChild(el('tr', null, ...['日期', '種類', '術式', '病歷號'].map(h => el('th', null, h))));
+  for (const x of list) t.appendChild(el('tr', null, el('td', null, x.date.slice(5).replace('-', '/')), el('td', null, x.kind), el('td', null, x.name), el('td', null, x.mrn || '—')));
+  box.appendChild(el('div', { style: 'overflow-x:auto' }, t));
+  return box;
 }
 
 function setView(name) {

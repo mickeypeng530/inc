@@ -26,7 +26,7 @@ const FNS = ['getCount', 'procRankName', 'painMonthDates', 'painDefaultOpdDoc', 
   'painOpdWrite', 'cyclePainOpdDoc', 'setPainOpdN', 'painOpdMonth', 'painInjKind', 'painMyMonth', 'painManual', 'painTameCount', 'painCell',
   'setPainManual', 'painTameRows', 'ensurePainTame', 'painTameUpdate', 'painCleanMrn', 'painMineKey', 'painMine', 'painMineUpdate',
   'painMyTameRows', 'painAllTameRows', 'painParseDate', 'painDocName', 'parsePainTamePaste', 'painTameKey', 'painClassifyRows',
-  'addPainTameRows', 'painTameAoa', 'painTameExportRows', 'painMonthCopyText', 'painRecOf', 'cyclePainRec'];
+  'addPainTameRows', 'painTameAoa', 'painTameExportRows', 'painMonthCopyText', 'painRecOf', 'cyclePainRec', 'painMyInjList'];
 function build(days, pain) {
   return new Function('DAYS', 'PAIN', `
     const state = { data: { days: DAYS, pain: PAIN } };
@@ -260,6 +260,22 @@ console.log('\n[12] ⭐ 門診日記錄狀態小圓點:未記錄 → 部分 → 
   const e = a.state.data.pain.opd['2026-11-06'];
   check('換醫師、填人數後狀態還在', e.rec === 'done' && e.n === 9 && !!e.doc, e);
   check('清掉人數不影響狀態', (a.setPainOpdN('2026-11-06', ''), a.state.data.pain.opd['2026-11-06'].rec === 'done'));
+}
+
+console.log('\n[13] ⭐ 我的打針名單(年度表點數字展開):筆數 = 年度表的打針數');
+{
+  const a = build({
+    '2026-11-03': { procedures: [P('ct_nb', 'CT NB', '600061'), P('arthro', 'Arthro', '600062')] },
+    '2026-11-12': { procedures: [P('nb_arthro', 'NB arthro', '600063 / 一些文字'), P('stame', 'sTAME', '600064'), P('prf', 'pRF', '600065')] },
+    '2026-10-30': { procedures: [P('ct_nb', 'CT NB', '600066')] },
+  }, {});
+  const L = a.painMyInjList('2026-11');
+  check('只列本月,依日期排序', L.map(x => x.date).join() === '2026-11-03,2026-11-12,2026-11-12', L.map(x => x.date));
+  check('種類:CT NB / NB arthro / RF', L.map(x => x.kind).join() === 'CT NB,NB arthro,RF', L.map(x => x.kind));
+  check('單純 Arthro、TAME 不列', !L.some(x => /^(Arthro|sTAME)$/.test(x.name)));
+  check('病歷號取乾淨的那段', L[1].mrn === '600063', L[1].mrn);
+  check('⭐ 筆數 = 年度表的打針數(同一支判定)', L.length === a.painMyMonth('2026-11').inj, [L.length, a.painMyMonth('2026-11').inj]);
+  check('沒有打針的月份 → 空陣列', a.painMyInjList('2026-09').length === 0);
 }
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`);
