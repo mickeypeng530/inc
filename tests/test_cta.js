@@ -34,7 +34,7 @@ console.log('\n[1] 計數清單');
   const c = ct.find(x => x.key === 'ct.cta_coa');
   check('CT 群組有 ct.cta_coa', !!c, ct.map(x => x.key));
   check('今日 tab 也顯示(不是 monthOnly)', c && !c.monthOnly);
-  check('排在 LDCT 之後、PH 之前', ct.map(x => x.key).join() === 'ct.opd,ct.er_adm_self,ct.ldct_health,ct.cta_coa,ct.ph', ct.map(x => x.key).join());
+  check('排在 LDCT 之後、PH 之前', ct.map(x => x.key).join() === 'ct.opd,ct.er_adm_self,ct.ldct_health,ct.cta_coa,ct.ca,ct.ph', ct.map(x => x.key).join());
 }
 
 console.log('\n[2] ⭐ 舊設定(沒有 cta_coa)也不會算出 NaN');

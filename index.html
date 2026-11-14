@@ -2330,7 +2330,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.13b';
+const APP_VERSION = '2026.11.14';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -2441,7 +2441,7 @@ function isStaleEcho(path, cloudVal) {
 // ===== Seed data (從現有 sheet 抽出) =====
 const SEED = {
   unitPrices: {
-    ct:    { opd: 350, er_adm_self: 420, ldct_health: 554, ph: 350, cta_coa: 2000 },   // cta_coa 暫定(2026-11-08)
+    ct:    { opd: 350, er_adm_self: 420, ldct_health: 554, ph: 350, cta_coa: 2000, ca: 120 },   // cta_coa 暫定(2026-11-08);ca = CT Ca 院內(2026-11-14)
     mr:    { opd: 700, er_adm_health: 840, ph: 700 },
     bmd:   120,
     special: {
@@ -2638,6 +2638,7 @@ const COUNTS_SCHEMA = [
     { key: 'ct.er_adm_self',    label: 'ER+ADM+自' },
     { key: 'ct.ldct_health',    label: 'LDCT' },
     { key: 'ct.cta_coa',        label: 'CTA coa' },
+    { key: 'ct.ca',             label: 'Ca' },
     { key: 'ct.ph',             label: 'PH 澎湖', monthOnly: true },
   ]},
   { group: 'MR', children: [
@@ -2876,6 +2877,10 @@ function runMigrations(data) {
   // 只補「沒有值」的,設定頁改過(含改成 0)就不動。不加 flag:冪等,而且之後若被清掉還會再補。
   if (data.settings?.unitPrices?.ct && data.settings.unitPrices.ct.cta_coa === undefined) {
     data.settings.unitPrices.ct.cta_coa = 2000;
+  }
+  // CT Ca(院內,2026-11-14,$120):同上,只補沒有值的
+  if (data.settings?.unitPrices?.ct && data.settings.unitPrices.ct.ca === undefined) {
+    data.settings.unitPrices.ct.ca = 120;
   }
   return data;
 }
@@ -3587,6 +3592,7 @@ function calcBaseRevenue(day, settings) {
   r += getCount(day,'ct.ldct_health') * p.ct.ldct_health;
   r += getCount(day,'ct.ph') * (p.ct.ph || 0);
   r += getCount(day,'ct.cta_coa') * (p.ct.cta_coa || 0);   // `|| 0`:0 × undefined = NaN 會污染整天收入
+  r += getCount(day,'ct.ca') * (p.ct.ca || 0);
   r += getCount(day,'mr.opd') * p.mr.opd;
   r += getCount(day,'mr.er_adm_health') * p.mr.er_adm_health;
   r += getCount(day,'mr.ph') * (p.mr.ph || 0);
@@ -7670,7 +7676,7 @@ function getProcStats() {
 //   改名要動 4 個呼叫點,不值得;分析時記得 opd 這一類要另外看(佔整桶約 6%)。
 function dayReadingByCat(d, p) {
   return {
-    ct:   getCount(d,'ct.opd')*p.ct.opd + getCount(d,'ct.er_adm_self')*p.ct.er_adm_self + getCount(d,'ct.ldct_health')*p.ct.ldct_health + getCount(d,'ct.ph')*(p.ct.ph||0) + getCount(d,'ct.cta_coa')*(p.ct.cta_coa||0),
+    ct:   getCount(d,'ct.opd')*p.ct.opd + getCount(d,'ct.er_adm_self')*p.ct.er_adm_self + getCount(d,'ct.ldct_health')*p.ct.ldct_health + getCount(d,'ct.ph')*(p.ct.ph||0) + getCount(d,'ct.cta_coa')*(p.ct.cta_coa||0) + getCount(d,'ct.ca')*(p.ct.ca||0),
     mr:   getCount(d,'mr.opd')*p.mr.opd + getCount(d,'mr.er_adm_health')*p.mr.er_adm_health + getCount(d,'mr.ph')*(p.mr.ph||0),
     xray: getCount(d,'xray.opd')*p.xray.opd + getCount(d,'xray.portable')*(p.xray.portable||0) + getCount(d,'xray.er')*p.xray.er + getCount(d,'xray.ph')*(p.xray.ph||0),
     bmd:  getCount(d,'bmd')*p.bmd,
@@ -9201,7 +9207,7 @@ function renderSettingsPrices() {
   t.appendChild(el('tr', null, el('th', null, '項目'), el('th', null, '單價')));
   const flat = [
     ['CT OPD', 'ct.opd'], ['CT ER+ADM+自費LDCT', 'ct.er_adm_self'], ['LDCT 國健署', 'ct.ldct_health'],
-    ['CTA coa(暫定)', 'ct.cta_coa'],
+    ['CTA coa(暫定)', 'ct.cta_coa'], ['CT Ca(院內)', 'ct.ca'],
     ['MR OPD', 'mr.opd'], ['MR ER+ADM+Health', 'mr.er_adm_health'],
     ['BMD', 'bmd'],
     ['Special Swallow', 'special.swal'], ['Special HSG', 'special.hsg'],
