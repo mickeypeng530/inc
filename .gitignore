@@ -51,5 +51,9 @@ Thumbs.db
 .idea/
 *.swp
 
+# 本機筆記 / 給其他 AI 工具的說明檔:含病歷號,不上 public repo(2026-11-16 稽核補)
+_pain.txt
+AGENTS.md
+
 # 效率分析備忘(含逐日收入數字,不上 public repo)
 分析_效率指標_待重驗.md

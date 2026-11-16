@@ -31,14 +31,14 @@ return { baseOf, idxOf, growthTxt, baseMonth: IDX_BASE_MONTH, endMonth: idxLast.
 let pass = 0, fail = 0;
 const chk = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? '  → ' + JSON.stringify(e) : '')); } };
 
-// 真實數值：2023-12 起算，mskIR 前三個月為 0（2024-03 才有值）；終點取最後一個完整月
+// 合成數值(非真實收入;repo 是 PUBLIC):2023-12 起算,mskIR 前三個月為 0(2024-03 才有值);終點取最後一個完整月
 const ROWS = [
-  { month: '2023-12', total: 339480, reading: 319424, ir: 20056, mskIR: 0,     isOpen: false },
-  { month: '2024-01', total: 411259, reading: 386052, ir: 25207, mskIR: 0,     isOpen: false },
-  { month: '2024-02', total: 324264, reading: 296928, ir: 27336, mskIR: 0,     isOpen: false },
-  { month: '2024-03', total: 428458, reading: 388307, ir: 40151, mskIR: 5420,  isOpen: false },
-  { month: '2025-01', total: 462129, reading: 427695, ir: 34434, mskIR: 19206, isOpen: false },
-  { month: '2026-05', total: 501217, reading: 448644, ir: 52573, mskIR: 40091, isOpen: false },
+  { month: '2023-12', total: 400000, reading: 360000, ir: 40000,  mskIR: 0,     isOpen: false },
+  { month: '2024-01', total: 420000, reading: 380000, ir: 40000,  mskIR: 0,     isOpen: false },
+  { month: '2024-02', total: 410000, reading: 370000, ir: 40000,  mskIR: 0,     isOpen: false },
+  { month: '2024-03', total: 450000, reading: 390000, ir: 60000,  mskIR: 10000, isOpen: false },
+  { month: '2025-01', total: 500000, reading: 400000, ir: 100000, mskIR: 20000, isOpen: false },
+  { month: '2026-05', total: 540000, reading: 420000, ir: 153000, mskIR: 41800, isOpen: false },
 ];
 const CLOSED = ROWS.filter(r => !r.isOpen);
 const LAST = ROWS[ROWS.length - 1];
@@ -54,7 +54,7 @@ console.log('--- 基期固定為 2025-01（四項皆有值 → 可互相比較�
       ['total','reading','ir','mskIR'].map(k => A.growthTxt(k)));
 }
 
-console.log('--- 成長率與實際資料吻合 ---');
+console.log('--- 成長率計算正確 ---');
 {
   chk('Total +8%', A.growthTxt('total') === '+8%', A.growthTxt('total'));
   chk('閱片 +5%', A.growthTxt('reading') === '+5%', A.growthTxt('reading'));
@@ -99,7 +99,7 @@ console.log('--- 整個序列都是 0 → 顯示 — 而非 +0% ---');
 console.log('--- 終點排除未結帳月(避免當月不完整拖成假谷底)---');
 {
   // 2026-06 進行中（perfTotal 未填 → isOpen），且只有 4 天資料
-  const rowsOpen = [...ROWS, { month: '2026-06', total: 83985, reading: 68624, ir: 15361, mskIR: 15361, isOpen: true }];
+  const rowsOpen = [...ROWS, { month: '2026-06', total: 80000, reading: 60000, ir: 20000, mskIR: 20000, isOpen: true }];
   const closedOnly = rowsOpen.filter(r => !r.isOpen);
   const O = mk(rowsOpen, closedOnly, rowsOpen[rowsOpen.length - 1]);
   chk('終點是 2026-05 而非進行中的 2026-06', O.endMonth === '2026-05', O.endMonth);

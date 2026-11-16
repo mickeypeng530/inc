@@ -2339,7 +2339,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.16';
+const APP_VERSION = '2026.11.16b';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -8345,10 +8345,10 @@ function showImportModal(initType, initDate) {
   const ta = el('textarea', { class: 'paste-textarea', rows: '12' });
   const preview = el('div', { class: 'paste-preview' });
   const PH = {
-    day: '① 貼 Excel 該天整欄(從日期或 CT 那列到加班列)→ 整天帶進:計數/收入/IR/Procedure/加班\n② 或直接打術式清單(每行一筆,sheet 寫法照用):\n326514 PICC\n3D\n→ 自動附加到當天,不動其他資料',
+    day: '① 貼 Excel 該天整欄(從日期或 CT 那列到加班列)→ 整天帶進:計數/收入/IR/Procedure/加班\n② 或直接打術式清單(每行一筆,sheet 寫法照用):\n600011 PICC\n3D\n→ 自動附加到當天,不動其他資料',
     counts: '從 sheet 複製一整欄計數,貼這裡\n(每行一個數字,空行=該項留空,順序依設定→Sheet 列順序)',
     meeting: '每行:日期(可多個,空格分隔) ⇥ 角色 ⇥ 會議名 ⇥ 當月總額\n例:6 13 20 27 ⇥ 主講 ⇥ 骨科手術案例討論 ⇥ 12000',
-    procedure: '每行:病歷號 preset名\n例:\n1874176 Arthro\n339804 CT NB',
+    procedure: '每行:病歷號 preset名\n例:\n7000013 Arthro\n600012 CT NB',
   };
   const HINT = {
     day: '貼整欄=整天覆蓋(重貼不會變兩倍);貼純術式清單=附加(計數/收入/既有紀錄不動)。sheet 簡寫直接認:PICC=PICC+AV、PCN=PCN+A-P、GB=PTGBD、3D/資源共享 進額外計費。',
@@ -9915,7 +9915,7 @@ function painTameUpdate(id, field, val) {
   if (v === '') delete r[field]; else r[field] = v;
   scheduleSave('saveDebounce', () => storage.save(state.data), 400);
 }
-// Worknum 的 medRecord 常夾當天文字(「1371380 / 1371380 GB…」)→ 取第一段裡第一個像病歷號的 token(同 registry cleanMrn)
+// Worknum 的 medRecord 常夾當天文字(「7000011 / 7000011 GB…」)→ 取第一段裡第一個像病歷號的 token(同 registry cleanMrn)
 function painCleanMrn(s) {
   const m = String(s || '').split(/[\/\n]/)[0].match(/[A-Za-z]?\d{4,}/);
   return m ? m[0] : String(s || '').trim();
