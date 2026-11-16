@@ -2292,6 +2292,15 @@ body:not(.mini-mode) #view-mini { display: none; }
     </div>
   </details>
 
+  <details class="settings-section" id="deskpet-section">
+    <summary>🐾 桌寵裝置</summary>
+    <div class="settings-body">
+      <p class="settings-hint">桌寵在新電腦第一次開會顯示 6 碼配對碼;在這裡核對碼一樣再按「核准」。「移除」立刻生效:那台桌寵馬上讀不到雲端(喝水/行程/計數)。同一次核准會同時寫 Worknum 與 dashboard 兩個專案。</p>
+      <div id="deskpet-body"></div>
+      <button class="btn-secondary" id="deskpet-refresh" style="margin-top:8px">↻ 重新整理</button>
+    </div>
+  </details>
+
   <details class="settings-section">
     <summary>資料管理</summary>
     <div class="settings-body">
@@ -2330,7 +2339,7 @@ body:not(.mini-mode) #view-mini { display: none; }
 // ===== 版號 =====
 // 無 build step → 手動維護。每次要 push 上線前 +1(同日多次部署就往後加字母)。
 // 用途:Ctrl+F5 後看 header 版號有沒有變,確認瀏覽器真的拿到新版而不是吃快取。
-const APP_VERSION = '2026.11.14';
+const APP_VERSION = '2026.11.16';
 // 立刻寫入(不等 enterApp)—— 登入前/登入失敗時也看得到版號,方便排查快取問題
 document.getElementById('app-version').textContent = 'v' + APP_VERSION;
 
@@ -9157,6 +9166,124 @@ function exportMonthTSV() {
 }
 
 // --- Settings ---
+// ===== 🐾 桌寵裝置(2026-11-16)=====
+// 桌寵自己在兩個專案各註冊一個帳號,在 deskpet/requests/{uid} 留同一組配對碼 {code,name,at}。
+// 核准 = 兩邊各寫 deskpet/devices/{uid} = {name, code, approvedAt, peer}(peer = 另一邊的 uid)並刪 request;
+// 兩邊 rules 的桌寵權限都只認 devices 名單 → 移除即刻失效。細節見 ../Pet/CLAUDE.md §1。
+// dashboard 專案(case-scheduler)是第二個 Firebase app,只在打開這區時初始化,登入一次後 SDK 會記住。
+const DP_CS_CONFIG = {
+  apiKey: "AIzaSyATCaOlYxkYTle1hPzYAcuXNlQHaAuO3-8",
+  authDomain: "case-scheduler-f752b.firebaseapp.com",
+  databaseURL: "https://case-scheduler-f752b-default-rtdb.firebaseio.com",
+  projectId: "case-scheduler-f752b",
+  appId: "1:703006186929:web:57ac5b059678005455f190",
+};
+let dpCs = null;   // { auth, db }
+function dpEsc(s) {   // name 是桌寵端送來的字串(任何人都能註冊帳號送申請)→ 一律跳脫
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function dpTime(v) {
+  const d = new Date(v);
+  return isNaN(d) ? '—' : d.toLocaleString('zh-TW', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+// 兩邊的 {uid: entry} 依配對碼合併成一列
+function dpPair(incMap, csMap) {
+  const rows = new Map();
+  for (const [side, m] of [['inc', incMap], ['cs', csMap]]) {
+    for (const [uid, e] of Object.entries(m || {})) {
+      const code = (e && e.code) || ('?' + uid);
+      const r = rows.get(code) || { code, name: e && e.name, at: (e && (e.approvedAt || e.at)) || 0 };
+      r[side] = uid;
+      rows.set(code, r);
+    }
+  }
+  return [...rows.values()].sort((a, b) => (b.at > a.at ? 1 : -1));
+}
+async function dpWrite(incPatch, csPatch) {
+  await update(ref(fbDB), incPatch);
+  await update(ref(dpCs.db), csPatch);
+}
+async function renderDeskpet() {
+  const box = $('deskpet-body');
+  if (!box || !currentUser) return;
+  if (!dpCs) {
+    const app = initializeApp(DP_CS_CONFIG, 'deskpet-cs');
+    dpCs = { auth: getAuth(app), db: getDatabase(app) };
+  }
+  await dpCs.auth.authStateReady();
+  const u = dpCs.auth.currentUser;
+  if (!u || u.email !== ALLOWED_EMAIL) {
+    if (u) await signOut(dpCs.auth);
+    box.innerHTML = `<p class="settings-hint">要同時管理 dashboard 那個專案,第一次需要再登入一次(同一個 Google 帳號)。</p>
+      <button class="btn-secondary" id="deskpet-login">🔑 登入 dashboard 專案</button>`;
+    $('deskpet-login').onclick = async () => {
+      try { await signInWithPopup(dpCs.auth, new GoogleAuthProvider()); } catch (e) { toast('登入失敗:' + (e.code || e.message), 'error'); }
+      renderDeskpet();
+    };
+    return;
+  }
+  box.innerHTML = '<p class="settings-hint">讀取中…</p>';
+  let d;
+  try {
+    const [ir, idv, cr, cdv] = await Promise.all([
+      get(ref(fbDB, 'deskpet/requests')), get(ref(fbDB, 'deskpet/devices')),
+      get(ref(dpCs.db, 'deskpet/requests')), get(ref(dpCs.db, 'deskpet/devices')),
+    ]);
+    d = { req: dpPair(ir.val(), cr.val()), dev: dpPair(idv.val(), cdv.val()) };
+  } catch (e) {
+    box.innerHTML = `<p class="settings-hint" style="color:var(--danger)">讀取失敗:${dpEsc(e.message)}</p>`;
+    return;
+  }
+  const both = r => r.inc && r.cs;
+  let html = '<div style="font-weight:600;margin:4px 0">申請中</div>';
+  html += d.req.length ? '<table class="settings-table"><tr><th>電腦</th><th>配對碼</th><th>申請時間</th><th></th></tr>' + d.req.map((r, i) => `
+    <tr><td>${dpEsc(r.name)}</td>
+      <td style="font-family:monospace;font-size:18px;letter-spacing:2px">${dpEsc(r.code)}</td>
+      <td>${dpTime(r.at)}${both(r) ? '' : ' <span style="color:var(--danger)">(只有一邊收到)</span>'}</td>
+      <td style="white-space:nowrap"><button class="btn-secondary" data-dp-ok="${i}" ${both(r) ? '' : 'disabled'}>核准</button>
+        <button class="btn-secondary" data-dp-no="${i}">拒絕</button></td></tr>`).join('') + '</table>'
+    : '<p class="settings-hint">沒有申請。</p>';
+  html += '<div style="font-weight:600;margin:12px 0 4px">已核准</div>';
+  html += d.dev.length ? '<table class="settings-table"><tr><th>電腦</th><th>配對碼</th><th>核准時間</th><th></th></tr>' + d.dev.map((r, i) => `
+    <tr><td>${dpEsc(r.name)}</td><td style="font-family:monospace">${dpEsc(r.code)}</td>
+      <td>${dpTime(r.at)}${both(r) ? '' : ' <span style="color:var(--danger)">(只有一邊)</span>'}</td>
+      <td><button class="btn-secondary" style="color:var(--danger)" data-dp-rm="${i}">移除</button></td></tr>`).join('') + '</table>'
+    : '<p class="settings-hint">還沒有核准的電腦。</p>';
+  box.innerHTML = html;
+
+  const del = (r, kind) => {   // kind: 'requests' | 'devices';兩邊各自刪(只刪存在的那邊)
+    const ip = {}, cp = {};
+    if (r.inc) ip[`deskpet/${kind}/${r.inc}`] = null;
+    if (r.cs) cp[`deskpet/${kind}/${r.cs}`] = null;
+    return [ip, cp];
+  };
+  const run = async (fn, okMsg) => {
+    try { await fn(); toast(okMsg); } catch (e) { toast('失敗:' + e.message, 'error'); }
+    renderDeskpet();
+  };
+  box.querySelectorAll('[data-dp-ok]').forEach(b => b.onclick = () => {
+    const r = d.req[+b.dataset.dpOk];
+    if (!confirm(`核准「${r.name}」?\n\n請確認桌寵上顯示的配對碼是 ${r.code}`)) return;
+    const at = new Date().toISOString();
+    run(() => dpWrite(
+      { [`deskpet/devices/${r.inc}`]: { name: r.name, code: r.code, approvedAt: at, peer: r.cs }, [`deskpet/requests/${r.inc}`]: null },
+      { [`deskpet/devices/${r.cs}`]: { name: r.name, code: r.code, approvedAt: at, peer: r.inc }, [`deskpet/requests/${r.cs}`]: null },
+    ), `已核准 ${r.name}`);
+  });
+  box.querySelectorAll('[data-dp-no]').forEach(b => b.onclick = () => {
+    const r = d.req[+b.dataset.dpNo];
+    if (!confirm(`拒絕「${r.name}」(${r.code})的申請?`)) return;
+    run(() => dpWrite(...del(r, 'requests')), '已拒絕');
+  });
+  box.querySelectorAll('[data-dp-rm]').forEach(b => b.onclick = () => {
+    const r = d.dev[+b.dataset.dpRm];
+    if (!confirm(`移除「${r.name}」?\n\n那台桌寵會立刻讀不到雲端;要再連就得重新申請配對。`)) return;
+    run(() => dpWrite(...del(r, 'devices')), `已移除 ${r.name}`);
+  });
+}
+$('deskpet-section').addEventListener('toggle', e => { if (e.target.open) renderDeskpet(); });
+$('deskpet-refresh').addEventListener('click', () => renderDeskpet());
+
 function renderSettings() {
   renderSettingsPrices();
   renderSettingsAtomics();
