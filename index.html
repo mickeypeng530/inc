@@ -2295,7 +2295,7 @@ body:not(.mini-mode) #view-mini { display: none; }
   <details class="settings-section" id="deskpet-section">
     <summary>🐾 桌寵裝置</summary>
     <div class="settings-body">
-      <p class="settings-hint">桌寵在新電腦第一次開會顯示 6 碼配對碼;在這裡核對碼一樣再按「核准」。「移除」立刻生效:那台桌寵馬上讀不到雲端(喝水/行程/計數)。同一次核准會同時寫 Worknum 與 dashboard 兩個專案。</p>
+      <p class="settings-hint">桌寵在新電腦第一次開會顯示 6 碼配對碼;在這裡<b>輸入那組碼</b>再按「核准」(這頁不會顯示碼,只有看得到那台桌寵的人打得出來)。申請 15 分鐘內有效,過期請在桌寵上重新申請。「移除」立刻生效:那台桌寵馬上讀不到雲端(喝水/行程/計數)。同一次核准會同時寫 Worknum 與 dashboard 兩個專案。</p>
       <div id="deskpet-body"></div>
       <button class="btn-secondary" id="deskpet-refresh" style="margin-top:8px">↻ 重新整理</button>
     </div>
@@ -9171,6 +9171,11 @@ function exportMonthTSV() {
 // 核准 = 兩邊各寫 deskpet/devices/{uid} = {name, code, approvedAt, peer}(peer = 另一邊的 uid)並刪 request;
 // 兩邊 rules 的桌寵權限都只認 devices 名單 → 移除即刻失效。細節見 ../Pet/CLAUDE.md §1。
 // dashboard 專案(case-scheduler)是第二個 Firebase app,只在打開這區時初始化,登入一次後 SDK 會記住。
+// ⚠ 核准的防線(2026-11-21 資安檢查後改):註冊帳號、送申請是任何人都做得到的(name 也能亂填成你的電腦名),
+//   所以①申請列**不顯示配對碼**,要核准就得輸入桌寵畫面上那組碼(原本是顯示碼、用眼睛比對後按確定);
+//   ②申請超過 DP_REQ_TTL 就不列、不能核准(原本永久有效)。別把碼加回申請列。
+const DP_REQ_TTL = 15 * 60 * 1000;
+const DP_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;   // 同 Pet/pairing.js 的 ALPHA、兩邊 rules 的 regex
 const DP_CS_CONFIG = {
   apiKey: "AIzaSyATCaOlYxkYTle1hPzYAcuXNlQHaAuO3-8",
   authDomain: "case-scheduler-f752b.firebaseapp.com",
@@ -9235,14 +9240,26 @@ async function renderDeskpet() {
     return;
   }
   const both = r => r.inc && r.cs;
+  // at = 伺服器時間(rules 強制 === now);只認 15 分鐘內的。這台時鐘快很多會把新申請也當過期 → 下面有提示。
+  const isFresh = r => typeof r.at === 'number' && Date.now() - r.at < DP_REQ_TTL;
+  const fresh = d.req.filter(isFresh);
+  const stale = d.req.filter(r => !isFresh(r));
   let html = '<div style="font-weight:600;margin:4px 0">申請中</div>';
-  html += d.req.length ? '<table class="settings-table"><tr><th>電腦</th><th>配對碼</th><th>申請時間</th><th></th></tr>' + d.req.map((r, i) => `
+  html += fresh.length ? '<table class="settings-table"><tr><th>電腦(對方自己填的)</th><th>申請時間</th><th></th></tr>' + fresh.map((r, i) => `
     <tr><td>${dpEsc(r.name)}</td>
-      <td style="font-family:monospace;font-size:18px;letter-spacing:2px">${dpEsc(r.code)}</td>
       <td>${dpTime(r.at)}${both(r) ? '' : ' <span style="color:var(--danger)">(只有一邊收到)</span>'}</td>
-      <td style="white-space:nowrap"><button class="btn-secondary" data-dp-ok="${i}" ${both(r) ? '' : 'disabled'}>核准</button>
-        <button class="btn-secondary" data-dp-no="${i}">拒絕</button></td></tr>`).join('') + '</table>'
+      <td style="white-space:nowrap"><button class="btn-secondary" data-dp-no="${i}">拒絕</button></td></tr>`).join('') + '</table>'
+    + `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0">
+        <input id="deskpet-code" type="text" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false"
+          placeholder="桌寵上的 6 碼" aria-label="桌寵上顯示的配對碼"
+          style="font-family:monospace;font-size:18px;letter-spacing:2px;width:9em;text-transform:uppercase;padding:4px 8px">
+        <button class="btn-secondary" id="deskpet-approve">核准</button>
+      </div>`
     : '<p class="settings-hint">沒有申請。</p>';
+  if (stale.length) {
+    html += `<p class="settings-hint">另有 ${stale.length} 筆超過 15 分鐘的申請,已失效、不能核准(要連線請在桌寵上重新申請)。
+      <button class="btn-secondary" id="deskpet-purge">清除過期申請</button></p>`;
+  }
   html += '<div style="font-weight:600;margin:12px 0 4px">已核准</div>';
   html += d.dev.length ? '<table class="settings-table"><tr><th>電腦</th><th>配對碼</th><th>核准時間</th><th></th></tr>' + d.dev.map((r, i) => `
     <tr><td>${dpEsc(r.name)}</td><td style="font-family:monospace">${dpEsc(r.code)}</td>
@@ -9261,20 +9278,37 @@ async function renderDeskpet() {
     try { await fn(); toast(okMsg); } catch (e) { toast('失敗:' + e.message, 'error'); }
     renderDeskpet();
   };
-  box.querySelectorAll('[data-dp-ok]').forEach(b => b.onclick = () => {
-    const r = d.req[+b.dataset.dpOk];
-    if (!confirm(`核准「${r.name}」?\n\n請確認桌寵上顯示的配對碼是 ${r.code}`)) return;
+  const approve = () => {
+    const inp = $('deskpet-code');
+    const typed = inp.value.replace(/\s+/g, '').toUpperCase();
+    if (!DP_CODE_RE.test(typed)) { toast('配對碼是 6 碼(英文大寫 + 數字,沒有 I、O、0、1)', 'error'); inp.focus(); return; }
+    // 用輸入的碼去找申請,不是先挑一列再比對 → 不可能核准到「名字很像」的另一筆
+    const r = fresh.find(x => x.code === typed);
+    if (!r) { toast('沒有這組配對碼的申請:碼打錯,或已超過 15 分鐘(請在桌寵上重新申請)', 'error'); inp.select(); return; }
+    if (!isFresh(r)) { toast('這筆申請剛超過 15 分鐘,請在桌寵上重新申請', 'error'); renderDeskpet(); return; }
+    if (!both(r)) { toast('這筆申請只有一邊收到,請在桌寵上重新申請', 'error'); return; }
+    if (!confirm(`配對碼相符。核准「${r.name}」?`)) return;
     const at = new Date().toISOString();
     run(() => dpWrite(
       { [`deskpet/devices/${r.inc}`]: { name: r.name, code: r.code, approvedAt: at, peer: r.cs }, [`deskpet/requests/${r.inc}`]: null },
       { [`deskpet/devices/${r.cs}`]: { name: r.name, code: r.code, approvedAt: at, peer: r.inc }, [`deskpet/requests/${r.cs}`]: null },
     ), `已核准 ${r.name}`);
-  });
+  };
+  if ($('deskpet-approve')) {
+    $('deskpet-approve').onclick = approve;
+    $('deskpet-code').onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); approve(); } };
+  }
   box.querySelectorAll('[data-dp-no]').forEach(b => b.onclick = () => {
-    const r = d.req[+b.dataset.dpNo];
-    if (!confirm(`拒絕「${r.name}」(${r.code})的申請?`)) return;
+    const r = fresh[+b.dataset.dpNo];
+    if (!confirm(`拒絕「${r.name}」(${dpTime(r.at)})的申請?`)) return;
     run(() => dpWrite(...del(r, 'requests')), '已拒絕');
   });
+  if ($('deskpet-purge')) $('deskpet-purge').onclick = () => {
+    if (!confirm(`清除 ${stale.length} 筆過期申請?`)) return;
+    const ip = {}, cp = {};
+    for (const r of stale) { const [a, b] = del(r, 'requests'); Object.assign(ip, a); Object.assign(cp, b); }
+    run(() => dpWrite(ip, cp), `已清除 ${stale.length} 筆過期申請`);
+  };
   box.querySelectorAll('[data-dp-rm]').forEach(b => b.onclick = () => {
     const r = d.dev[+b.dataset.dpRm];
     if (!confirm(`移除「${r.name}」?\n\n那台桌寵會立刻讀不到雲端;要再連就得重新申請配對。`)) return;
